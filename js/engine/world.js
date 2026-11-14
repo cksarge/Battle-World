@@ -35,6 +35,14 @@ const RAIL_BITS = [[1, 0, 1], [-1, 0, 2], [0, 1, 4], [0, -1, 8]];
 // Ramp / stair directions in DIR_OF order: north, east, south, west (the way they rise).
 const DIR_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const CONTAINER_TINTS = ['#a8432f', '#2f6aa8', '#3d7a45', '#c27a2c', '#7b7f86'];
+// Props that fill only part of their cell, as half-sizes [across x, across z] when the panel runs along x,
+// plus `lo`, the height of the full-cell lintel above (Infinity for none). Matches the meshes in decor.js.
+const PANEL_CHARS = new Set(['D', 'G', 'P']);
+const FOOTPRINTS = {
+  D: { hx: 1, hz: 0.15, lo: 2.7 }, G: { hx: 1, hz: 0.15, lo: 3 }, P: { hx: 1, hz: 0.15, lo: 3.2 },
+  A: { hx: 0.88, hz: 0.58, lo: Infinity }, J: { hx: 0.3, hz: 0.25, dx: 0.05, lo: Infinity },
+  B: { hx: 0.78, hz: 0.72, dz: 0.06, lo: Infinity },
+};
 
 function heightOf(ch) {
   if (ch in SOLID_H) return SOLID_H[ch];
@@ -77,6 +85,15 @@ export class World {
       if (PROP_CHARS.has(g[y][x])) this.props.set(x + ',' + y, { x, y, ch: g[y][x], open: false, broken: false, hp: WOOD_HP[g[y][x]] || 60, stage: 0, anim: 0 });
     }
     this.up = up;
+    // Thin and small props collide with their own box, not the whole cell.
+    this.foot = new Map();
+    for (const p of this.props.values()) {
+      const f = FOOTPRINTS[p.ch];
+      if (!f) continue;
+      const ax = this.panelAlongX(p.x, p.y), hx = ax ? f.hx : f.hz, hz = ax ? f.hz : f.hx;
+      const cx = (p.x + 0.5) * CELL + (ax ? f.dx || 0 : f.dz || 0), cz = (p.y + 0.5) * CELL + (ax ? f.dz || 0 : f.dx || 0);
+      this.foot.set(p.y * def.w + p.x, { ch: p.ch, x0: cx - hx, x1: cx + hx, z0: cz - hz, z1: cz + hz, lo: f.lo });
+    }
     this.computeRamps();
     // An upper slab only makes sense over ground that's lower than its underside.
     for (let y = 0; y < def.h; y++) for (let x = 0; x < def.w; x++) {
@@ -158,6 +175,24 @@ export class World {
       const level = (d && Math.abs(d.top - u.top) <= 0.55) || (Math.abs(gh - u.top) <= 0.55 && this.navH(nx, ny) !== null);
       if (!level && gh < u.top + 0.5) this.rails[i] |= bit;
     }
+  }
+
+  // Which way a door, gate or glass pane spans its cell: between walls, or along a run of panels.
+  panelAlongX(x, y) {
+    const wall = (cx, cy) => { const c = this.chars[cy]?.[cx]; return c === '#' || c === 'X'; };
+    const run = (cx, cy) => wall(cx, cy) || PANEL_CHARS.has(this.chars[cy]?.[cx]);
+    const wx = wall(x - 1, y) || wall(x + 1, y), wz = wall(x, y - 1) || wall(x, y + 1);
+    if (wx !== wz) return wx;
+    const rx = run(x - 1, y) || run(x + 1, y), rz = run(x, y - 1) || run(x, y + 1);
+    return rx || !rz;
+  }
+
+  inGrid(cx, cy) { return cx >= 0 && cy >= 0 && cx < this.w && cy < this.h; }
+
+  // The part-cell box of a prop at cell index i, while it still stands (null otherwise).
+  footAt(i) {
+    const f = this.foot.get(i);
+    return f && this.chars[Math.floor(i / this.w)][i % this.w] === f.ch ? f : null;
   }
 
   cellH(cx, cy) {
@@ -364,6 +399,9 @@ export class World {
     const z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
     for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) {
       let h = this.isRamp(cx, cz) ? this.rampUnder(cx, cz, x, z, r) : this.cellH(cx, cz);
+      const f = h > 0 && this.inGrid(cx, cz) && this.footAt(cz * this.w + cx);
+      // Beside a thin or small prop: only its lintel (if any) can be in the way.
+      if (f && !(x + r > f.x0 && x - r < f.x1 && z + r > f.z0 && z - r < f.z1) && y + bh <= f.lo) h = 0;
       if (h >= FULL_H) h = SKY;
       if (h > y + (this.isLift(cx, cz) ? 0.4 : 0.001) && h > top) top = h;
       // An overhead slab blocks only bodies that overlap it.
@@ -379,8 +417,10 @@ export class World {
     const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL);
     const z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
     for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) {
-      const h = this.isRamp(cx, cz) ? this.rampUnder(cx, cz, x, z, r) : this.cellH(cx, cz);
+      let h = this.isRamp(cx, cz) ? this.rampUnder(cx, cz, x, z, r) : this.cellH(cx, cz);
       if (h >= FULL_H) continue; // never something to stand on
+      const f = h > 0 && this.inGrid(cx, cz) && this.footAt(cz * this.w + cx);
+      if (f && !(x + r > f.x0 && x - r < f.x1 && z + r > f.z0 && z - r < f.z1)) h = 0;
       if (h <= y + (this.isLift(cx, cz) ? 0.4 : 0.05) && h > f) f = h;
       const ut = this.UT[cz * this.w + cx] || 0;
       if (ut && ut <= y + 0.05 && ut > f) f = ut;
@@ -433,7 +473,14 @@ export class World {
           body.pos.y = top; body.pos[axis] = next; continue;
         }
         const edge = v > 0 ? Math.floor((next + r) / CELL) * CELL - r - 0.001 : (Math.floor((next - r) / CELL) + 1) * CELL + r + 0.001;
-        body.pos[axis] = v > 0 ? Math.max(body.pos[axis], Math.min(next, edge)) : Math.min(body.pos[axis], Math.max(next, edge));
+        const snap = v > 0 ? Math.max(body.pos[axis], Math.min(next, edge)) : Math.min(body.pos[axis], Math.max(next, edge));
+        const clearAt = (u) => this.blockingTop(axis === 'x' ? u : body.pos.x, body.pos.y, axis === 'z' ? u : body.pos.z, r, bh) < 0;
+        if (clearAt(snap)) {
+          // The cell edge is clear, so a part-cell prop is what stopped us: close in on its face.
+          let lo = snap, hi = next;
+          for (let k = 0; k < 10; k++) { const mid = (lo + hi) / 2; if (clearAt(mid)) lo = mid; else hi = mid; }
+          body.pos[axis] = lo;
+        } else body.pos[axis] = snap;
         body.vel[axis] = 0;
       }
       body.vel.y -= 20 * h;
@@ -501,6 +548,12 @@ export class World {
             return this._hit(o, d, tP, n.normalize());
           }
         }
+      } else if (H > 0 && this.footAt(di)) {
+        const hit = this._propHit(o, d, this.footAt(di), cx, cz, H, tEnter, tExit);
+        if (hit) {
+          if (hit.t > maxDist) return null;
+          return this._hit(o, d, hit.t, hit.normal);
+        }
       } else if (H > 0) {
         const yEnter = o.y + d.y * tEnter;
         if (yEnter < H && tEnter > 0) {
@@ -526,6 +579,25 @@ export class World {
       if (cx < -1 || cz < -1 || cx > this.w || cz > this.h) return null;
     }
     return null;
+  }
+  // A ray against a part-cell prop's box and the full-cell lintel above it, within [tEnter, tExit].
+  _propHit(o, d, f, cx, cz, H, tEnter, tExit) {
+    let best = null;
+    const test = (b) => {
+      let tn = -Infinity, tf = Infinity, n = null;
+      for (const [k, lo, hi] of [['x', b[0], b[3]], ['y', b[1], b[4]], ['z', b[2], b[5]]]) {
+        if (Math.abs(d[k]) < 1e-9) { if (o[k] < lo || o[k] > hi) return; continue; }
+        let t0 = (lo - o[k]) / d[k], t1 = (hi - o[k]) / d[k], s = -1;
+        if (t0 > t1) { [t0, t1] = [t1, t0]; s = 1; }
+        if (t0 > tn) { tn = t0; n = new THREE.Vector3(k === 'x' ? s : 0, k === 'y' ? s : 0, k === 'z' ? s : 0); }
+        tf = Math.min(tf, t1);
+      }
+      if (tn > tf || tn <= 0 || tn < tEnter - 1e-6 || tn > tExit + 1e-6) return;
+      if (!best || tn < best.t) best = { t: tn, normal: n };
+    };
+    test([f.x0, 0, f.z0, f.x1, Math.min(H, f.lo), f.z1]);
+    if (H > f.lo) test([cx * CELL, f.lo, cz * CELL, (cx + 1) * CELL, H, (cz + 1) * CELL]);
+    return best;
   }
   _hit(o, d, t, normal) {
     return { dist: t, point: new THREE.Vector3(o.x + d.x * t, o.y + d.y * t, o.z + d.z * t), normal };

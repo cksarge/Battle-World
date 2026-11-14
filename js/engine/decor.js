@@ -271,9 +271,7 @@ export function buildProp(world, p, theme) {
   const root = new THREE.Group();
   const cx = (p.x + 0.5) * CELL, cz = (p.y + 0.5) * CELL;
   root.position.set(cx, 0, cz);
-  const solid = (x, y) => { const c = world.chars[y]?.[x]; return c === '#' || c === 'X'; };
-  // Panels span the axis that has walls on both ends.
-  const alongX = solid(p.x - 1, p.y) || solid(p.x + 1, p.y) ? true : !(solid(p.x, p.y - 1) || solid(p.x, p.y + 1));
+  const alongX = world.panelAlongX(p.x, p.y);
   const wallMat = getMaterial(theme.wall);
   const view = { root, setBroken() {}, update() {} };
 

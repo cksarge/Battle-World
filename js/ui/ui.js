@@ -715,7 +715,7 @@ export class UI {
         Fallen teammates can be revived; everyone comes back when a wave ends. Power-ups drop from the dead.</span>
       </div>
       <div class="m-label">Map</div>
-      <div class="map-strip">${playMaps().map((m) => `<button class="map-tile ${z.map === m.id ? 'sel' : ''}" data-zmap="${m.id}" title="${esc(m.desc)}"><img src="${mapPreview(m.id)}" alt=""><span>${esc(m.name)}${best[m.id] ? ` <i class="map-tag">Best: wave ${best[m.id]}</i>` : ''}</span></button>`).join('')}</div>
+      <div class="map-strip">${playMaps().map((m) => `<button class="map-tile ${z.map === m.id ? 'sel' : ''}" data-zmap="${m.id}" title="${esc(m.custom ? `${m.name} by ${m.author}. ${m.desc}` : m.desc)}"><img src="${mapPreview(m.id)}" alt=""><span>${esc(m.name)}${m.featured ? ' <i class="map-tag">Featured</i>' : m.custom ? ' <i class="map-tag">Community</i>' : ''}${best[m.id] ? ` <i class="map-tag">Best: wave ${best[m.id]}</i>` : ''}</span></button>`).join('')}</div>
       <div class="m-label">Conditions</div>
       <div class="seg" id="z-var">${Object.keys(VARIANTS).map((k) => `<button data-v="${k}" class="${z.variant === k ? 'sel' : ''}">${esc(variantName(MAPS[z.map], k))}</button>`).join('')}</div>
       <div class="m-label">Bot squadmates${inParty ? ' (fill empty spots in your party)' : ''}</div>
