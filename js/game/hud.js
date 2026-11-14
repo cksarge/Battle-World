@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WEAPONS, GRENADES, BUY_MENU, itemInfo, GUN_GAME_ORDER } from '../data/weapons.js';
-import { TEAM_CLASS, SOLO_KINDS, RESPAWN_KINDS, SIDED_KINDS, BOMB_KINDS, goalText, econFor } from '../data/modes.js';
+import { TEAM_CLASS, SOLO_KINDS, POOL_KINDS, RESPAWN_KINDS, SIDED_KINDS, BOMB_KINDS, goalText, econFor } from '../data/modes.js';
+import { POINTS } from '../data/zombies.js';
 import { RARITIES, KINDS } from '../data/skins.js';
 import { itemSwatch, emoteName, cardImage } from '../ui/cards.js';
 import { spreadFor } from './combat.js';
@@ -43,6 +44,8 @@ export class Hud {
       <div class="goal-pill"></div>
       <div class="tut-panel hidden"></div>
       <div class="alive-row"></div>
+      <div class="obj-row"></div>
+      <div class="zpts"></div>
       <div class="killfeed"></div>
       <div class="crosshair"></div>
       <div class="hitmarker"></div>
@@ -77,6 +80,7 @@ export class Hud {
       center: q('.center-msg'), goal: q('.goal-pill'), info: q('.info-msg'), prog: q('.progress'), spec: q('.spectate'), bomb: q('.bomb-icon'),
       money: q('.money'), hp: q('.hp'), ar: q('.ar'), slots: q('.slots'), wname: q('.weapon-name'), ammo: q('.ammo .hud-num'),
       chat: q('.chat'), ovl: q('.ovl'), tut: q('.tut-panel'), wheel: q('.emote-wheel'), killcam: q('.killcam'), cues: q('.snd-cues'),
+      obj: q('.obj-row'), zpts: q('.zpts'),
     };
     this.cues = new Map();
     this.radarImg = this.g.world.radarCanvas(8);
@@ -166,7 +170,11 @@ export class Hud {
   }
 
   openBuy() {
-    if (!this.g.canBuy()) { this.info(SOLO_KINDS.has(this.g.mode.kind) ? `No buying in ${this.g.mode.name}` : 'You can only buy during the buy phase', 2); return; }
+    if (!this.g.canBuy()) {
+      const k = this.g.mode.kind;
+      this.info(k === 'zombies' ? 'In Zombies you buy guns off the walls with points' : POOL_KINDS.has(k) ? `No buying in ${this.g.mode.name}` : 'You can only buy during the buy phase', 2);
+      return;
+    }
     this.overlay = 'buy';
     this.g.input.unlock();
     this.refreshBuy();
@@ -226,10 +234,14 @@ export class Hud {
   }
 
   scoreTable(players, showMoney) {
-    const lp = this.g.local;
-    return `<table class="tbl"><tr><th>Player</th>${showMoney ? '<th class="num">$</th>' : ''}<th class="num">K</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${this.g.online ? '<th class="num">ELO</th>' : ''}</tr>
-      ${players.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths).map((p) => `<tr class="${p === lp ? 'me' : ''} ${p.alive ? '' : 'dead'}">
+    const lp = this.g.local, kind = this.g.mode.kind;
+    // Zombies shows points (everyone's), infection shows match points.
+    const pts = kind === 'zombies' ? (p) => p.money : kind === 'infect' ? (p) => p.score || 0 : null;
+    if (pts) players.sort((a, b) => pts(b) - pts(a));
+    return `<table class="tbl"><tr><th>Player</th>${pts ? '<th class="num">PTS</th>' : ''}${showMoney ? '<th class="num">$</th>' : ''}<th class="num">K</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${this.g.online ? '<th class="num">ELO</th>' : ''}</tr>
+      ${(pts ? players : players.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)).map((p) => `<tr class="${p === lp ? 'me' : ''} ${p.alive ? '' : 'dead'}">
         <td>${esc(p.name)}${this.g.state.bomb?.carrier === p.id && lp && p.team === lp.team ? ' <span style="color:var(--bad)">◆</span>' : ''}</td>
+        ${pts ? `<td class="num">${pts(p).toLocaleString()}</td>` : ''}
         ${showMoney ? `<td class="num">${lp && p.team === lp.team ? '$' + p.money : ''}</td>` : ''}
         <td class="num">${p.kills}</td><td class="num">${p.deaths}</td><td class="num">${p.hs}</td><td class="num">${Math.round(p.damage)}</td>
         ${this.g.online ? `<td class="num">${p.isBot ? '—' : p.elo}</td>` : ''}</tr>`).join('')}</table>`;
@@ -239,9 +251,10 @@ export class Hud {
     const g = this.g, all = [...g.players.values()];
     let body;
     if (SOLO_KINDS.has(g.mode.kind)) body = `<div class="sb-team">${this.scoreTable(all, false)}</div>`;
+    else if (g.zombies) body = `<div class="sb-team"><div class="sb-head ct"><span>SURVIVORS</span><span>WAVE ${g.state.z?.wave || 0}</span></div>${this.scoreTable(all.filter((p) => !p.zombie), false)}</div>`;
     else body = [0, 1].map((t) => `<div class="sb-team"><div class="sb-head ${TEAM_CLASS[t]}"><span>${g.teamName(t)}</span><span>${g.state.scores[t]}</span></div>${this.scoreTable(all.filter((p) => p.team === t), !!econFor(g.mode))}</div>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay" style="pointer-events:none;background:none"><div class="scoreboard">
-      <div class="row"><h2 style="margin:0">${esc(g.mode.name)}</h2><span class="muted">${esc(g.mapDef.name)}${RESPAWN_KINDS.has(g.mode.kind) ? '' : ' · Round ' + g.state.round}</span><span class="spacer"></span><span class="goal-tag">${esc(goalText(g.mode))}</span></div>${body}</div></div>`;
+      <div class="row"><h2 style="margin:0">${esc(g.mode.name)}</h2><span class="muted">${esc(g.mapDef.name)}${RESPAWN_KINDS.has(g.mode.kind) || g.zombies ? '' : ' · Round ' + g.state.round}</span><span class="spacer"></span><span class="goal-tag">${esc(goalText(g.mode))}</span></div>${body}</div></div>`;
   }
 
   // ───────────── chat ─────────────
@@ -399,31 +412,50 @@ export class Hud {
     const e = document.createElement('div');
     const lp = this.g.local;
     e.className = 'kf' + ((k && k === lp) || v === lp ? ' mine' : '');
-    const wname = itemInfo(w)?.name || { bomb: 'Charge', barrel: 'Exploding barrel', fire: 'Incendiary', fall: 'Fall' }[w] || w;
+    const wname = itemInfo(w)?.name || { bomb: 'Charge', barrel: 'Exploding barrel', fire: 'Incendiary', fall: 'Fall', claws: 'Claws', bloat: 'Bloater' }[w] || w;
     e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${esc(k.name)}</span>` : ''}<span class="w">${esc(wname)}</span>${hs ? '<span class="hs">◉ HS</span>' : ''}<span class="${cls(v)}">${esc(v.name)}</span>`;
     this.el.kf.prepend(e);
     while (this.el.kf.children.length > 6) this.el.kf.lastChild.remove();
     setTimeout(() => e.remove(), 7000);
   }
 
+  // Zombies: floating "+60" next to the crosshair. Hits get small ones from the local shot (see
+  // Game.tryFire); kills come from the kill event.
+  zombieKill(hs, w) {
+    const melee = WEAPONS[w]?.type === 'knife';
+    this.zpoints(melee ? POINTS.melee : hs ? POINTS.head : POINTS.kill, true);
+  }
+
+  zpoints(n, big = false) {
+    const mult = this.g.state.z?.double > 0 ? 2 : 1;
+    const e = document.createElement('span');
+    e.className = big ? 'big' : '';
+    e.textContent = '+' + n * mult;
+    e.style.setProperty('--dx', `${Math.round((Math.random() - 0.5) * 40)}px`);
+    this.el.zpts.appendChild(e);
+    setTimeout(() => e.remove(), 900);
+    while (this.el.zpts.children.length > 8) this.el.zpts.firstChild.remove();
+  }
+
   // ───────────── results ─────────────
   showResults({ result, reason, scores, stats, score }) {
     this.overlay = 'results';
-    const g = this.g, title = { win: 'VICTORY', loss: 'DEFEAT', draw: 'DRAW', over: 'MATCH OVER' }[result];
+    const g = this.g, title = g.zombies && !g.spectator ? (result === 'win' ? 'SURVIVED' : 'OVERRUN') : { win: 'VICTORY', loss: 'DEFEAT', draw: 'DRAW', over: 'MATCH OVER' }[result];
     const color = result === 'win' ? 'var(--good)' : result === 'loss' ? 'var(--bad)' : 'var(--muted)';
-    const reasonText = { forfeit: 'Opponent forfeited', 'host-left': 'The host left the match', kills: 'Kill limit reached', time: 'Time limit reached', gungame: 'Got a kill with every weapon', score: '' }[reason] || '';
+    const reasonText = { forfeit: 'Opponent forfeited', 'host-left': 'The host left the match', kills: 'Kill limit reached', time: 'Time limit reached', gungame: 'Got a kill with every weapon', score: '', overrun: `Overrun on wave ${g.state.z?.wave || 0}` }[reason] || '';
     // Commend or report other real players (signed-in online matches only).
     const social = g.online && !!g.app.user && !g.spectator;
     const canRate = (s) => social && !s.bot && s.id !== g.localId && /^[0-9a-f-]{36}$/.test(s.id);
     const rateCell = (s) => (social ? `<td class="rate">${canRate(s) ? `<button class="btn tiny" data-commend="${esc(s.id)}" title="Commend ${esc(s.name)}">👍</button><button class="btn tiny ghost" data-report="${esc(s.id)}" title="Report ${esc(s.name)}">⚑</button>` : ''}</td>` : '');
-    const rows = [...stats].sort((a, b) => b.k - a.k).map((s) => `<tr class="${s.id === g.localId ? 'me' : ''}"><td>${esc(s.name)}</td>${!SOLO_KINDS.has(g.mode.kind) ? `<td style="color:var(--${TEAM_CLASS[s.team]})">${SIDED_KINDS.has(g.mode.kind) ? (s.team === 0 ? 'ATK' : 'DEF') : 'T' + (s.team + 1)}</td>` : ''}<td class="num">${s.k}</td><td class="num">${s.d}</td><td class="num">${s.hs}</td><td class="num">${s.dmg}</td>${rateCell(s)}</tr>`).join('');
+    const pts = g.mode.kind === 'infect', teamCol = !POOL_KINDS.has(g.mode.kind);
+    const rows = [...stats].sort((a, b) => (pts ? b.pts - a.pts : 0) || b.k - a.k).map((s) => `<tr class="${s.id === g.localId ? 'me' : ''}"><td>${esc(s.name)}</td>${teamCol ? `<td style="color:var(--${TEAM_CLASS[s.team]})">${SIDED_KINDS.has(g.mode.kind) ? (s.team === 0 ? 'ATK' : 'DEF') : 'T' + (s.team + 1)}</td>` : ''}${pts ? `<td class="num">${s.pts}</td>` : ''}<td class="num">${s.k}</td><td class="num">${s.d}</td><td class="num">${s.hs}</td><td class="num">${s.dmg}</td>${rateCell(s)}</tr>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay"><div class="panel" style="width:min(720px,94vw)">
       <div style="text-align:center"><div class="hud-num" style="font-size:64px;color:${color}">${title}</div>
       <div class="muted">${esc(g.mode.name)} · ${esc(g.mapDef.name)} · ${esc(score)}</div>
       ${reasonText ? `<div class="muted small">${esc(reasonText)}</div>` : ''}
       <div class="elo" style="margin:10px 0;font-family:var(--display);font-size:22px">${g.mode.ranked && g.app.user ? 'Updating rating…' : ''}</div>
       <div class="drop"></div></div>
-      <table class="tbl"><tr><th>Player</th>${!SOLO_KINDS.has(g.mode.kind) ? '<th>Team</th>' : ''}<th class="num">K</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${social ? '<th></th>' : ''}</tr>${rows}</table>
+      <table class="tbl"><tr><th>Player</th>${teamCol ? '<th>Team</th>' : ''}${pts ? '<th class="num">PTS</th>' : ''}<th class="num">K</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${social ? '<th></th>' : ''}</tr>${rows}</table>
       <div class="row" style="justify-content:center;margin-top:16px"><button class="btn" data-a="replay">Watch replay</button><button class="btn primary" data-a="menu">Back to menu</button></div>
     </div></div>`;
     this.el.ovl.querySelector('[data-a=menu]').onclick = () => this.g.leave();
@@ -490,12 +522,17 @@ export class Hud {
     el.ch.style.display = scoped || !p.alive || g.emoteT > 0 || (w && w.type === 'sniper') ? 'none' : '';
     el.scope.classList.toggle('hidden', !scoped);
 
-    // Plant/defuse progress
+    // Plant/defuse/revive progress, or capturing a point
+    const cap = !g.action && g.objectives?.progress(p);
     if (g.action && p.alive) {
       const total = g.actionTime(g.action.type, p);
       el.prog.classList.remove('hidden');
-      el.prog.querySelector('.lbl').textContent = g.action.type === 'plant' ? 'Planting charge…' : 'Defusing…';
+      el.prog.querySelector('.lbl').textContent = { plant: 'Planting charge…', revive: 'Reviving…', pickup: 'Picking up…' }[g.action.type] || 'Defusing…';
       el.prog.querySelector('.bar div').style.width = Math.min(100, (g.action.t / total) * 100) + '%';
+    } else if (cap) {
+      el.prog.classList.remove('hidden');
+      el.prog.querySelector('.lbl').textContent = cap.label;
+      el.prog.querySelector('.bar div').style.width = Math.min(100, cap.frac * 100) + '%';
     } else el.prog.classList.add('hidden');
 
     this.radarT = (this.radarT || 0) - dt;
@@ -536,22 +573,41 @@ export class Hud {
       el.top.innerHTML = `<div class="ts ct" title="Your weapon level">${lvl}</div><div class="timer">${fmtTime(timer)}<small>${lead ? 'LEAD ' + esc(lead.name) + ' ' + Math.min((lead.gg || 0) + 1, N) : ''}</small></div><div class="ts t" title="Weapons">${N}</div>`;
       const next = GUN_GAME_ORDER[(p.gg || 0) + 1];
       goal += ` · weapon ${lvl}/${N}${next ? ' · next: ' + (WEAPONS[next]?.name || next) : ' · knife kill wins'}`;
+    } else if (kind === 'zombies') {
+      el.top.innerHTML = g.zombies.topHtml(p);
+      goal = s.phase === 'live' ? g.zombies.goalText() : goal;
+      const pills = [...g.players.values()].filter((q) => !q.zombie).map((q) => `<i class="${q.alive ? '' : 'dead'}"></i>`).join('');
+      el.alive.innerHTML = `<div class="ct">${pills}</div>`;
+    } else if (kind === 'infect') {
+      const n = (t) => [...g.players.values()].filter((q) => q.team === t).length;
+      el.top.innerHTML = `<div class="ts ct" title="Survivors">${n(0)}</div><div class="timer">${fmtTime(timer)}<small>${s.phase === 'live' ? `ROUND ${s.round}/${g.mode.rounds}` : phaseLabel}</small></div><div class="ts t inf" title="Infected">${n(1)}</div>`;
+      goal = `${p.team === 1 ? 'Infected: knife the survivors' : 'Survivor: stay alive'} · you have ${p.score || 0} pts`;
     } else {
       el.top.innerHTML = `<div class="ts t">${s.scores[0]}</div><div class="timer ${planted ? 'bomb' : ''}">${fmtTime(timer)}<small>${phaseLabel}</small></div><div class="ts ct">${s.scores[1]}</div>`;
       if (kind === 'tdm') el.top.querySelector('.timer small').textContent = `TO ${g.mode.killsToWin}`;
+      if (g.objectives) el.top.querySelector('.timer small').textContent = `TO ${g.mode.scoreToWin || g.mode.capsToWin}`;
       const pills = (t) => [...g.players.values()].filter((q) => q.team === t).map((q) => `<i class="${q.alive ? '' : 'dead'}"></i>`).join('');
       el.alive.innerHTML = `<div class="t">${pills(0)}</div><div class="ct">${pills(1)}</div>`;
     }
 
     el.goal.textContent = goal;
     el.goal.classList.toggle('hidden', !goal);
+    const objHtml = g.objectives?.hudHtml(p) || '';
+    if (objHtml !== this.objHtml) { this.objHtml = objHtml; el.obj.innerHTML = objHtml; }
 
     // Vitals
+    const maxHp = p.maxHp || 100;
     el.hp.querySelector('.hud-num').textContent = Math.max(0, p.hp);
-    el.hp.querySelector('.hp-bar div').style.width = Math.max(0, p.hp) + '%';
-    el.hp.classList.toggle('hp-low', p.hp <= 25);
-    el.ar.querySelector('.hud-num').textContent = p.armor;
-    el.ar.querySelector('.hud-label').textContent = p.helmet ? 'Armor + Helmet' : 'Armor';
+    el.hp.querySelector('.hp-bar div').style.width = Math.max(0, (p.hp / maxHp) * 100) + '%';
+    el.hp.classList.toggle('hp-low', p.hp <= maxHp * 0.25);
+    if (g.zombies) {
+      // No armor in zombies: the slot shows your tonics instead.
+      el.ar.querySelector('.hud-num').innerHTML = g.zombies.perkChips(p);
+      el.ar.querySelector('.hud-label').textContent = 'Tonics';
+    } else {
+      el.ar.querySelector('.hud-num').textContent = p.armor;
+      el.ar.querySelector('.hud-label').textContent = p.helmet ? 'Armor + Helmet' : 'Armor';
+    }
     el.money.textContent = econFor(g.mode) ? `$${p.money}` : '';
     el.bomb.classList.toggle('hidden', !p.hasBomb);
     if (g.spectator) {
@@ -637,6 +693,8 @@ export class Hud {
       enemyDot(d.pos.x * S, d.pos.z * S);
     }
     const b = g.state.bomb || {};
+    g.objectives?.drawRadar(ctx, S, pal);
+    g.zombies?.drawRadar(ctx, S);
     g.pings?.drawRadar(ctx, S);
     for (const h of g.state.hostages || []) {
       if (h.state === 'rescued') continue;

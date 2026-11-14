@@ -36,6 +36,7 @@ export const ACHIEVEMENTS = [
   { id: 'pistol50', cat: 'Weapons', icon: '🔫', tier: 'bronze', name: 'Sidearm Specialist', desc: 'Get 50 pistol kills', stat: 'pistol', n: 50 },
   { id: 'shotgun50', cat: 'Weapons', icon: '🚪', tier: 'bronze', name: 'Door Kicker', desc: 'Get 50 shotgun kills', stat: 'shotgun', n: 50 },
   { id: 'arsenal', cat: 'Weapons', icon: '🧰', tier: 'silver', name: 'Arsenal', desc: 'Get a kill with 15 different weapons', stat: 'arsenal', n: 15 },
+  { id: 'mastery_max', cat: 'Weapons', icon: '🏅', tier: 'gold', name: 'Master Craftsman', desc: 'Reach mastery level 10 with any weapon', stat: 'mastered', n: 1 },
   { id: 'nades100', cat: 'Weapons', icon: '💣', tier: 'bronze', name: 'Grenadier', desc: 'Throw 100 grenades', stat: 'nades', n: 100 },
   // objectives
   { id: 'plant1', cat: 'Objectives', icon: '📦', tier: 'bronze', name: 'Charge Set', desc: 'Plant the charge', stat: 'plants', n: 1 },
@@ -43,6 +44,9 @@ export const ACHIEVEMENTS = [
   { id: 'defuse1', cat: 'Objectives', icon: '✂️', tier: 'bronze', name: 'Wire Cutter', desc: 'Defuse the charge', stat: 'defuses', n: 1 },
   { id: 'defuse25', cat: 'Objectives', icon: '🧯', tier: 'silver', name: 'Bomb Squad', desc: 'Defuse the charge 25 times', stat: 'defuses', n: 25 },
   { id: 'rescue10', cat: 'Objectives', icon: '🚑', tier: 'silver', name: 'Extraction', desc: 'Rescue 10 hostages', stat: 'rescues', n: 10 },
+  { id: 'caps25', cat: 'Objectives', icon: '🚩', tier: 'silver', name: 'Ground Taken', desc: 'Capture 25 points or flags (Domination, Capture the Flag)', stat: 'caps', n: 25 },
+  { id: 'zwave10', cat: 'Objectives', icon: '🧟', tier: 'silver', name: 'Still Standing', desc: 'Reach wave 10 in Zombies', test: (m) => m.wave >= 10 },
+  { id: 'zwave25', cat: 'Objectives', icon: '🕯️', tier: 'gold', name: 'Last Light', desc: 'Reach wave 25 in Zombies', test: (m) => m.wave >= 25 },
   { id: 'gungame', cat: 'Objectives', icon: '🏁', tier: 'silver', name: 'Full Circuit', desc: 'Win a Gun Game match', test: (m) => m.mode === 'gungame' && m.result === 'win' },
   // career
   { id: 'matches10', cat: 'Career', icon: '🎮', tier: 'bronze', name: 'Getting Started', desc: 'Finish 10 matches', stat: 'matches', n: 10 },
@@ -106,12 +110,12 @@ export function checkUnlocks(rec, profile = null, match = null) {
 }
 
 // Adds one finished match to the counters, then unlocks. m: {mode, map, variant, result, online, k, d, hs,
-// weapons, nades, plants, defuses, rescues, knife, multi, streak, long, party}
+// weapons, nades, plants, defuses, rescues, knife, multi, streak, long, party, caps, wave}
 export function applyMatchAchievements(rec, m, profile) {
   const c = rec.c, add = (k, n) => { if (n > 0) c[k] = (c[k] || 0) + n; };
   const addTo = (k, v) => { c[k] = [...new Set([...(c[k] || []), v])]; };
   add('kills', m.k); add('hs', m.hs); add('matches', 1); add('wins', m.result === 'win' ? 1 : 0);
-  add('knife', m.knife); add('nades', m.nades); add('plants', m.plants); add('defuses', m.defuses); add('rescues', m.rescues);
+  add('knife', m.knife); add('nades', m.nades); add('plants', m.plants); add('defuses', m.defuses); add('rescues', m.rescues); add('caps', m.caps || 0);
   add('sniper', classKills(m, 'sniper')); add('pistol', classKills(m, 'pistol')); add('shotgun', classKills(m, 'shotgun'));
   add('rankedWins', m.mode === 'ranked' && m.result === 'win' ? 1 : 0);
   add('nightWins', m.variant === 'night' && m.result === 'win' ? 1 : 0);

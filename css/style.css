@@ -305,6 +305,22 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .alive-row i.dead { opacity: .2; }
 .alive-row .t { color: var(--t); flex-direction: row-reverse; }
 .alive-row .ct { color: var(--ct); }
+.topscore .ts small { display: block; font-size: 10px; letter-spacing: 2px; color: var(--muted); line-height: 1; }
+.topscore .ts.inf { color: #9dff2e; border-bottom-color: #9dff2e; }
+/* Objective modes: point letters, the hill timer or flag states under the score. */
+.obj-row { position: absolute; top: 116px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; align-items: center; font-family: var(--display); font-weight: 700; }
+.obj-row:empty { display: none; }
+.obj-row .obj { min-width: 30px; padding: 2px 8px; text-align: center; border: 2px solid currentColor; border-radius: 3px; background: rgba(10,12,16,.7); font-size: 16px; color: #e7ebef; }
+.obj-row .obj.t { color: var(--t); } .obj-row .obj.ct { color: var(--ct); } .obj-row .obj.contested { color: #ff4040; }
+.obj-row .obj.capping { animation: objPulse .5s infinite alternate; }
+.obj-row .obj-t { font-size: 13px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+@keyframes objPulse { to { background: rgba(255,255,255,.18); } }
+/* Zombies: points popping up beside the crosshair, and tonic chips where armor usually is. */
+.zpts { position: absolute; left: calc(50% + 34px); top: calc(50% - 22px); pointer-events: none; }
+.zpts span { position: absolute; left: var(--dx, 0); font-family: var(--display); font-weight: 700; font-size: 16px; color: #ffd23f; text-shadow: 0 2px 4px rgba(0,0,0,.9); animation: zpt .9s ease-out forwards; }
+.zpts span.big { font-size: 22px; }
+@keyframes zpt { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-46px); opacity: 0; } }
+.zperk { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 3px; border-radius: 50%; background: var(--pc); color: #0b0d10; font-size: 13px; font-style: normal; font-weight: 800; box-shadow: 0 0 8px var(--pc); }
 
 .killfeed { position: absolute; top: 14px; right: 18px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .kf { background: rgba(10,12,16,.7); padding: 5px 10px; border-radius: 3px; font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: center; animation: toastIn .15s; }

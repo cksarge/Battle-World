@@ -309,6 +309,9 @@
 .m-train b { font-family: var(--m-stencil); font-size: 22px; line-height: 1.05; }
 .m-train span { font-size: 13px; color: var(--m-dim); }
 .m-train:hover { border-color: var(--m-teal); }
+.m-zombies { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--m-faint); background: linear-gradient(90deg, rgba(157, 255, 46, 0.12), rgba(157, 255, 46, 0.02)); }
+.m-zombies b { font-family: var(--m-stencil); font-size: 22px; line-height: 1.05; color: var(--m-bone); }
+.m-zombies span { font-size: 13px; color: var(--m-dim); }
 .m-nav .nav-admin b { color: var(--m-red); }
 .admin-badge { font-size: 12px; padding: 3px 8px; border: 1px solid var(--m-red); color: #ffb3b5; white-space: nowrap; }
 .tag { font-size: 11px; padding: 2px 6px; border: 1px solid var(--m-faint); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
@@ -426,6 +429,12 @@
 }
 
 /* ───── achievements ───── */
+.mastery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.mastery-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--m-faint); background: rgba(16, 20, 14, 0.55); }
+.mastery-name { font-weight: 600; color: var(--m-bone); }
+.mastery-line { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--m-dim); margin: 6px 0 10px; }
+.mastery-card .mastery-line { margin: 0; }
+.mastery-line b { font-family: var(--m-stencil); font-size: 15px; color: var(--m-amber); letter-spacing: 0.5px; }
 .ach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .ach { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--m-faint); border-left: 3px solid color-mix(in srgb, var(--tc) 35%, transparent); background: rgba(16, 20, 14, 0.55); }
 .ach.done { border-left-color: var(--tc); background: rgba(28, 34, 25, 0.85); }
@@ -438,6 +447,8 @@
 .ach.done .ach-body em { color: var(--tc); }
 .ach-bar { height: 4px; background: var(--m-faint); margin-top: 4px; }
 .ach-bar i { display: block; height: 100%; background: var(--tc); }
+.mastery-line .ach-bar { margin-top: 0; }
+.mastery-line .ach-bar i { background: var(--m-amber); }
 .ach-tier { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--tc); white-space: nowrap; }
 .ach-strip { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
 .ach-strip span { color: var(--m-dim); font-size: 13px; margin-right: 4px; }

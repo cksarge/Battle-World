@@ -41,7 +41,9 @@ export function bestSlot(p) {
 }
 
 // Perk-adjusted timings.
-export function reloadTime(p, w) { return w.reload * (p.char?.perk === 'speedloader' ? 0.8 : 1); }
+export function reloadTime(p, w) { return w.reload * (p.char?.perk === 'speedloader' ? 0.8 : 1) * (p.zperks?.has('quickload') ? 0.5 : 1); }
+// Zombies: a forged gun holds half as many rounds again.
+export function magSize(p, w) { return p.forged?.has(w.id) ? Math.ceil(w.mag * 1.5) : w.mag; }
 export function maxNades(p) { return p.char?.perk === 'utility' ? 5 : 4; }
 // How many of one grenade type a player may carry.
 export function nadeLimit(p, kind) { return (kind === 'flash' ? 2 : 1) + (p.char?.perk === 'utility' ? 1 : 0); }
@@ -50,7 +52,7 @@ export function startReload(p) {
   const w = p.weapon;
   if (!w || !w.mag) return false;
   const a = p.ammo[w.id];
-  if (!a || a.mag >= w.mag || a.reserve <= 0 || p.ws.reloadT >= 0) return false;
+  if (!a || a.mag >= magSize(p, w) || a.reserve <= 0 || p.ws.reloadT >= 0) return false;
   p.ws.reloadT = 0;
   p.ws.scope = 0;
   return true;
@@ -66,7 +68,7 @@ export function tickWeapon(p, dt, firing) {
     ws.reloadT += dt;
     if (ws.reloadT >= reloadTime(p, w)) {
       const a = p.ammo[w.id];
-      const take = Math.min(w.mag - a.mag, a.reserve);
+      const take = Math.min(magSize(p, w) - a.mag, a.reserve);
       a.mag += take; a.reserve -= take;
       ws.reloadT = -1;
       return true;

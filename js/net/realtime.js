@@ -1,4 +1,5 @@
-import { MODES, SOLO_KINDS, nextMap } from '../data/modes.js';
+import { MODES, POOL_KINDS, nextMap } from '../data/modes.js';
+import { POOL as ZOMBIE_POOL, SQUAD_MAX, zombieChar } from '../data/zombies.js';
 import { MAPS, rollVariant } from '../data/maps.js';
 import { payloadRow } from '../data/custommaps.js';
 import { botName } from '../game/bot.js';
@@ -79,14 +80,21 @@ export function newId(n = 10) {
 }
 
 // Builds the roster for a match: humans get teams (balanced by ELO), bots fill empty slots.
-export function buildMatch({ mode, map, variant, humans, hostId, fillBots = true, botLevel = 'normal' }) {
+// Zombies: `squad` bot teammates (when fillBots is on) and a fixed pool of zombie slots on team 1 that the
+// host recycles every wave.
+export function buildMatch({ mode, map, variant, humans, hostId, fillBots = true, botLevel = 'normal', squad = 0 }) {
   const m = MODES[mode];
   const players = [];
   if (m.kind === 'training') {
     humans.slice(0, 1).forEach((h) => players.push({ ...h, team: 0, isBot: false }));
-  } else if (SOLO_KINDS.has(m.kind)) {
+  } else if (m.kind === 'zombies') {
+    humans.slice(0, SQUAD_MAX).forEach((h) => players.push({ ...h, team: 0, isBot: false }));
+    const target = Math.min(SQUAD_MAX, players.length + (fillBots ? squad : 0));
+    for (let i = players.length; i < target; i++) players.push({ id: 'bot-' + i, name: botName(i), team: 0, isBot: true, char: randomChar(), elo: 1000 });
+    for (let i = 0; i < ZOMBIE_POOL; i++) players.push({ id: 'z' + i, name: 'Zombie', team: 1, isBot: true, zombie: true, char: zombieChar('walker'), elo: 1000 });
+  } else if (POOL_KINDS.has(m.kind)) {
     humans.forEach((h) => players.push({ ...h, team: 0, isBot: false }));
-    const target = fillBots ? Math.max(humans.length, 6) : humans.length;
+    const target = fillBots ? Math.max(humans.length, m.kind === 'infect' ? m.maxPlayers : 6) : humans.length;
     for (let i = players.length; i < target; i++) players.push({ id: 'bot-' + i, name: botName(i), team: 0, isBot: true, char: randomChar(), elo: 1000 });
   } else {
     const sorted = [...humans].sort((a, b) => (b.elo || 1000) - (a.elo || 1000));
@@ -104,6 +112,7 @@ export function buildMatch({ mode, map, variant, humans, hostId, fillBots = true
     }
   }
   if (m.kind === 'training') variant = 'day';
+  if (m.kind === 'zombies') variant ||= 'night';
   map ||= nextMap(mode);
   // Community maps travel with the match so every player can build them.
   return { matchId: newId(14), mode, map, mapRow: payloadRow(MAPS[map]), variant: variant || rollVariant(!!m.ranked), hostId, players, botLevel };

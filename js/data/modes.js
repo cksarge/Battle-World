@@ -14,6 +14,8 @@ export function removeMapFromPools(id) {
 
 // Game modes. `teamSize` is players per team (ffa-style modes use `maxPlayers`).
 // kind: 'rounds' | 'bomb' | 'retake' | 'hostage' (round based) · 'ffa' | 'tdm' | 'gungame' (respawn based)
+//       'dom' | 'koth' | 'ctf' (respawn based, team objectives; js/game/objectives.js)
+//       'infect' (rounds where the dead switch sides) · 'zombies' (co-op waves; js/game/zombies.js)
 //       'training' (the offline range, no opponents)
 export const MODES = {
   duel: {
@@ -62,6 +64,31 @@ export const MODES = {
     desc: 'Everyone for themselves. Instant respawns. First to 25 kills or 6 minutes.',
     killsToWin: 25, timeLimit: 360, maps: ALL,
   },
+  dom: {
+    id: 'dom', name: 'Domination', short: 'DOM', teamSize: 5, kind: 'dom',
+    desc: 'Three capture points. Stand in a point to take it; every point your team holds scores each second. Instant respawns, free loadouts. First to 200.',
+    scoreToWin: 200, timeLimit: 600, capTime: 4, maps: ALL,
+  },
+  koth: {
+    id: 'koth', name: 'King of the Hill', short: 'KOTH', teamSize: 5, kind: 'koth',
+    desc: 'One hill that moves every minute. Hold it with no enemy inside to score a point each second. Instant respawns, free loadouts. First to 120.',
+    scoreToWin: 120, timeLimit: 600, hillTime: 60, maps: ALL,
+  },
+  ctf: {
+    id: 'ctf', name: 'Capture the Flag', short: 'CTF', teamSize: 5, kind: 'ctf',
+    desc: 'Grab the enemy flag from their base and carry it to yours while your own flag is home. Dropped flags go back after 20 seconds or when a teammate touches them. First to 3.',
+    capsToWin: 3, timeLimit: 600, flagReturn: 20, maps: ALL,
+  },
+  infection: {
+    id: 'infection', name: 'Infection', short: 'INF', maxPlayers: 8, kind: 'infect',
+    desc: 'One player starts infected with only a blade. Everyone they kill joins them. Survive the round for 3 points, infect someone for 1. Four rounds; most points wins.',
+    rounds: 4, roundTime: 150, maps: ALL,
+  },
+  zombies: {
+    id: 'zombies', name: 'Zombies', short: 'ZMB', maxPlayers: 4, kind: 'zombies', coop: true,
+    desc: 'Up to four players hold out against endless waves of the dead. Earn points to unlock doors, buy guns off the walls, gamble at the supply crate, drink perks and forge upgrades.',
+    maps: ALL,
+  },
   training: {
     id: 'training', name: 'Training Range', short: 'GYM', maxPlayers: 1, kind: 'training', offlineOnly: true,
     desc: 'Aim drills, moving targets, spray practice and grenade line-ups. Infinite ammo, every weapon free.',
@@ -81,8 +108,14 @@ export function econFor(mode) {
   return mode.economy ? DUEL_ECON : null;
 }
 
-export const RESPAWN_KINDS = new Set(['ffa', 'tdm', 'gungame']);
+export const RESPAWN_KINDS = new Set(['ffa', 'tdm', 'gungame', 'dom', 'koth', 'ctf']);
+// Everyone can damage everyone (no teams).
 export const SOLO_KINDS = new Set(['ffa', 'gungame', 'training']);
+// Players join as one pool instead of two teams (queues, parties, lobbies, the roster). Infection splits
+// the pool once the match starts; zombies puts everyone on team 0 against the horde.
+export const POOL_KINDS = new Set([...SOLO_KINDS, 'infect', 'zombies']);
+// Team objective modes (capture points, the hill, flags): js/game/objectives.js.
+export const OBJECTIVE_KINDS = new Set(['dom', 'koth', 'ctf']);
 // Modes with a charge to plant or defuse.
 export const BOMB_KINDS = new Set(['bomb', 'retake']);
 // Attack/defend modes: named sides and played on the large maps with sites.
@@ -98,6 +131,10 @@ export function goalText(mode) {
     case 'ffa': return `First to ${mode.killsToWin} kills`;
     case 'tdm': return `First team to ${mode.killsToWin} kills`;
     case 'gungame': return `First through all ${GUN_GAME_ORDER.length} weapons`;
+    case 'dom': case 'koth': return `First team to ${mode.scoreToWin} points`;
+    case 'ctf': return `First team to ${mode.capsToWin} captures`;
+    case 'infect': return `Most points after ${mode.rounds} rounds`;
+    case 'zombies': return 'Survive as many waves as you can';
     default: return '';
   }
 }

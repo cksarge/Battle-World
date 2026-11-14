@@ -4,11 +4,12 @@ import { switchSlot, startReload, bestSlot } from './combat.js';
 // reaction: seconds before a bot starts shooting at someone it just spotted.
 // error: aim offset (radians) when it starts; settle: how fast that offset shrinks per second.
 // minErr: the fraction of the error that never goes away. nades: chance to throw utility when it can.
+// tap: extra pause (s) between trigger pulls with semi-automatic guns.
 export const BOT_LEVELS = {
-  easy: { reaction: 0.95, turn: 2.4, error: 0.14, settle: 0.45, minErr: 0.45, fov: 95, headChance: 0.04, strafe: 0.08, burst: 3, nades: 0.03 },
-  normal: { reaction: 0.68, turn: 3.6, error: 0.095, settle: 0.7, minErr: 0.3, fov: 100, headChance: 0.12, strafe: 0.22, burst: 4, nades: 0.06 },
-  hard: { reaction: 0.3, turn: 9, error: 0.035, settle: 1.2, minErr: 0.15, fov: 120, headChance: 0.5, strafe: 0.55, burst: 7, nades: 0.12 },
-  elite: { reaction: 0.16, turn: 16, error: 0.016, settle: 1.3, minErr: 0.15, fov: 130, headChance: 0.75, strafe: 0.8, burst: 9, nades: 0.18 },
+  easy: { reaction: 0.95, turn: 2.4, error: 0.14, settle: 0.45, minErr: 0.45, fov: 95, headChance: 0.04, strafe: 0.08, burst: 3, nades: 0.03, tap: 0.4 },
+  normal: { reaction: 0.68, turn: 3.6, error: 0.095, settle: 0.7, minErr: 0.3, fov: 100, headChance: 0.12, strafe: 0.22, burst: 4, nades: 0.06, tap: 0.22 },
+  hard: { reaction: 0.3, turn: 9, error: 0.035, settle: 1.2, minErr: 0.15, fov: 120, headChance: 0.5, strafe: 0.55, burst: 7, nades: 0.12, tap: 0.1 },
+  elite: { reaction: 0.16, turn: 16, error: 0.016, settle: 1.3, minErr: 0.15, fov: 130, headChance: 0.75, strafe: 0.8, burst: 9, nades: 0.18, tap: 0.05 },
 };
 
 const BOT_NAMES = ['Hollis', 'Brandt', 'Vasquez', 'Petrov', 'Kade', 'Moreau', 'Sato', 'Novak', 'Ibarra', 'Quinn', 'Rourke', 'Falk', 'Abara', 'Dunmore', 'Lark', 'Ostrova', 'Teague', 'Wilder'];
@@ -58,7 +59,9 @@ export class BotBrain {
     const fwd = new THREE.Vector3(-Math.sin(this.p.yaw), 0, -Math.cos(this.p.yaw));
     const flat = new THREE.Vector3(d.x, 0, d.z).normalize();
     const ang = Math.acos(THREE.MathUtils.clamp(fwd.dot(flat), -1, 1));
-    if (ang > THREE.MathUtils.degToRad(this.L.fov / 2) && dist > 4 && !(this.hurtT > 0)) return false;
+    // Zombies groan and shuffle: squad bots notice them all round, not just in front.
+    const heard = o.zombie && dist < 22;
+    if (ang > THREE.MathUtils.degToRad(this.L.fov / 2) && dist > 4 && !(this.hurtT > 0) && !heard) return false;
     if (!this.g.world.lineOfSight(eye, dst) && !this.g.world.lineOfSight(eye, o.eye())) return false;
     if (this.g.effects.smokeBlocks(eye, dst)) return false;
     return true;
@@ -72,6 +75,9 @@ export class BotBrain {
   chooseGoal() {
     const g = this.g, p = this.p, w = g.world, kind = g.mode.kind;
     if (kind === 'hostage') return this.hostageGoal();
+    if (g.objectives) return g.objectives.botGoal(this);
+    if (kind === 'zombies') return g.zombies.squadGoal(this);
+    if (kind === 'infect') return this.infectGoal();
     if (kind === 'bomb' || kind === 'retake') {
       const b = g.state.bomb || {};
       if (p.team === 0) {
@@ -103,6 +109,28 @@ export class BotBrain {
     if (!enemies.length) return null;
     const e = enemies[Math.floor(Math.random() * enemies.length)];
     return e.pos.clone();
+  }
+
+  // Infection: the infected hunt the nearest survivor; survivors pick a hideout and dig in, moving on
+  // now and then (or when the infected find them).
+  infectGoal() {
+    const g = this.g, p = this.p, w = g.world;
+    if (p.team === 1) {
+      let best = null, bd = Infinity;
+      for (const e of this.enemies()) { const d = e.pos.distanceTo(p.pos); if (d < bd) { bd = d; best = e; } }
+      return best ? best.pos.clone() : null;
+    }
+    const now = performance.now();
+    if (!this.hideout || now > this.hideUntil || (this.lastSeen && this.lostT < 1 && this.lastSeen.distanceTo(this.hideout) < 6)) {
+      const cells = [];
+      for (let i = 0; i < 30; i++) cells.push(w.allFloor[Math.floor(Math.random() * w.allFloor.length)]);
+      // Corners: cells with the most solid neighbours.
+      const walls = (c) => { let n = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (w.navH(c.x + dx, c.y + dy) === null) n++; return n; };
+      const pick = cells.filter((c) => w.navH(c.x, c.y) !== null).sort((a, b) => walls(b) - walls(a))[0];
+      this.hideout = pick ? w.cellCenter(pick.x, pick.y) : null;
+      this.hideUntil = now + 20000 + Math.random() * 15000;
+    }
+    return this.hideout;
   }
 
   // Attackers fetch the nearest free hostage and carry it home; defenders guard the hostage site.
@@ -154,13 +182,14 @@ export class BotBrain {
 
     let wish = new THREE.Vector3(), walk = false, crouch = false, fire = false;
     const t = this.target;
-    if (t && t.alive && this.seenT >= this.L.reaction) {
+    // Zombies are slow and obvious, so bots open fire on them sooner.
+    if (t && t.alive && this.seenT >= this.L.reaction * (t.zombie ? 0.45 : 1)) {
       // Combat: aim, fire in bursts, strafe a little.
       const aimPoint = this.aimHead ? t.headCenter() : t.pos.clone().setY(t.pos.y + t.height() * 0.66);
       const eye = p.eye();
       const d = aimPoint.sub(eye);
       const dist = d.length();
-      const errScale = this.L.error * Math.max(this.L.minErr, 1 - (this.seenT - this.L.reaction) * this.L.settle) * (1 + Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 5) * 0.5);
+      const errScale = this.L.error * Math.max(this.L.minErr, 1 - (this.seenT - this.L.reaction * (t.zombie ? 0.45 : 1)) * this.L.settle) * (1 + Math.min(1, Math.hypot(p.vel.x, p.vel.z) / 5) * 0.5);
       const wantYaw = Math.atan2(-d.x, -d.z) + this.aimErr.x * errScale;
       const wantPitch = Math.atan2(d.y, Math.hypot(d.x, d.z)) + this.aimErr.y * errScale * 0.6;
       const k = Math.min(1, dt * this.L.turn);
@@ -188,6 +217,16 @@ export class BotBrain {
         wish.set(Math.cos(p.yaw) * this.strafeDir, 0, -Math.sin(p.yaw) * this.strafeDir);
       }
       crouch = dist > 20 && (w?.type === 'rifle') && this.L.strafe > 0.5 && fire;
+      // Zombies: back off when one gets close (they hit hard up close), angling a little to the side.
+      if (t.zombie && dist < 4.5 && w?.type !== 'knife') {
+        const ax = -d.x / dist, az = -d.z / dist;
+        wish.set(ax - az * 0.5 * this.strafeDir, 0, az + ax * 0.5 * this.strafeDir).normalize();
+      }
+      // Zombies: finish a revive or keep walking to the shop while the nearest one is still far off.
+      if (g.zombies && dist > 7) {
+        if (this.action === 'revive') { this.doAction(dt); wish.set(0, 0, 0); fire = false; }
+        else if (this.shop) wish = this.navigate(dt);
+      }
     } else {
       p.ws.scope = 0;
       if (a && a.mag < (w.mag * 0.35) && a.reserve > 0) startReload(p);
@@ -203,6 +242,8 @@ export class BotBrain {
       }
     }
     if (frozen) { wish.set(0, 0, 0); fire = false; }
+    // Semi-automatic guns need the trigger let go between shots.
+    if (fire && w && !w.auto && !w.burst && w.type !== 'knife' && p.triggerHeld && p.ws.cooldown <= -this.L.tap) g.releaseTrigger(p);
     g.movePlayer(p, wish, dt, { walk, crouch, jump: false });
     if (fire || p.burstLeft > 0) g.tryFire(p, false);
     if (!fire) g.releaseTrigger(p);
@@ -217,6 +258,8 @@ export class BotBrain {
       const d = e.pos.distanceTo(p.pos);
       if (d < bestD) { bestD = d; best = e; }
     }
+    // Don't keep switching between zombies that are about as close as each other.
+    if (best && this.target && this.target !== best && this.target.zombie && this.target.alive && this.canSee(this.target) && this.target.pos.distanceTo(p.pos) < bestD + 3) best = this.target;
     if (best) {
       if (best !== this.target) {
         this.target = best; this.seenT = 0;
@@ -228,6 +271,11 @@ export class BotBrain {
     } else {
       if (this.target) { this.target = null; this.seenT = 0; }
       this.lostT += 0.2;
+    }
+    // Zombies: revive and shop between waves, or while nothing is close.
+    if (g.zombies && g.state.phase === 'live' && (!this.target || this.target.pos.distanceTo(p.pos) > 12 || g.state.z?.phase !== 'wave')) {
+      g.zombies.squadThink(this);
+      if (this.shop && (!this.goal || this.goal.distanceTo(g.zombies.squadGoal(this)) > 1)) { this.goal = g.zombies.squadGoal(this).clone(); this.goalT = 6; this.repath(); }
     }
     if (this.target) return;
     if (this.blindT > 0) return;
@@ -369,6 +417,10 @@ export class BotBrain {
       const h = g.state.hostages?.[this.pickup];
       if (!h || h.state !== 'idle' || Math.hypot(p.pos.x - h.pos[0], p.pos.z - h.pos[2]) > 2.2) { this.action = null; return; }
       if (this.actionT >= g.mode.pickupTime) { g.request('pickup', { i: this.pickup }, p); this.action = null; }
+    } else if (this.action === 'revive') {
+      const down = g.zombies?.revivable(p);
+      if (!down || down.id !== this.reviveId) { this.action = null; return; }
+      if (this.actionT >= g.zombies.reviveTime(p)) { g.request('zrevive', { id: down.id }, p); this.action = null; }
     } else if (this.action === 'defuse') {
       if (b.state !== 'planted') { this.action = null; return; }
       if (this.actionT >= g.actionTime('defuse', p)) { g.request('defuse', {}, p); this.action = null; }

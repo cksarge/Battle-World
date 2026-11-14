@@ -5,8 +5,12 @@ import { Viewmodel } from '../engine/viewmodel.js';
 import { buildGun } from '../engine/models.js';
 import { sfx, setListener, initAudio, setVolume, onSoundCue } from '../engine/audio.js';
 import { MAPS, withVariant, SIGHT } from '../data/maps.js';
-import { MODES, RESPAWN_KINDS, SOLO_KINDS, BOMB_KINDS, SIDED_KINDS, goalText, econFor } from '../data/modes.js';
+import { MODES, RESPAWN_KINDS, SOLO_KINDS, POOL_KINDS, BOMB_KINDS, SIDED_KINDS, OBJECTIVE_KINDS, goalText, econFor } from '../data/modes.js';
 import { HostageView } from './hostage.js';
+import { Objectives } from './objectives.js';
+import { ZombieMode, ZombieBrain } from './zombies.js';
+import { infectedChar } from '../data/zombies.js';
+import { masteryLevel } from '../data/mastery.js';
 import { sanitizeChar } from '../data/characters.js';
 import { Training } from './training.js';
 import { Tutorial } from './tutorial.js';
@@ -117,6 +121,8 @@ export class Game {
     scene.add(this.bombMesh);
     this.beepT = 0;
     if (this.mode.kind === 'hostage') this.hostageView = new HostageView(this);
+    if (OBJECTIVE_KINDS.has(this.mode.kind)) this.objectives = new Objectives(this);
+    if (this.mode.kind === 'zombies') this.zombies = new ZombieMode(this);
 
     for (const info of this.opts.players) this.addPlayer(info);
 
@@ -166,12 +172,13 @@ export class Game {
     // cosmetics from seasons that haven't started).
     if (!info.isBot && info.char) info = { ...info, char: { ...sanitizeChar(info.char), preset: info.char.preset } };
     const p = new Player(info);
+    p.baseChar = p.char;
     p.owner = info.isBot ? this.hostId : info.id;
     p.isLocal = info.id === this.localId;
     p.isRemoteView = p.owner !== this.localId;
     this.players.set(p.id, p);
     p.dummy = !!info.dummy;
-    if (info.isBot && !info.dummy && this.isHost) this.brains.set(p.id, new BotBrain(this, p, this.opts.botLevel || 'normal'));
+    if (info.isBot && !info.dummy && this.isHost) this.brains.set(p.id, this.makeBrain(p));
     if (!p.isLocal) {
       p.ensureModel(this.scene, !SOLO_KINDS.has(this.mode.kind));
       p.model.root.visible = false;
@@ -199,6 +206,9 @@ export class Game {
     p.model.root.add(s);
     p.tag = s;
   }
+
+  // Zombies get their own brain; everyone else (squad bots included) uses the normal one.
+  makeBrain(p) { return p.zombie ? new ZombieBrain(this, p) : new BotBrain(this, p, this.opts.botLevel || 'normal'); }
 
   removePlayer(id) {
     const p = this.players.get(id);
@@ -279,6 +289,8 @@ export class Game {
     this.updateNades(dt);
     this.updateBomb(dt);
     this.hostageView?.update(dt);
+    this.objectives?.update(dt);
+    this.zombies?.update(dt);
     this.training?.update(dt);
     this.tutorial?.update(dt);
     this.pings?.update(dt);
@@ -373,6 +385,14 @@ export class Game {
       this.action.t += dt;
       if (this.action.t >= this.mode.pickupTime) { this.request('pickup', { i: hostage.i }); this.action = null; }
     }
+    // Zombies: revive a fallen teammate (hold E)
+    const down = k('KeyE') && this.state.phase === 'live' && this.zombies?.revivable(p);
+    if (down) {
+      acting = true;
+      if (this.action?.type !== 'revive' || this.action.id !== down.id) this.action = { type: 'revive', t: 0, id: down.id };
+      this.action.t += dt;
+      if (this.action.t >= this.zombies.reviveTime(p)) { this.request('zrevive', { id: down.id }); this.action = null; }
+    }
     if (!acting) this.action = null;
     if (!ui && !acting && inp.pressed('KeyE')) this.interact(p);
 
@@ -456,7 +476,8 @@ export class Game {
     const finish = WEAPON_SKINS[p.char?.skins?.[id]]?.name || 'Factory';
     const kills = (this.app.localStats?.().weapons?.[id]?.k || 0) + (this.myStats.weapons[id]?.k || 0);
     const name = itemInfo(id)?.name || id;
-    this.hud.info(`${name} · ${finish}${WEAPONS[id] ? ` · ${kills.toLocaleString()} kill${kills === 1 ? '' : 's'} on this device` : ''}`, 3);
+    const mastery = WEAPONS[id] ? ` · mastery ${masteryLevel(this.app.achievements, id)}` : '';
+    this.hud.info(`${name} · ${finish}${mastery}${WEAPONS[id] ? ` · ${kills.toLocaleString()} kill${kills === 1 ? '' : 's'} on this device` : ''}`, 3);
   }
 
   selectSlot(p, slot) {
@@ -473,8 +494,8 @@ export class Game {
   canBuy(p = this.local) {
     if (!p || !p.alive) return false;
     if (this.mode.kind === 'training') return true;
-    if (SOLO_KINDS.has(this.mode.kind)) return false;
-    if (this.mode.kind === 'tdm') return this.state.phase === 'live';
+    if (POOL_KINDS.has(this.mode.kind)) return false;
+    if (this.mode.kind === 'tdm' || OBJECTIVE_KINDS.has(this.mode.kind)) return this.state.phase === 'live';
     if (this.state.phase === 'buy') return true;
     if (this.state.phase === 'live' && (this.mode.kind === 'bomb' || this.mode.kind === 'hostage') && this.state.time > this.mode.roundTime - 20) {
       const r = this.mapDef.spawns[p.team];
@@ -491,6 +512,7 @@ export class Game {
   }
 
   actionTime(type, p) {
+    if (type === 'revive') return this.zombies?.reviveTime(p) || 3;
     const t = type === 'plant' ? this.mode.plantTime : this.mode.defuseTime;
     return t * (p?.char?.perk === 'quickhands' ? 0.7 : 1);
   }
@@ -589,8 +611,9 @@ export class Game {
     p.walking = walk;
     p.crouch += ((crouch ? 1 : 0) - p.crouch) * Math.min(1, dt * 10);
     const w = p.weapon;
-    let max = 6.0 * (w?.moveSpeed || 1) * (p.ws.scope > 0 ? 0.5 : 1) * (p.char?.perk === 'fleet' ? 1.06 : 1);
+    let max = 6.0 * (w?.moveSpeed || 1) * (p.ws.scope > 0 ? 0.5 : 1) * (p.char?.perk === 'fleet' ? 1.06 : 1) * (p.speedMul || 1);
     if (this.state.hostages?.some((h) => h.carrier === p.id)) max *= 0.82;
+    if (this.objectives?.isCarrier(p)) max *= 0.9;
     if (crouch) max *= 0.42; else if (walk) max *= 0.52;
     const v = p.vel;
     if (p.onGround) {
@@ -695,7 +718,7 @@ export class Game {
     }
     a.mag--;
     const breath = p.char?.perk === 'breath' && (w.type === 'sniper' || w.id === 'falcon') ? 0.8 : 1;
-    p.ws.cooldown = w.fireRate * breath;
+    p.ws.cooldown = w.fireRate * breath * (p.zperks?.has('overdrive') ? 0.77 : 1);
     if (w.burst) {
       // Burst rifles fire `burst` rounds per trigger pull, then wait burstDelay.
       if (!(p.burstLeft > 0)) p.burstLeft = w.burst;
@@ -712,8 +735,9 @@ export class Game {
     const spread = spreadFor(p);
     const dmgBy = new Map();
     const shots = [];
+    const forged = p.forged?.has(w.id) ? 2 : 1;
     const addHit = (victim, part, dist, mult = 1) => {
-      const d = bulletDamage(w, part, dist) * mult;
+      const d = bulletDamage(w, part, dist) * mult * forged;
       const prev = dmgBy.get(victim) || { d: 0, part: 'legs' };
       prev.d += d;
       if (part === 'head' || (part === 'body' && prev.part === 'legs')) prev.part = part;
@@ -766,6 +790,7 @@ export class Game {
       this.request('hit', { v: victim.id, d: Math.round(d), part, w: w.id }, p);
       if (isLocal) this.hud.hitmarker(part === 'head', false);
       if (isLocal) sfx.hit(part === 'head');
+      if (isLocal && victim.zombie) this.hud.zpoints(10);
     }
     this.recoil(p, w, isLocal);
     if (isLocal && w.type === 'sniper' && !w.keepScope) p.ws.scope = 0;
@@ -838,7 +863,7 @@ export class Game {
       this.request('hit', { v: best.o.id, d: Math.round(dmg), part: 'body', w: w.id }, p);
       const pt = origin.clone().addScaledVector(dir, best.dist);
       this.effects.impact(pt, dir.clone().negate(), { blood: true });
-      if (p.isLocal) { this.hud.hitmarker(false, false); sfx.hit(false); }
+      if (p.isLocal) { this.hud.hitmarker(false, false); sfx.hit(false); if (best.o.zombie) this.hud.zpoints(10); }
       this.queueShot(p, w.id, [[+pt.x.toFixed(2), +pt.y.toFixed(2), +pt.z.toFixed(2), 1]]);
     } else if (wall) {
       this.effects.impact(wall.point, wall.normal);
@@ -1144,6 +1169,7 @@ export class Game {
     let best = null, bd = Infinity;
     for (const pr of this.world.props.values()) {
       if (pr.ch !== 'D' && pr.ch !== 'A' && pr.ch !== 'J') continue;
+      if (this.zombies && (pr.ch === 'A' || pr.ch === 'D')) continue; // zombies: ammo is bought and doors stay open once paid for
       const cx = (pr.x + 0.5) * CELL, cz = (pr.y + 0.5) * CELL;
       const dx = cx - eye.x, dz = cz - eye.z, dist = Math.hypot(dx, dz);
       if (dist > (pr.ch === 'D' ? 2.7 : 2.4)) continue;
@@ -1156,6 +1182,8 @@ export class Game {
   interactHint() {
     const p = this.local;
     if (!p?.alive) return '';
+    const z = this.zombies?.hint(p) || this.objectives?.hint(p);
+    if (z) return z;
     const pr = this.usableProp(p);
     if (!pr) return '';
     if (pr.ch === 'D') return `Press ${pad.label('use')} to ${pr.open ? 'close' : 'open'} the door`;
@@ -1165,6 +1193,7 @@ export class Game {
   }
 
   interact(p) {
+    if (this.zombies?.interact(p)) return;
     const pr = this.usableProp(p);
     if (!pr) return;
     if (pr.ch === 'D') return this.request('door', { cell: [pr.x, pr.y] }, p);
@@ -1184,7 +1213,7 @@ export class Game {
 
   hostToggleDoor(p, cell) {
     const pr = this.world.prop(cell[0], cell[1]);
-    if (!pr || pr.ch !== 'D' || !p.alive) return;
+    if (!pr || pr.ch !== 'D' || !p.alive || this.zombies) return;
     if (Math.hypot(p.pos.x - (pr.x + 0.5) * CELL, p.pos.z - (pr.y + 0.5) * CELL) > 3.6) return;
     const open = !pr.open;
     // Don't shut a door on someone standing in the doorway.
@@ -1367,7 +1396,8 @@ export class Game {
     if (!p) return;
     if (type === 'hit') {
       const v = this.players.get(data.v);
-      if (!v || !p.alive || data.d <= 0 || data.d > 700) return;
+      // Forged guns (zombies) hit twice as hard, so they get a higher ceiling.
+      if (!v || !p.alive || data.d <= 0 || data.d > (this.zombies ? 1500 : 700)) return;
       this.hostDamage(p, v, data.d, data.part, data.w);
     } else if (type === 'buy') this.hostBuy(p, data.item);
     else if (type === 'fall') { if (p.alive && data.d > 0 && data.d < 250) this.hostDamage(p, p, data.d, 'legs', 'fall'); }
@@ -1377,6 +1407,7 @@ export class Game {
     else if (type === 'plant') this.rules.onPlant(p, data.pos);
     else if (type === 'defuse') this.rules.onDefuse(p);
     else if (type === 'pickup') this.rules.onPickup?.(p, data.i);
+    else if (type === 'zbuy' || type === 'zrevive') this.zombies?.handleRequest(type, p, data);
   }
 
   hostDamage(attacker, victim, raw, part, weapon) {
@@ -1385,6 +1416,7 @@ export class Game {
     const w = WEAPONS[weapon];
     const explosive = nadeDef(weapon)?.explosive || weapon === 'bomb' || weapon === 'barrel' || !!WEAPONS[weapon]?.projectile;
     if (explosive && victim.char?.perk === 'blastsuit') raw *= 0.6;
+    if (this.zombies) raw = this.zombies.adjustDamage(attacker, victim, raw);
     let dmg = raw, armorLoss = 0;
     const armored = part === 'head' ? victim.helmet : part !== 'legs' && victim.armor > 0;
     if (armored && victim.armor > 0) {
@@ -1396,12 +1428,14 @@ export class Game {
     const hp = Math.max(0, Math.round(victim.hp - dmg));
     const armor = Math.max(0, Math.round(victim.armor - armorLoss));
     if (attacker) attacker.damage += Math.min(victim.hp, dmg);
+    if (!victim.zombie) victim.hurtAt = performance.now();
+    this.zombies?.award(attacker, victim, part, weapon, hp <= 0);
     this.broadcast('hp', { id: victim.id, hp, armor, by: attacker?.id ?? null });
     if (hp <= 0) {
       const killReward = this.econ && attacker && attacker !== victim ? (w?.killReward ?? 300) : 0;
       if (attacker && killReward) attacker.money = Math.min(this.econ.max, attacker.money + killReward);
       this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', money: attacker ? attacker.money : 0 });
-      this.rules.onKill(attacker, victim, weapon);
+      this.rules.onKill(attacker, victim, weapon, part);
     }
   }
 
@@ -1423,6 +1457,7 @@ export class Game {
   }
 
   botBuys() {
+    if (POOL_KINDS.has(this.mode.kind)) return; // zombies: bots buy off the walls; infection: loadouts are handed out
     const pick = (list) => list[Math.floor(Math.random() * list.length)];
     for (const p of this.players.values()) {
       if (!p.isBot || !p.alive) continue;
@@ -1447,13 +1482,14 @@ export class Game {
 
   syncPayload() {
     const players = {};
-    for (const p of this.players.values()) players[p.id] = [p.money, p.kills, p.deaths, p.hp, p.alive ? 1 : 0, p.team, p.hs, Math.round(p.damage)];
+    for (const p of this.players.values()) players[p.id] = [p.money, p.kills, p.deaths, p.hp, p.alive ? 1 : 0, p.team, p.hs, Math.round(p.damage), p.score || 0];
     const s = this.state;
-    return { phase: s.phase, time: s.time, round: s.round, scores: s.scores, bomb: s.bomb, players };
+    return { phase: s.phase, time: s.time, round: s.round, scores: s.scores, bomb: s.bomb, players, obj: s.obj, z: s.z };
   }
 
   statsPayload() {
-    return [...this.players.values()].map((p) => ({ id: p.id, name: p.name, team: p.team, k: p.kills, d: p.deaths, hs: p.hs, dmg: Math.round(p.damage), bot: p.isBot, gg: p.gg || 0 }));
+    return [...this.players.values()].filter((p) => !p.zombie)
+      .map((p) => ({ id: p.id, name: p.name, team: p.team, k: p.kills, d: p.deaths, hs: p.hs, dmg: Math.round(p.damage), bot: p.isBot, gg: p.gg || 0, pts: p.score || 0 }));
   }
 
   // ───────────────────────── events (all clients) ─────────────────────────
@@ -1474,7 +1510,7 @@ export class Game {
       case 'roundEnd': {
         s.scores = d.scores; s.phase = 'post'; s.time = 5;
         for (const [id, m] of Object.entries(d.money || {})) { const p = this.players.get(id); if (p) p.money = m; }
-        const reasonText = { elim: 'All enemies eliminated', bomb: 'The charge detonated', defuse: 'The charge was defused', time: 'Time ran out', draw: 'Draw' }[d.reason] || '';
+        const reasonText = { elim: 'All enemies eliminated', bomb: 'The charge detonated', defuse: 'The charge was defused', time: 'Time ran out', draw: 'Draw', infected: 'Everyone was infected', survived: 'The survivors held out (+3 each)' }[d.reason] || '';
         if (d.winner < 0) this.hud.center('ROUND DRAW', reasonText, 4);
         else {
           const name = this.teamName(d.winner);
@@ -1496,11 +1532,13 @@ export class Game {
         if (!this.isHost) {
           s.phase = d.phase; s.time = d.time; s.round = d.round; s.scores = d.scores;
           if (d.bomb) s.bomb = d.bomb;
+          if (d.obj) s.obj = d.obj;
+          if (d.z) { s.z = d.z; this.zombies?.refreshPlayers(); }
           for (const [id, v] of Object.entries(d.players)) {
             const p = this.players.get(id);
             if (!p) continue;
             [p.money, p.kills, p.deaths] = v;
-            p.hs = v[6] || 0; p.damage = v[7] || 0;
+            p.hs = v[6] || 0; p.damage = v[7] || 0; p.score = v[8] || 0;
             if (p.team !== v[5]) this.setTeam(p, v[5]);
             if (!v[4] && p.alive) { p.alive = false; p.model?.die(1); }
           }
@@ -1512,6 +1550,7 @@ export class Game {
         if (!p) break;
         const by = d.by ? this.players.get(d.by) : null;
         if (p.isLocal && d.hp < p.hp) { this.hud.damaged(by); pad.rumble(0.4, Math.min(1, (p.hp - d.hp) / 60), 160); }
+        if (by?.zombie && d.hp < p.hp) { by.firingT = 0.35; sfx.swipe(p.pos); }
         p.hp = d.hp; p.armor = d.armor;
         this.brains.get(p.id)?.onDamaged(by);
         break;
@@ -1523,15 +1562,16 @@ export class Game {
         v.deaths++;
         const dir = k ? (new THREE.Vector3().subVectors(v.pos, k.pos).dot(v.forward()) > 0 ? -1 : 1) : 1;
         v.model?.die(dir);
-        if (k && k !== v) { k.kills++; if (d.hs) k.hs++; if (this.isHost) k.money = d.money ?? k.money; }
+        if (k && k !== v) { k.kills++; if (d.hs) k.hs++; if (this.isHost || this.zombies) k.money = d.money ?? k.money; }
         this.trackKill(k, v, d);
         this.training?.onKill(k, v);
         this.tutorial?.onKill(k, v);
-        this.hud.killfeed(k, v, d.w, d.hs);
+        if (!v.zombie) this.hud.killfeed(k, v, d.w, d.hs);
+        else if (k?.isLocal) this.hud.zombieKill(d.hs, d.w);
         const fx = k && k !== v ? k.char?.killfx : null;
         if (fx && fx !== 'none' && KILL_FX[fx]) this.effects.killFx(fx, v.pos.clone().setY(v.pos.y + 1), KILL_FX[fx].color);
         if (k?.isLocal && k !== v) { this.hud.hitmarker(d.hs, true); }
-        if (v.isLocal && k && k !== v && this.settings.killcam !== false && this.state.phase !== 'over' && !this.tutorial) {
+        if (v.isLocal && k && k !== v && !k.zombie && this.settings.killcam !== false && this.state.phase !== 'over' && !this.tutorial) {
           this.killcam = { killer: k.id, delay: 0.7, pos: this.rec.t - 2.8, end: this.rec.t + 0.6, w: d.w, hs: d.hs, revived: new Set() };
         }
         if (v.isLocal) {
@@ -1539,7 +1579,10 @@ export class Game {
           this.action = null;
           this.spectateIdx = 0;
           this.killer = k;
-          this.hud.center('YOU DIED', k ? `${k.name} · ${itemInfo(d.w)?.name || { fire: 'Incendiary', barrel: 'Exploding barrel', fall: 'Fall damage' }[d.w] || d.w}${d.hs ? ' · headshot' : ''}` : '', 2.5);
+          const how = itemInfo(d.w)?.name || { fire: 'Incendiary', barrel: 'Exploding barrel', fall: 'Fall damage', claws: 'Clawed', bloat: 'Bloater' }[d.w] || d.w;
+          if (this.zombies) this.hud.center('YOU’RE DOWN', this.zombies.survivors().some((q) => q.alive) ? 'A teammate can revive you, or you’re back next wave' : '', 3);
+          else if (this.mode.kind === 'infect' && v.team === 0) this.hud.center('INFECTED', 'You’ll come back as one of them', 2.5);
+          else this.hud.center('YOU DIED', k ? `${k.name} · ${how}${d.hs ? ' · headshot' : ''}` : d.w === 'bloat' ? how : '', 2.5);
         }
         if (this.mode.kind === 'bomb' && this.state.bomb?.carrier === v.id) v.hasBomb = false;
         break;
@@ -1589,6 +1632,18 @@ export class Game {
         break;
       }
       case 'ping': this.pings?.receive(d); break;
+      case 'obj': this.objectives?.apply(d); break;
+      case 'z': this.zombies?.apply(d); break;
+      case 'infect': {
+        const p = this.players.get(d.id);
+        if (!p) break;
+        this.setTeam(p, 1);
+        if (d.by !== undefined) { const k = this.players.get(d.by); if (k) k.score = d.score ?? k.score; }
+        if (p.isLocal) this.hud.info('You are infected. Knife the survivors', 3);
+        else this.hud.chatLine('', `${p.name} was infected`, -1);
+        break;
+      }
+      case 'points': for (const [id, v] of Object.entries(d.list || {})) { const p = this.players.get(id); if (p) p.score = v; } break;
       case 'give': this.applyGive(d); break;
       case 'nade': this.spawnNade(d); break;
       case 'emote': {
@@ -1615,6 +1670,8 @@ export class Game {
 
   teamName(team) {
     if (SIDED_KINDS.has(this.mode.kind)) return team === 0 ? 'ATTACKERS' : 'DEFENDERS';
+    if (this.mode.kind === 'infect') return team === 0 ? 'SURVIVORS' : 'INFECTED';
+    if (this.mode.kind === 'zombies') return team === 0 ? 'SURVIVORS' : 'THE HORDE';
     const lp = this.local;
     if (!lp && this.mode.teamSize !== 1) return 'TEAM ' + (team + 1);
     if (this.mode.teamSize === 1) {
@@ -1627,10 +1684,12 @@ export class Game {
   setTeam(p, team) {
     if (p.team === team) return;
     p.team = team;
+    // Infection: the infected wear their operator, turned.
+    if (this.mode.kind === 'infect') p.char = team === 1 ? infectedChar(p.baseChar || p.char) : p.baseChar || p.char;
     if (p.model) {
       const tag = p.tag;
       p.model.dispose(); p.model = null;
-      p.ensureModel(this.scene, this.mode.kind !== 'ffa');
+      p.ensureModel(this.scene, !SOLO_KINDS.has(this.mode.kind));
       if (tag) { p.model.root.add(tag); }
     }
   }
@@ -1646,9 +1705,11 @@ export class Game {
 
   spawnPlayer(p, at, resetKit, freeArmor) {
     p.snapTo(at[0], at[1], at[2], at[3]);
-    p.alive = true; p.hp = 100;
+    // Infected players are tougher and quicker; zombies set their own health after spawning.
+    if (this.mode.kind === 'infect') { p.maxHp = p.team === 1 ? 150 : 100; p.speedMul = p.team === 1 ? 1.1 : 1; }
+    p.alive = true; p.hp = p.maxHp || 100;
     if (resetKit) { p.resetKit(); p.armor = 0; p.helmet = false; }
-    if (freeArmor) { p.armor = 100; p.helmet = true; }
+    if (freeArmor && !(this.mode.kind === 'infect' && p.team === 1)) { p.armor = 100; p.helmet = true; }
     if (p.char?.perk === 'fortified' && p.armor < 100) p.armor = 100;
     p.model?.revive();
     p.ws.cooldown = 0; p.ws.reloadT = -1; p.ws.drawT = 0; p.ws.scope = 0; p.ws.spray = 0;
@@ -1661,11 +1722,20 @@ export class Game {
     const kind = this.mode.kind;
     if (kind === 'gungame') return this.setGunGameWeapon(p);
     if (kind === 'ffa') return this.giveFFALoadout(p, at);
-    if (kind === 'tdm' && p.owner === this.localId) {
+    if (kind === 'infect') return p.team === 1 ? this.giveInfectedKit(p) : this.giveFFALoadout(p, at);
+    if ((kind === 'tdm' || OBJECTIVE_KINDS.has(kind)) && p.owner === this.localId) {
       if (p.isLocal && this.savedBuys.length) setTimeout(() => this.rebuy(), 120);
       else if (p.isLocal) setTimeout(() => this.request('buy', { item: 'ar7' }), 120);
       else setTimeout(() => { this.hostBuy(p, BOT_TDM_WEAPONS[Math.floor(Math.random() * BOT_TDM_WEAPONS.length)]); }, 120);
     }
+  }
+
+  // Infection: the infected only get a blade.
+  giveInfectedKit(p) {
+    p.inv = { primary: null, secondary: null, melee: p.knifePref || 'knife', nades: [] };
+    p.slot = '';
+    switchSlot(p, 'melee');
+    if (p.isLocal) this.viewmodel.setWeapon(p.weaponId, p.char);
   }
 
   setGunGameWeapon(p) {
@@ -1691,6 +1761,8 @@ export class Game {
     const s = this.state;
     this.endKillcam();
     s.round = d.round; s.time = d.time; s.scores = d.scores; s.phase = d.phase || 'buy'; s.bomb = d.bomb; s.hostages = d.hostages || [];
+    if (d.obj) s.obj = d.obj;
+    if (d.z) { s.z = d.z; this.zombies?.refreshPlayers(); }
     this.effects.clearRound();
     this.clearNades();
     if (!RESPAWN_KINDS.has(this.mode.kind)) this.world.resetProps();
@@ -1701,7 +1773,7 @@ export class Game {
       const at = d.spawns[p.id];
       if (!at) { p.alive = false; continue; }
       this.spawnPlayer(p, at, reset.has(p.id), d.freeArmor);
-      if (RESPAWN_KINDS.has(this.mode.kind)) this.giveSpawnLoadout(p, at);
+      if (RESPAWN_KINDS.has(this.mode.kind) || this.mode.kind === 'infect') this.giveSpawnLoadout(p, at);
     }
     this.refreshBombCarrier();
     this.action = null;
@@ -1712,6 +1784,8 @@ export class Game {
     }
     const lp = this.local;
     if (RESPAWN_KINDS.has(this.mode.kind)) this.hud.center(this.mode.name.toUpperCase(), goalText(this.mode), 3);
+    else if (this.zombies) this.hud.center('ZOMBIES', 'Earn points, buy guns off the walls, unlock doors. Stay alive.', 4);
+    else if (this.mode.kind === 'infect') this.hud.center(`ROUND ${d.round} OF ${this.mode.rounds}`, lp?.team === 1 ? 'You’re patient zero. Knife the survivors' : 'Survive. The infected only have blades', 3);
     else if (this.training) this.hud.center('TRAINING RANGE', `Press ${pad.label('buy')} for weapons and drills`, 3);
     else {
       const kind = this.mode.kind, site = d.bomb?.site || d.hostages?.[0]?.site;
@@ -1745,14 +1819,14 @@ export class Game {
       sfx.buy(); this.viewmodel.setWeapon(p.weaponId, p.char); this.hud.refreshBuy();
       const queued = this.pendingEquip?.indexOf(it) ?? -1;
       if (queued >= 0) this.pendingEquip.splice(queued, 1);
-      else this.saveLastLoadout();
+      else if (!this.zombies) this.saveLastLoadout();
     }
   }
 
   // ───────────────────────── networking ─────────────────────────
   bindNet() {
     const n = this.net;
-    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping'];
+    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
     for (const e of evs) n.on(e, (d) => this.onEvent(e, d));
     n.on('S', (d) => this.onStates(d));
     n.on('req', (d) => { if (this.isHost) this.handleRequest(d.type, d.data, d.from); });
@@ -1772,7 +1846,7 @@ export class Game {
 
   rosterPayload() {
     return [...this.players.values()].map((p) => ({
-      id: p.id, name: p.baseName || p.name, team: p.team, isBot: p.isBot, char: p.char, elo: p.elo, owner: p.owner, wasHuman: !!p.wasHuman,
+      id: p.id, name: p.baseName || p.name, team: p.team, isBot: p.isBot, char: p.baseChar || p.char, elo: p.elo, owner: p.owner, wasHuman: !!p.wasHuman, zombie: p.zombie,
     }));
   }
 
@@ -1780,7 +1854,7 @@ export class Game {
   snapshot() {
     const pstate = {};
     for (const p of this.players.values()) {
-      pstate[p.id] = { alive: p.alive, pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, hp: p.hp, armor: p.armor, helmet: p.helmet, gg: p.gg || 0 };
+      pstate[p.id] = { alive: p.alive, pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, hp: p.hp, armor: p.armor, helmet: p.helmet, gg: p.gg || 0, zt: p.ztype || null };
     }
     return { hostId: this.localId, state: this.state, roster: this.rosterPayload(), sync: this.syncPayload(), pstate, props: this.world.propState() };
   }
@@ -1792,7 +1866,7 @@ export class Game {
     if (d.hostId && d.hostId !== this.hostId) this.setHost(d.hostId);
     for (const r of d.roster) {
       const p = this.players.get(r.id) || this.addPlayer(r);
-      p.isBot = r.isBot; p.wasHuman = r.wasHuman;
+      p.isBot = r.isBot; p.wasHuman = r.wasHuman; p.zombie = !!r.zombie;
       p.owner = r.isBot ? d.hostId : r.id;
       p.isRemoteView = p.owner !== this.localId;
       if (p.team !== r.team) this.setTeam(p, r.team);
@@ -1815,6 +1889,7 @@ export class Game {
         const p = this.players.get(id);
         if (!p || p.isLocal) continue;
         p.gg = st2.gg; p.alive = st2.alive; p.hp = st2.hp;
+        if (st2.zt && this.zombies) this.zombies.restyle(p, st2.zt);
         if (st2.alive) p.snapTo(st2.pos[0], st2.pos[1], st2.pos[2], st2.yaw);
       }
       this.hud.center(this.spectator ? 'SPECTATING' : 'RECONNECTED', `${this.mode.name} · ${this.mapDef.name}`, 2.5);
@@ -1871,7 +1946,7 @@ export class Game {
     p.name = p.baseName + ' (bot)';
     p.isRemoteView = p.owner !== this.localId;
     if (this.isHost) {
-      this.brains.set(p.id, new BotBrain(this, p, this.opts.botLevel || 'normal'));
+      this.brains.set(p.id, this.makeBrain(p));
       this.net?.send('owner', { id: p.id, owner: this.hostId, isBot: true });
     }
   }
@@ -1902,7 +1977,7 @@ export class Game {
       if (!p.isBot) continue;
       p.owner = id;
       p.isRemoteView = p.owner !== this.localId;
-      if (this.isHost && !this.brains.has(p.id)) this.brains.set(p.id, new BotBrain(this, p, this.opts.botLevel || 'normal'));
+      if (this.isHost && !this.brains.has(p.id)) this.brains.set(p.id, this.makeBrain(p));
     }
   }
 
@@ -1920,7 +1995,7 @@ export class Game {
     if (this.isHost) {
       this.state.lossStreak = this.state.lossStreak || [0, 0];
       this.rules = new Rules(this);
-      if (RESPAWN_KINDS.has(this.mode.kind)) {
+      if (RESPAWN_KINDS.has(this.mode.kind) || this.mode.kind === 'infect') {
         for (const p of this.players.values()) if (!p.alive) this.rules.respawnQueue.set(p.id, 2);
       }
       this.net?.send('host', { id: this.localId });
@@ -2200,7 +2275,9 @@ export class Game {
     this.input.unlock();
     const lp = this.local;
     let result = 'draw';
-    if (SOLO_KINDS.has(this.mode.kind)) {
+    const wave = this.state.z?.wave || 0;
+    if (this.zombies) result = wave >= 10 ? 'win' : 'loss';
+    else if (SOLO_KINDS.has(this.mode.kind) || this.mode.kind === 'infect') {
       result = d.winner === this.localId ? 'win' : 'loss';
     } else if (d.winner >= 0 && lp) result = d.winner === lp.team ? 'win' : 'loss';
     if (d.reason === 'host-left' && d.winner === -2) result = 'draw';
@@ -2212,7 +2289,15 @@ export class Game {
       result, scores: d.scores, online: this.online,
     }));
     let eloChange = 0;
-    const score = this.mode.kind === 'ffa' ? `${myStats.k} kills`
+    if (this.zombies && !this.spectator) {
+      try {
+        const best = JSON.parse(localStorage.getItem('jps_zombies_best') || '{}');
+        if (wave > (best[this.mapDef.id] || 0)) { best[this.mapDef.id] = wave; localStorage.setItem('jps_zombies_best', JSON.stringify(best)); }
+      } catch { /* ignore */ }
+    }
+    const score = this.zombies ? `Wave ${wave}`
+      : this.mode.kind === 'infect' ? `${lp?.score || 0} points`
+      : this.mode.kind === 'ffa' ? `${myStats.k} kills`
       : this.mode.kind === 'gungame' ? `Weapon ${Math.min((lp?.gg || 0) + 1, GUN_GAME_ORDER.length)}/${GUN_GAME_ORDER.length}`
         : `${d.scores[lp?.team ?? 0]}-${d.scores[1 - (lp?.team ?? 0)]}`;
     (result === 'win' ? sfx.win : result === 'loss' ? sfx.lose : sfx.roundStart)();
@@ -2229,6 +2314,7 @@ export class Game {
       this.app.trackAchievements?.({
         mode: this.mode.id, map: this.mapDef.id, variant: this.variant, result, online: this.online, k: myStats.k, d: myStats.d, hs: myStats.hs,
         weapons: ms.weapons, nades: ms.nades, plants: ms.plants, defuses: ms.defuses, rescues: ms.rescues, knife, multi: ms.multi, streak: ms.streak, long: ms.long,
+        caps: ms.caps || 0, wave: this.zombies ? wave : 0,
         party: this.app.party?.inParty ? this.app.party.size : 1,
       });
     }

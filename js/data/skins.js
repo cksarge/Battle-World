@@ -51,6 +51,11 @@ export const WEAPON_SKINS = {
   s4_solar: { name: 'Solar Flare', rarity: 'legendary', pattern: 'fade', palette: ['#ffd23f', '#ff5a1f', '#8a1020'], emissive: '#ff7a3d', season: 's4', slot: 'legend' },
   s5_dusk: { name: 'Duskfall', rarity: 'epic', pattern: 'digital', palette: ['#1a1030', '#3a2060', '#6a3dff', '#0a0614'], season: 's5', slot: 'finish' },
   s5_void: { name: 'Voidwalker', rarity: 'legendary', pattern: 'circuit', palette: ['#05030a', '#c06cff'], emissive: '#c06cff', metal: '#0a0612', season: 's5', slot: 'legend' },
+  // Weapon mastery (js/data/mastery.js): unlocked per weapon at that weapon's mastery level.
+  m_bronze: { name: 'Mastery Bronze', rarity: 'rare', pattern: 'metal', palette: ['#a8693d'], metal: '#6b3f22', metalness: 1, roughness: 0.3, mastery: 3 },
+  m_silver: { name: 'Mastery Silver', rarity: 'epic', pattern: 'metal', palette: ['#c7d0d8'], metal: '#7d8791', metalness: 1, roughness: 0.2, mastery: 5 },
+  m_gold: { name: 'Mastery Gold', rarity: 'legendary', pattern: 'metal', palette: ['#e8bb3a'], metal: '#a8801f', metalness: 1, roughness: 0.16, mastery: 7 },
+  m_dark: { name: 'Dark Matter', rarity: 'legendary', pattern: 'circuit', palette: ['#07040f', '#ff4dff'], emissive: '#d04dff', metal: '#0a0612', mastery: 10 },
   apex: { name: 'Apex', rarity: 'legendary', pattern: 'fade', palette: ['#ffd23f', '#ff5a5a', '#c06cff'], emissive: '#ff7a3d', milestone: { stat: 'peak_elo', n: 1400, label: 'Reach Diamond (1400 ELO)' } },
 };
 
@@ -157,10 +162,12 @@ let seasonNotStarted = () => false;
 export function setSeasonGate(fn) { seasonNotStarted = fn; }
 export const seasonLocked = (def) => !!def?.season && seasonNotStarted(def.season);
 
-export function owns(inv, kind, id, stats) {
+// `masteryLevel` is the mastery level of the weapon a mastery finish would go on (see js/data/mastery.js).
+export function owns(inv, kind, id, stats, masteryLevel = 0) {
   const k = KINDS[kind], def = k?.defs[id];
   if (!def || seasonLocked(def)) return false;
   if (def.starter) return true;
+  if (def.mastery) return masteryLevel >= def.mastery;
   if (def.milestone) return milestoneMet(def, stats);
   return (inv?.[k.key] || []).includes(id);
 }
@@ -174,17 +181,17 @@ export function starterInventory() {
 export function normalizeInventory(inv) {
   const base = starterInventory(), out = {};
   for (const k of Object.values(KINDS)) {
-    out[k.key] = [...new Set([...base[k.key], ...((inv && inv[k.key]) || []).filter((id) => k.defs[id] && !k.defs[id].milestone)])];
+    out[k.key] = [...new Set([...base[k.key], ...((inv && inv[k.key]) || []).filter((id) => k.defs[id] && !k.defs[id].milestone && !k.defs[id].mastery)])];
   }
   return out;
 }
 
 // Rolls one random item. Already-owned items are skipped where possible so drops feel fresh.
-// Milestone and season items never drop.
+// Milestone, mastery and season items never drop.
 export function rollDrop(inv, rng = Math.random) {
   const pool = [];
   for (const [kind, k] of Object.entries(KINDS)) {
-    for (const [id, d] of Object.entries(k.defs)) if (!d.starter && !d.milestone && !d.season) pool.push({ kind, id, rarity: d.rarity, name: d.name });
+    for (const [id, d] of Object.entries(k.defs)) if (!d.starter && !d.milestone && !d.season && !d.mastery) pool.push({ kind, id, rarity: d.rarity, name: d.name });
   }
   const owned = (it) => (inv[KINDS[it.kind].key] || []).includes(it.id);
   const fresh = pool.filter((it) => !owned(it));

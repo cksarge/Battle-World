@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CELL } from '../engine/world.js';
 import { GUN_GAME_ORDER, isKnife } from '../data/weapons.js';
-import { RESPAWN_KINDS, BOMB_KINDS, econFor } from '../data/modes.js';
+import { RESPAWN_KINDS, BOMB_KINDS, SOLO_KINDS, OBJECTIVE_KINDS, econFor } from '../data/modes.js';
 
 // Host-only match logic. Everything it decides is broadcast as events that every client applies.
 export class Rules {
@@ -17,6 +17,7 @@ export class Rules {
 
   begin() {
     if (this.mode.kind === 'training') return this.startTraining();
+    if (this.mode.kind === 'zombies') return this.g.zombies.begin();
     const s = this.s;
     s.phase = 'warmup';
     s.time = this.g.online ? 6 : 3;
@@ -36,9 +37,15 @@ export class Rules {
 
     if (s.phase === 'warmup') {
       if (g.waitingForPlayers() && s.time > -12) return;
-      if (s.time <= 0) RESPAWN_KINDS.has(this.mode.kind) ? this.startFFA() : this.startRound();
+      if (s.time <= 0) {
+        if (this.mode.kind === 'zombies') g.zombies.start();
+        else if (this.mode.kind === 'infect') this.startInfectRound();
+        else RESPAWN_KINDS.has(this.mode.kind) ? this.startFFA() : this.startRound();
+      }
       return;
     }
+    if (this.mode.kind === 'zombies') return g.zombies.hostUpdate(dt);
+    if (this.mode.kind === 'infect') return this.updateInfect(dt);
     if (RESPAWN_KINDS.has(this.mode.kind)) return this.updateFFA(dt);
     if (s.phase === 'buy' && s.time <= 0) {
       s.phase = 'live'; s.time = this.mode.roundTime;
@@ -289,7 +296,7 @@ export class Rules {
     s.phase = 'live'; s.time = this.mode.timeLimit; s.round = 1; s.scores = [0, 0];
     s.bomb = { state: 'none' };
     const spawns = {};
-    const teamOf = (id) => (this.mode.kind === 'tdm' ? g.players.get(id)?.team : id);
+    const teamOf = (id) => (SOLO_KINDS.has(this.mode.kind) ? id : g.players.get(id)?.team);
     // Everyone appears at once, so place players one by one, each out of sight of those already placed.
     for (const p of g.players.values()) {
       p.gg = 0;
@@ -297,8 +304,9 @@ export class Rules {
       spawns[p.id] = this.respawnPoint(p, enemies) || this.respawnPoint(p, enemies, true);
     }
     this.faceAwayFromEnemies(spawns, teamOf);
+    if (g.objectives) s.obj = g.objectives.initialState();
     g.broadcast('round', {
-      round: 1, time: s.time, scores: [0, 0], spawns, resetKit: [...g.players.keys()], money: {}, bomb: s.bomb,
+      round: 1, time: s.time, scores: [0, 0], spawns, resetKit: [...g.players.keys()], money: {}, bomb: s.bomb, obj: s.obj,
       teams: Object.fromEntries([...g.players.values()].map((p) => [p.id, p.team])), freeArmor: true, phase: 'live',
     });
   }
@@ -312,7 +320,7 @@ export class Rules {
     if (!enemies) enemies = [...g.players.values()].filter((o) => o !== p && o.alive && g.canDamage(p, o)).map((o) => [o.pos.x, o.pos.y, o.pos.z]);
     const center = [w.size.x / 2, w.size.z / 2];
     let cells;
-    if (this.mode.kind === 'tdm') {
+    if (!SOLO_KINDS.has(this.mode.kind) && this.mode.kind !== 'infect') {
       const zone = w.spawnCells[p.team] || w.allFloor;
       const zc = zone.reduce((a, c) => [a[0] + c.x / zone.length, a[1] + c.y / zone.length], [0, 0]);
       const shuffled = [...zone].sort(() => Math.random() - 0.5);
@@ -339,9 +347,12 @@ export class Rules {
     return behind || (force ? least?.pt : null);
   }
 
-  onKill(killer, victim, weapon) {
+  onKill(killer, victim, weapon, part) {
     const kind = this.mode.kind, s = this.s;
+    if (kind === 'zombies') return this.g.zombies.onKill(killer, victim, weapon, part);
+    if (kind === 'infect') return this.onInfectKill(killer, victim);
     if (RESPAWN_KINDS.has(kind)) {
+      this.g.objectives?.onKill(victim);
       if (s.phase !== 'live') return;
       // Humans wait long enough to watch the kill cam; bots come straight back.
       this.respawnQueue.set(victim.id, victim.isBot ? (kind === 'gungame' ? 1.5 : 2.5) : (kind === 'gungame' ? 3.6 : 4.2));
@@ -377,8 +388,9 @@ export class Rules {
     }
   }
 
-  updateFFA(dt) {
-    const s = this.s, g = this.g;
+  // Brings queued players back once a spot with no enemy on screen is free.
+  tickRespawns(dt) {
+    const g = this.g;
     for (const [id, t] of this.respawnQueue) {
       const nt = t - dt;
       if (nt > 0) { this.respawnQueue.set(id, nt); continue; }
@@ -390,14 +402,88 @@ export class Rules {
       this.respawnQueue.delete(id);
       g.broadcast('respawn', { id, at });
     }
+  }
+
+  updateFFA(dt) {
+    const s = this.s, g = this.g;
+    this.tickRespawns(dt);
+    if (s.phase === 'over') return;
+    g.objectives?.hostUpdate(dt);
+    if (s.phase === 'over') return;
     if (s.time <= 0) {
       const kind = this.mode.kind;
-      if (kind === 'tdm') return this.finish(s.scores[0] === s.scores[1] ? -1 : s.scores[0] > s.scores[1] ? 0 : 1, 'time');
+      if (kind === 'tdm' || OBJECTIVE_KINDS.has(kind)) return this.finish(s.scores[0] === s.scores[1] ? -1 : s.scores[0] > s.scores[1] ? 0 : 1, 'time');
       let best = null;
       const rank = (p) => (kind === 'gungame' ? (p.gg || 0) * 1000 + p.kills : p.kills);
       for (const p of g.players.values()) if (!best || rank(p) > rank(best)) best = p;
       this.finish(best ? best.id : -1, 'time');
     }
+  }
+
+  // ───────────── infection ─────────────
+  // Everyone starts as a survivor except patient zero. Survivors who die turn and come back infected.
+  // The round ends when nobody is left to infect, or the clock runs out (every survivor scores 3).
+  startInfectRound() {
+    const s = this.s, g = this.g, m = this.mode;
+    Object.assign(s, { phase: 'live', time: m.roundTime, bomb: { state: 'none' }, hostages: [] });
+    s.round++;
+    this.respawnQueue.clear();
+    const all = [...g.players.values()];
+    // Patient zero is someone who hasn't started infected yet, where possible.
+    this.zeroes ||= new Set();
+    let pool = all.filter((p) => !this.zeroes.has(p.id));
+    if (!pool.length) { this.zeroes.clear(); pool = all; }
+    const zero = pool[Math.floor(Math.random() * pool.length)];
+    this.zeroes.add(zero?.id);
+    const teams = Object.fromEntries(all.map((p) => [p.id, p === zero ? 1 : 0]));
+    const spawns = {};
+    for (const p of all) {
+      const enemies = Object.entries(spawns).filter(([id]) => teams[id] !== teams[p.id]).map(([, e]) => e);
+      spawns[p.id] = this.respawnPoint(p, enemies) || this.respawnPoint(p, enemies, true);
+    }
+    this.faceAwayFromEnemies(spawns, (id) => teams[id]);
+    g.broadcast('round', { round: s.round, time: s.time, scores: s.scores, spawns, resetKit: all.map((p) => p.id), money: {}, bomb: s.bomb, teams, freeArmor: true, phase: 'live' });
+  }
+
+  updateInfect(dt) {
+    const s = this.s, g = this.g;
+    if (s.phase === 'post') { if (s.time <= 0) this.afterInfectRound(); return; }
+    if (s.phase !== 'live') return;
+    this.tickRespawns(dt);
+    if (s.time <= 0) {
+      const list = {};
+      for (const p of g.players.values()) if (p.team === 0 && p.alive) { p.score = (p.score || 0) + 3; list[p.id] = p.score; }
+      g.broadcast('points', { list });
+      this.endInfectRound(0);
+    }
+  }
+
+  onInfectKill(killer, victim) {
+    const g = this.g;
+    if (this.s.phase !== 'live') return;
+    if (victim.team === 0) {
+      if (killer && killer !== victim && killer.team === 1) killer.score = (killer.score || 0) + 1;
+      g.broadcast('infect', { id: victim.id, by: killer?.id, score: killer?.score });
+      this.respawnQueue.set(victim.id, victim.isBot ? 2.5 : 3.5);
+      if (![...g.players.values()].some((p) => p.team === 0)) this.endInfectRound(1);
+    } else this.respawnQueue.set(victim.id, victim.isBot ? 2 : 3);
+  }
+
+  endInfectRound(winner) {
+    const s = this.s;
+    s.phase = 'post'; s.time = 5;
+    s.scores[winner]++;
+    this.respawnQueue.clear();
+    this.g.broadcast('roundEnd', { winner, reason: winner ? 'infected' : 'survived', scores: s.scores, money: {}, over: s.round >= this.mode.rounds });
+  }
+
+  afterInfectRound() {
+    const g = this.g;
+    if (this.s.round < this.mode.rounds) return this.startInfectRound();
+    let best = null;
+    const rank = (p) => (p.score || 0) * 1000 + p.kills;
+    for (const p of g.players.values()) if (!best || rank(p) > rank(best)) best = p;
+    this.finish(best ? best.id : -1, 'score');
   }
 
   // ───────────── requests from clients ─────────────

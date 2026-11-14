@@ -9,12 +9,14 @@ import { MenuScene } from './ui/menuscene.js';
 import { PartyManager } from './net/party.js';
 import { initAudio } from './engine/audio.js';
 import { pad, PadNav, isTouchOnly, applyPadSettings, padHelp } from './engine/gamepad.js';
-import { normalizeInventory, rollDrop, addToInventory, KINDS } from './data/skins.js';
+import { normalizeInventory, rollDrop, addToInventory, KINDS, WEAPON_SKINS } from './data/skins.js';
+import { WEAPONS } from './data/weapons.js';
 import { applySeasonRows, currentSeason, seasonById, seasonTrack, tierFor, rankedReward, RANKED_REWARD_WINS } from './data/seasons.js';
 import { normalizeProgress, applyMatch } from './data/challenges.js';
 import { applyAccess } from './ui/access.js';
 import { loadLocalMaps, setFeatured, registerRow, isCustom } from './data/custommaps.js';
 import { normalizeAchievements, mergeAchievements, applyMatchAchievements, checkUnlocks } from './data/achievements.js';
+import { addMastery } from './data/mastery.js';
 
 const boot = document.getElementById('boot');
 const bootBar = boot.querySelector('.boot-bar div');
@@ -427,6 +429,12 @@ class App {
   // Called after every finished match (not the training range).
   trackAchievements(m) {
     this.achievements = normalizeAchievements(this.achievements);
+    const ups = addMastery(this.achievements, m.weapons);
+    for (const u of ups.slice(0, 3)) {
+      const finish = Object.values(WEAPON_SKINS).find((d) => d.mastery === u.level);
+      this.ui.toast(`${WEAPONS[u.weapon]?.name || u.weapon} reached mastery level ${u.level}${finish ? `: ${finish.name} finish unlocked for it` : ''}`, 'good', null, 6000);
+    }
+    if (ups.length > 3) this.ui.toast(`${ups.length - 3} more weapons levelled up. See Stats → Mastery`, 'good', null, 6000);
     const got = applyMatchAchievements(this.achievements, m, this.profile);
     this.announceAchievements(got);
     this.saveAchievements();
@@ -536,7 +544,7 @@ class App {
   startOffline(o) {
     if (this.maintenanceShown) return;
     const me = this.me();
-    const payload = buildMatch({ mode: o.mode, map: o.map, variant: o.variant || 'day', humans: [{ id: me.id, name: me.name, elo: me.elo, char: me.char }], hostId: me.id, fillBots: !o.noBots, botLevel: o.botLevel });
+    const payload = buildMatch({ mode: o.mode, map: o.map, variant: o.variant || 'day', humans: [{ id: me.id, name: me.name, elo: me.elo, char: me.char }], hostId: me.id, fillBots: !o.noBots, botLevel: o.botLevel, squad: o.squad || 0 });
     this.runGame(payload, null);
   }
 

@@ -197,6 +197,17 @@ export const sfx = {
   bounce(pos) { if (!ctx) return; const dst = out(pos, 0.3, 30); if (!dst) return; tone(dst, ctx.currentTime, 0.05, { type: 'triangle', freq: 700, gain: 0.5 }); },
   beep(pos) { cue('beep', pos); if (!ctx) return; const dst = out(pos, 0.5, 120); if (!dst) return; tone(dst, ctx.currentTime, 0.12, { type: 'square', freq: 1950, gain: 0.35 }); },
   plantDone(pos) { if (!ctx) return; const dst = out(pos, 0.6, 120); if (!dst) return; const t = ctx.currentTime; for (let i = 0; i < 3; i++) tone(dst, t + i * 0.09, 0.07, { type: 'square', freq: 1500, gain: 0.3 }); },
+  // Zombies: a low groan, a claw swipe, and the stinger between waves.
+  groan(pos) {
+    cue('step', pos); if (!ctx) return; const dst = out(pos, 0.5, 30); if (!dst) return; const t = ctx.currentTime, f = 70 + Math.random() * 50;
+    tone(dst, t, 0.9 + Math.random() * 0.5, { type: 'sawtooth', freq: f, freqEnd: f * 0.7, gain: 0.22, attack: 0.15 });
+    noise(dst, t, 0.8, { type: 'bandpass', freq: 380, q: 3, gain: 0.35, attack: 0.1 });
+  },
+  swipe(pos) { cue('knife', pos); if (!ctx) return; const dst = out(pos, 0.5, 20); if (!dst) return; noise(dst, ctx.currentTime, 0.16, { type: 'bandpass', freq: 1400, freqEnd: 500, q: 1.5, gain: 0.8 }); },
+  wave(start) {
+    if (!ctx) return; const d = out(null, 0.45); const t = ctx.currentTime;
+    (start ? [196, 185, 147, 98] : [147, 196, 247, 294]).forEach((f, i) => tone(d, t + i * 0.22, 0.9, { type: 'sawtooth', freq: f, gain: 0.25, attack: 0.04 }));
+  },
   click() { if (!ctx) return; tone(out(null, 0.2), ctx.currentTime, 0.03, { type: 'square', freq: 2400, gain: 0.3 }); },
   buy() { if (!ctx) return; const d = out(null, 0.3); const t = ctx.currentTime; tone(d, t, 0.06, { freq: 900, gain: 0.4 }); tone(d, t + 0.06, 0.08, { freq: 1350, gain: 0.4 }); },
   roundStart() { if (!ctx) return; const d = out(null, 0.35); const t = ctx.currentTime; [523, 659, 784].forEach((f, i) => tone(d, t + i * 0.09, 0.25, { type: 'triangle', freq: f, gain: 0.5 })); },

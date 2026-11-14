@@ -1,5 +1,5 @@
 import { Room, buildMatch, newId } from './realtime.js';
-import { MODES, SOLO_KINDS } from '../data/modes.js';
+import { MODES, POOL_KINDS } from '../data/modes.js';
 
 const FILL_AFTER = 20; // seconds before a non-ranked queue starts with bots filling gaps
 
@@ -34,7 +34,7 @@ const groupIds = (e) => (e.group?.length ? e.group : [e]).map((x) => x.id);
 
 function needFor(mode) {
   const m = MODES[mode];
-  return SOLO_KINDS.has(m.kind) ? m.maxPlayers : m.teamSize * 2;
+  return POOL_KINDS.has(m.kind) ? m.maxPlayers : m.teamSize * 2;
 }
 
 // Presence-based queue: the longest-waiting player forms the match and hosts it.
@@ -68,7 +68,7 @@ export class Matchmaker {
   // Entries that fit in one match, oldest first. Team modes also need each group to fit on a team.
   pick(list) {
     const m = MODES[this.mode], need = needFor(this.mode), out = [];
-    const room = SOLO_KINDS.has(m.kind) ? null : [m.teamSize, m.teamSize];
+    const room = POOL_KINDS.has(m.kind) ? null : [m.teamSize, m.teamSize];
     let total = 0;
     for (const e of list) {
       const g = e.group?.length ? e.group : [e];
@@ -88,8 +88,9 @@ export class Matchmaker {
     const leader = list[0]?.id === me.id;
     const waited = (Date.now() - this.started) / 1000;
     const humans = list.reduce((n, e) => n + (e.group?.length || 1), 0);
-    const canFill = !m.ranked && humans >= 2 && waited >= FILL_AFTER;
-    this.onUpdate?.({ count: humans, need, waited, leader, canForce: leader && !m.ranked && humans >= 2 });
+    // Co-op zombies can start with whoever is waiting (even alone) once the fill timer runs out.
+    const canFill = !m.ranked && humans >= (m.coop ? 1 : 2) && waited >= FILL_AFTER;
+    this.onUpdate?.({ count: humans, need, waited, leader, canForce: leader && !m.ranked && humans >= (m.coop ? 1 : 2) });
     if (!leader) return;
     const { total } = this.pick(list);
     if (total >= need || canFill) this.form(list);
@@ -97,7 +98,7 @@ export class Matchmaker {
 
   forceStart() {
     const list = this.queue();
-    if (list.reduce((n, e) => n + (e.group?.length || 1), 0) >= 2) this.form(list);
+    if (list.reduce((n, e) => n + (e.group?.length || 1), 0) >= (MODES[this.mode].coop ? 1 : 2)) this.form(list);
   }
 
   async form(list) {
@@ -202,7 +203,7 @@ export class Lobby {
     const banned = await this.bans.verify(this.members().map((x) => x.id));
     if (banned.size) { this.onChange?.(); return; }
     const humans = this.members().map((x) => ({ id: x.id, name: x.name, elo: x.elo, char: x.char, team: x.team }));
-    const payload = buildMatch({ mode: this.cfg.mode, map: this.cfg.map, variant: this.cfg.variant || 'day', humans, hostId: me.id, fillBots: this.cfg.fillBots, botLevel: this.cfg.botLevel });
+    const payload = buildMatch({ mode: this.cfg.mode, map: this.cfg.map, variant: this.cfg.variant || 'day', humans, hostId: me.id, fillBots: this.cfg.fillBots, botLevel: this.cfg.botLevel, squad: 4 });
     this.started = true;
     this.room.send('start', payload);
     setTimeout(() => this.onStart(payload), 150);

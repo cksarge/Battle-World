@@ -56,8 +56,8 @@ export const OPERATORS = [
 export function randomChar(rng = Math.random) {
   const pick = (a) => a[Math.floor(rng() * a.length)];
   const base = pick(OPERATORS).char;
-  // Season exclusives stay off bots so nobody sees them before they can be earned.
-  const open = (defs) => Object.keys(defs).filter((id) => !defs[id].season);
+  // Season exclusives stay off bots so nobody sees them before they can be earned (mastery finishes too).
+  const open = (defs) => Object.keys(defs).filter((id) => !defs[id].season && !defs[id].mastery);
   const finishes = open(WEAPON_SKINS), outfits = open(OUTFITS);
   const skins = {};
   for (const w of Object.keys(WEAPONS)) if (rng() < 0.35) skins[w] = pick(finishes);

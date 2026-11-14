@@ -1,4 +1,6 @@
-import { MODES, rankBadge, rankFor, levelFor, RANKS, SOLO_KINDS, SIDED_KINDS, needsSites, goalText } from '../data/modes.js';
+import { MODES, rankBadge, rankFor, levelFor, RANKS, POOL_KINDS, SIDED_KINDS, needsSites, goalText } from '../data/modes.js';
+import { SQUAD_MAX, PERKS as ZPERKS } from '../data/zombies.js';
+import { buildMatch } from '../net/realtime.js';
 import { PERKS, OPERATORS, CHAR_OPTIONS, sanitizeChar } from '../data/characters.js';
 import { WEAPONS, CLASS_NAMES, itemInfo } from '../data/weapons.js';
 import { RARITIES, KINDS, owns } from '../data/skins.js';
@@ -23,14 +25,17 @@ import { seasonById, fmtDate } from '../data/seasons.js';
 import { censor } from '../data/profanity.js';
 import { PALETTES, applyAccess } from './access.js';
 import { ACHIEVEMENTS, TIERS, MAX_POINTS, normalizeAchievements, progressOf, points } from '../data/achievements.js';
+import { masteryInfo, masteryLevel, MAX_LEVEL } from '../data/mastery.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const kd = (k, d) => (d ? (k / d).toFixed(2) : k ? k.toFixed(2) : '0.00');
 const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago'; };
 const QUAD_MODES = ['ranked', 'duo', 'bomb', 'tdm'];
-const MORE_MODES = ['hostage', 'retake', 'duel', 'gungame', 'ffa'];
-const OFFLINE_MODES = ['duel', 'duo', 'bomb', 'hostage', 'retake', 'tdm', 'gungame', 'ffa'];
+const MORE_MODES = ['dom', 'koth', 'ctf', 'hostage', 'retake', 'duel', 'infection', 'gungame', 'ffa'];
+const OFFLINE_MODES = ['duel', 'duo', 'bomb', 'hostage', 'retake', 'tdm', 'dom', 'koth', 'ctf', 'infection', 'gungame', 'ffa'];
+// Custom lobbies can also run co-op zombies.
+const LOBBY_MODES = [...OFFLINE_MODES, 'zombies'];
 // Official maps, then featured community maps, then maps downloaded to this device (the test draft never).
 const playMaps = () => Object.values(MAPS).filter((m) => !m.training && m.id !== 'draft').sort((a, b) => (!!a.custom - !!b.custom) || (!!b.featured - !!a.featured));
 const RESEND_COOLDOWN = 60; // seconds between auth emails (matches Supabase's default per-user limit)
@@ -51,7 +56,7 @@ const WIDE = new Set(['season', 'stats', 'replays', 'workshop', 'leaderboard', '
 const ADMIN_NAV = ['admin', 'Admin', 'Reports, players and game switches'];
 const ARMORY_KINDS = [['finish', 'Finishes'], ['outfit', 'Outfits'], ['card', 'Calling cards'], ['effect', 'Kill effects'], ['emote', 'Emotes']];
 const WHEEL = ['Up', 'Right', 'Down', 'Left'];
-const SIZE_LABEL = (m) => (SOLO_KINDS.has(m.kind) ? `${m.maxPlayers} players` : `${m.teamSize}v${m.teamSize}`);
+const SIZE_LABEL = (m) => (m.coop ? `1–${m.maxPlayers} co-op` : POOL_KINDS.has(m.kind) ? `${m.maxPlayers} players` : `${m.teamSize}v${m.teamSize}`);
 
 function emailCooldownLeft() {
   let sent = 0;
@@ -77,6 +82,7 @@ export class UI {
     this.onlineMode = 'ranked';
     this.allModes = false;
     this.offline = { mode: 'bomb', map: 'dustline', variant: 'day', botLevel: 'normal' };
+    this.zmb = { map: 'harbor', variant: 'night', botLevel: 'normal', squad: 1 };
     this.armoryKind = 'finish';
     this.armoryWeapon = 'ar7';
     this.emoteSlot = 0;
@@ -122,7 +128,13 @@ export class UI {
     return { matches: on.length, wins: on.filter((m) => m.result === 'win').length, kills: on.reduce((a, m) => a + m.k, 0), headshots: on.reduce((a, m) => a + m.hs, 0), peak_elo: 1000, ranked_wins: 0 };
   }
 
-  owned(kind, id) { return owns(this.app.inventory, kind, id, this.milestoneStats()); }
+  // Mastery finishes depend on the weapon: pass it, or leave it out to ask "on any weapon".
+  owned(kind, id, weapon = null) {
+    const def = KINDS[kind]?.defs[id];
+    let lvl = 0;
+    if (def?.mastery) lvl = weapon ? masteryLevel(this.app.achievements, weapon) : Math.max(...Object.keys(WEAPONS).map((w) => masteryLevel(this.app.achievements, w)));
+    return owns(this.app.inventory, kind, id, this.milestoneStats(), lvl);
+  }
 
   // The squad shown in the 3D stage: you, then party members.
   squad() {
@@ -614,8 +626,8 @@ export class UI {
     el.innerHTML = `
       ${active ? `<div class="m-rejoin"><div><b>Your match is still running</b><span>${esc(am?.name || active.payload.mode)} on ${esc(MAPS[active.payload.map]?.name || active.payload.map)}. A bot is playing for you.</span></div>
         <button class="btn small primary" id="rejoin">Reconnect</button><button class="btn small ghost" id="rejoin-x">Dismiss</button></div>` : ''}
-      <div class="m-switch" role="tablist"><button data-src="online" class="${src === 'online' ? 'on' : ''}">Online</button><button data-src="offline" class="${src === 'offline' ? 'on' : ''}">Versus bots</button></div>
-      ${src === 'online' ? `
+      <div class="m-switch" role="tablist"><button data-src="online" class="${src === 'online' ? 'on' : ''}">Online</button><button data-src="offline" class="${src === 'offline' ? 'on' : ''}">Versus bots</button><button data-src="zombies" class="${src === 'zombies' ? 'on' : ''}">Zombies</button></div>
+      ${src === 'zombies' ? this.zombiesHtml() : src === 'online' ? `
         ${online ? '' : `<div class="m-note">Online play needs an account so your rank and stats can be saved. <button class="btn small primary" id="signin">Sign in</button></div>`}
         <div class="mquads ${online ? '' : 'off'}">${QUAD_MODES.map((id) => quad(id)).join('')}</div>
         <button class="m-allmodes ${online ? '' : 'off'} ${moreSel ? 'has-sel' : ''}" id="all-modes" aria-expanded="${showMore}">All modes<span>${showMore ? '−' : '+'}</span></button>
@@ -638,12 +650,18 @@ export class UI {
         <button class="deploy-btn" id="deploy" ${src === 'online' && (!online || !isLeader) ? 'disabled' : ''}></button>
       </div>`;
     const $ = (s) => el.querySelector(s);
-    el.querySelectorAll('[data-src]').forEach((b) => { b.onclick = () => { this.source = b.dataset.src; if (this.source === 'offline') { this.scene?.show(o.map); this.footMap(); } this.renderPlay(el); }; });
+    el.querySelectorAll('[data-src]').forEach((b) => { b.onclick = () => {
+      this.source = b.dataset.src;
+      const show = this.source === 'offline' ? o.map : this.source === 'zombies' ? this.zmb.map : null;
+      if (show) { this.scene?.show(show); this.footMap(); }
+      this.renderPlay(el);
+    }; });
     if (active) {
       $('#rejoin').onclick = () => app.rejoinMatch();
       $('#rejoin-x').onclick = () => { app.clearActiveMatch(); this.renderPlay(el); };
     }
     const info = $('#deploy-info'), btn = $('#deploy');
+    if (src === 'zombies') return this.bindZombies(el, info, btn);
     if (src === 'online') {
       $('#signin')?.addEventListener('click', () => this.showAuth());
       el.querySelectorAll('[data-mode]').forEach((b) => { b.onclick = () => { this.onlineMode = b.dataset.mode; this.renderPlay(el); }; });
@@ -674,11 +692,63 @@ export class UI {
       el.querySelectorAll('#off-diff button').forEach((b) => { b.onclick = () => { o.botLevel = b.dataset.d; this.renderPlay(el); }; });
       el.querySelectorAll('#off-var button').forEach((b) => { b.onclick = () => { o.variant = b.dataset.v; this.renderPlay(el); }; });
       const m = MODES[o.mode], map = MAPS[o.map];
-      const n = SOLO_KINDS.has(m.kind) ? 5 : m.teamSize * 2 - 1;
+      const n = POOL_KINDS.has(m.kind) ? (m.kind === 'infect' ? m.maxPlayers - 1 : 5) : m.teamSize * 2 - 1;
       info.innerHTML = `<b>${esc(m.name)} on ${esc(map.name)}${o.variant !== 'day' ? ' · ' + esc(variantName(map, o.variant)) : ''}</b><span>${n} ${o.botLevel} bot${n > 1 ? 's' : ''}. ${esc(map.desc)}</span>`;
       btn.textContent = 'Deploy';
       btn.onclick = () => app.startOffline({ ...o });
     }
+  }
+
+  // ───────────────────────── zombies ─────────────────────────
+  // Its own tab: solo with bot squadmates, with your party, a co-op queue, or a co-op lobby.
+  zombiesHtml() {
+    const z = this.zmb, app = this.app;
+    if (!MAPS[z.map] || z.map === 'draft') z.map = 'harbor';
+    let best = {};
+    try { best = JSON.parse(localStorage.getItem('jps_zombies_best') || '{}'); } catch { /* ignore */ }
+    const party = app.party, inParty = !!party?.inParty;
+    return `
+      <div class="m-zombies">
+        <b>Hold out against the horde</b>
+        <span>Every wave is bigger and tougher. Shoot zombies for points, then spend them: guns chalked on the walls, a supply crate with a random gun,
+        four tonics (${Object.values(ZPERKS).map((d) => esc(d.short)).join(', ')}), the Forge that upgrades your gun, and locked doors that open up more of the map.
+        Fallen teammates can be revived; everyone comes back when a wave ends. Power-ups drop from the dead.</span>
+      </div>
+      <div class="m-label">Map</div>
+      <div class="map-strip">${playMaps().map((m) => `<button class="map-tile ${z.map === m.id ? 'sel' : ''}" data-zmap="${m.id}" title="${esc(m.desc)}"><img src="${mapPreview(m.id)}" alt=""><span>${esc(m.name)}${best[m.id] ? ` <i class="map-tag">Best: wave ${best[m.id]}</i>` : ''}</span></button>`).join('')}</div>
+      <div class="m-label">Conditions</div>
+      <div class="seg" id="z-var">${Object.keys(VARIANTS).map((k) => `<button data-v="${k}" class="${z.variant === k ? 'sel' : ''}">${esc(variantName(MAPS[z.map], k))}</button>`).join('')}</div>
+      <div class="m-label">Bot squadmates${inParty ? ' (fill empty spots in your party)' : ''}</div>
+      <div class="seg" id="z-squad">${[0, 1, 2, 3].map((n) => `<button data-n="${n}" class="${z.squad === n ? 'sel' : ''}">${n ? n : 'None'}</button>`).join('')}</div>
+      <div class="m-label">Squadmate skill</div>
+      <div class="seg" id="z-diff">${Object.keys(BOT_LEVELS).map((k) => `<button data-d="${k}" class="${z.botLevel === k ? 'sel' : ''}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
+      ${app.user ? `<div class="m-join"><button class="btn small" id="z-queue">Find a co-op squad</button><button class="btn small ghost" id="z-lobby">Create a co-op lobby</button></div>` : '<p class="m-sub">Sign in to play zombies with other people.</p>'}`;
+  }
+
+  bindZombies(el, info, btn) {
+    const z = this.zmb, app = this.app, $ = (q) => el.querySelector(q);
+    const party = app.party, inParty = !!party?.inParty, isLeader = !inParty || party.isLeader;
+    el.querySelectorAll('[data-zmap]').forEach((b) => { b.onclick = () => { z.map = b.dataset.zmap; this.scene?.show(z.map); this.footMap(); this.renderPlay(el); }; });
+    el.querySelectorAll('#z-var button').forEach((b) => { b.onclick = () => { z.variant = b.dataset.v; this.renderPlay(el); }; });
+    el.querySelectorAll('#z-squad button').forEach((b) => { b.onclick = () => { z.squad = +b.dataset.n; this.renderPlay(el); }; });
+    el.querySelectorAll('#z-diff button').forEach((b) => { b.onclick = () => { z.botLevel = b.dataset.d; this.renderPlay(el); }; });
+    $('#z-queue')?.addEventListener('click', () => this.startQueue('zombies'));
+    $('#z-lobby')?.addEventListener('click', () => this.createLobby({ mode: 'zombies', map: z.map, variant: z.variant }));
+    const map = MAPS[z.map], withParty = inParty && party.size > 1;
+    const bots = Math.min(z.squad, SQUAD_MAX - (withParty ? party.size : 1));
+    info.innerHTML = `<b>Zombies on ${esc(map.name)}${z.variant !== 'day' ? ' · ' + esc(variantName(map, z.variant)) : ''}</b><span>${withParty ? `Your party of ${party.size}` : 'You'}${bots > 0 ? ` and ${bots} ${z.botLevel} bot${bots > 1 ? 's' : ''}` : ', alone'}. ${withParty && !isLeader ? 'Only your party leader can start.' : ''}</span>`;
+    btn.textContent = 'Deploy';
+    btn.disabled = withParty && !isLeader;
+    if (withParty && party.size > SQUAD_MAX) info.innerHTML += `<span class="m-party-line">Zombies squads are up to ${SQUAD_MAX} players. Your party has ${party.size}.</span>`;
+    btn.onclick = () => {
+      if (withParty && party.size > SQUAD_MAX) { this.toast(`Zombies squads are up to ${SQUAD_MAX} players`, 'bad'); return; }
+      if (!withParty) { app.startOffline({ mode: 'zombies', map: z.map, variant: z.variant, botLevel: z.botLevel, squad: z.squad, noBots: !z.squad }); return; }
+      if (this.blockedByMaintenance()) return;
+      const me = app.me();
+      const payload = buildMatch({ mode: 'zombies', map: z.map, variant: z.variant, humans: party.group(), hostId: me.id, fillBots: z.squad > 0, botLevel: z.botLevel, squad: z.squad });
+      party.relayMatch(payload);
+      app.startOnline(payload);
+    };
   }
 
   // ───────────────────────── queue ─────────────────────────
@@ -697,7 +767,7 @@ export class UI {
       onUpdate: (s) => {
         const t = Math.floor(s.waited);
         modal.querySelector('#q-status').textContent = `Searching ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-        modal.querySelector('#q-sub').textContent = `${s.count} of ${s.need} players found${m.ranked ? '' : s.count >= 2 ? '. Bots fill the empty slots at 0:20.' : '. Waiting for at least one more player.'}`;
+        modal.querySelector('#q-sub').textContent = `${s.count} of ${s.need} players found${m.ranked ? '' : m.coop ? '. The squad sets off with whoever is here at 0:20.' : s.count >= 2 ? '. Bots fill the empty slots at 0:20.' : '. Waiting for at least one more player.'}`;
         modal.querySelector('#q-force').classList.toggle('hidden', !s.canForce);
       },
       onMatch: (payload) => { this.queue = null; modal.remove(); this.app.startOnline(payload); },
@@ -710,10 +780,10 @@ export class UI {
   }
 
   // ───────────────────────── lobbies ─────────────────────────
-  async createLobby() { await this.openLobby(Lobby.newCode(), true); }
+  async createLobby(cfg = null) { await this.openLobby(Lobby.newCode(), true, cfg); }
   async joinLobby(code) { await this.openLobby(code, false); }
 
-  async openLobby(code, isHost) {
+  async openLobby(code, isHost, cfg = null) {
     if (this.blockedByMaintenance()) return;
     if (this.tab === null || !this.root.querySelector('.m-shell')) this.showMenu('play');
     const lobby = new Lobby(this.app, code, isHost, {
@@ -728,6 +798,7 @@ export class UI {
       await lobby.connect();
       this.app.setStatus('lobby');
       this.lobby = lobby;
+      if (cfg && isHost) lobby.setCfg(cfg);
       if (isHost && this.app.party?.inParty && this.app.party.isLeader) this.app.party.announceLobby(code);
       this.renderLobby(lobby);
       if (!isHost) setTimeout(() => { if (!lobby.cfg.hostId && !lobby.started) { lobby.leave(); this.lobby = null; this.toast('No lobby with that code', 'bad'); this.showMenu('play'); } }, 4000);
@@ -742,7 +813,7 @@ export class UI {
     const members = lobby.members();
     const row = (x) => `<div class="l-player"><span>${esc(x.name)}</span>${x.host ? '<span class="m-tagline">Host</span>' : ''}<span class="spacer"></span>${rankBadge(x.elo)}${host && x.id !== me.id ? ` <button class="btn small ghost" data-kick="${x.id}" title="Remove">×</button>` : ''}</div>`;
     let teams;
-    if (SOLO_KINDS.has(m.kind)) teams = `<div class="l-team"><div class="l-head"><b>Players</b><span>${members.length}</span></div>${members.map(row).join('')}</div>`;
+    if (POOL_KINDS.has(m.kind)) teams = `<div class="l-team"><div class="l-head"><b>${m.coop ? 'Squad' : 'Players'}</b><span>${members.length}/${m.maxPlayers}</span></div>${members.map(row).join('')}</div>`;
     else {
       const col = (t, label) => `<div class="l-team ${t ? 'ct' : 't'}"><div class="l-head"><b>${label}</b><button class="btn small" data-team="${t}">Join</button></div>${members.filter((x) => x.team === t).map(row).join('') || '<p class="m-empty">Empty — bots fill in if enabled.</p>'}</div>`;
       const auto = members.filter((x) => x.team !== 0 && x.team !== 1);
@@ -766,11 +837,11 @@ export class UI {
         <button class="btn small ghost" id="lb-leave">Leave lobby</button>${host ? '<button class="deploy-btn small" id="lb-start">Start match</button>' : '<span class="m-sub">Waiting for the host to start</span>'}</div>
       <div class="l-grid"><div class="l-teams">${teams}</div>
         <div class="l-cfg">
-          <label class="field"><span>Mode</span><select id="lb-mode" ${host ? '' : 'disabled'}>${OFFLINE_MODES.map((k) => opt(k, cfg.mode, MODES[k].name)).join('')}</select></label>
+          <label class="field"><span>Mode</span><select id="lb-mode" ${host ? '' : 'disabled'}>${LOBBY_MODES.map((k) => opt(k, cfg.mode, MODES[k].name)).join('')}</select></label>
           <label class="field"><span>Map</span><select id="lb-map" ${host ? '' : 'disabled'}>${maps.some((x) => x.id === cfg.map) ? '' : opt(cfg.map, cfg.map, `${MAPS[cfg.map].name} (community)`)}${maps.map((x) => opt(x.id, cfg.map, `${x.name} (${x.size}${x.featured ? ', featured' : x.custom ? ', community' : ''})`)).join('')}</select></label>
           <label class="field"><span>Conditions</span><select id="lb-var" ${host ? '' : 'disabled'}>${Object.keys(VARIANTS).map((k) => opt(k, cfg.variant || 'day', variantName(MAPS[cfg.map], k))).join('')}</select></label>
           <label class="field"><span>Bot difficulty</span><select id="lb-diff" ${host ? '' : 'disabled'}>${Object.keys(BOT_LEVELS).map((k) => opt(k, cfg.botLevel, k)).join('')}</select></label>
-          <label class="m-check"><input type="checkbox" id="lb-fill" ${cfg.fillBots ? 'checked' : ''} ${host ? '' : 'disabled'}><span>Fill empty slots with bots</span></label>
+          <label class="m-check"><input type="checkbox" id="lb-fill" ${cfg.fillBots ? 'checked' : ''} ${host ? '' : 'disabled'}><span>${m.coop ? 'Fill the squad with bots' : 'Fill empty slots with bots'}</span></label>
           <img src="${mapPreview(cfg.map)}" class="l-map" alt="">
           <p class="m-sub">${esc(m.desc)}</p>
         </div></div>`;
@@ -787,8 +858,8 @@ export class UI {
       $('#lb-fill').onchange = (e) => lobby.setCfg({ fillBots: e.target.checked });
       $('#lb-start').onclick = () => {
         const humans = lobby.members().length;
-        if (!cfg.fillBots && humans < 2) { this.toast('Add a second player or turn on bot fill', 'bad'); return; }
-        if (!SOLO_KINDS.has(m.kind) && humans > m.teamSize * 2) { this.toast(`Too many players for ${m.name}`, 'bad'); return; }
+        if (!cfg.fillBots && humans < 2 && !m.coop) { this.toast('Add a second player or turn on bot fill', 'bad'); return; }
+        if (POOL_KINDS.has(m.kind) ? humans > m.maxPlayers : humans > m.teamSize * 2) { this.toast(`Too many players for ${m.name}`, 'bad'); return; }
         lobby.start();
       };
     }
@@ -893,18 +964,19 @@ export class UI {
     const wid = this.armoryWeapon;
     const current = kind === 'finish' ? c.skins[wid] || 'factory' : kind === 'outfit' ? c.outfit || 'standard' : kind === 'card' ? c.card : kind === 'effect' ? c.killfx : null;
     const card = (id, d) => {
-      const own = this.owned(kind, id), r = RARITIES[d.rarity], sw = itemSwatch(kind, id);
+      const own = this.owned(kind, id, kind === 'finish' ? wid : null), r = RARITIES[d.rarity], sw = itemSwatch(kind, id);
       const eq = kind === 'emote' ? c.emotes.includes(id) : id === current;
       const ss = d.season ? seasonById(d.season) : null;
-      const lockText = d.milestone ? d.milestone.label : ss ? (d.rankedReward ? `Season ${ss.num} ranked reward` : `Season ${ss.num} reward track`) + (Date.parse(ss.start) > Date.now() ? ` · from ${fmtDate(ss.start)}` : '') : 'Earned from match drops';
+      const lockText = d.mastery ? `Reach mastery level ${d.mastery} with the ${WEAPONS[wid]?.name || 'weapon'}` : d.milestone ? d.milestone.label : ss ? (d.rankedReward ? `Season ${ss.num} ranked reward` : `Season ${ss.num} reward track`) + (Date.parse(ss.start) > Date.now() ? ` · from ${fmtDate(ss.start)}` : '') : 'Earned from match drops';
       return `<button class="item-card ${kind === 'card' ? 'wide' : ''} ${eq ? 'equipped' : ''} ${own ? '' : 'locked'}" data-item="${id}" style="--rc:${r.color}" title="${esc(own ? d.name : lockText)}">
-        <span class="sw" style="background:${sw.bg}">${sw.glyph}</span><b>${esc(d.name)}</b><em>${own ? r.name : d.milestone ? 'Milestone' : ss ? `Season ${ss.num}` : 'Locked'}</em>
+        <span class="sw" style="background:${sw.bg}">${sw.glyph}</span><b>${esc(d.name)}</b><em>${own ? r.name : d.mastery ? `Mastery ${d.mastery}` : d.milestone ? 'Milestone' : ss ? `Season ${ss.num}` : 'Locked'}</em>
         ${kind === 'emote' && eq ? `<i class="slot-tag">${WHEEL[c.emotes.indexOf(id)]}</i>` : ''}</button>`;
     };
     const classes = Object.keys(CLASS_NAMES);
     el.innerHTML = `<div class="m-switch scroll">${ARMORY_KINDS.map(([k, l]) => `<button data-kind="${k}" class="${k === kind ? 'on' : ''}">${l}</button>`).join('')}</div>
       <p class="m-sub">${have} of ${total} collected. Wins always drop an item; other matches drop one half the time. Milestone items unlock as you play.</p>
-      ${kind === 'finish' ? `<label class="field"><span>Weapon</span><select id="ar-w">${classes.map((t) => `<optgroup label="${CLASS_NAMES[t]}">${Object.values(WEAPONS).filter((w) => w.type === t).map((w) => `<option value="${w.id}" ${w.id === wid ? 'selected' : ''}>${esc(w.name)} — ${esc(defs[c.skins[w.id] || 'factory']?.name || 'Factory')}</option>`).join('')}</optgroup>`).join('')}</select></label>` : ''}
+      ${kind === 'finish' ? `<label class="field"><span>Weapon</span><select id="ar-w">${classes.map((t) => `<optgroup label="${CLASS_NAMES[t]}">${Object.values(WEAPONS).filter((w) => w.type === t).map((w) => `<option value="${w.id}" ${w.id === wid ? 'selected' : ''}>${esc(w.name)} (mastery ${masteryLevel(app.achievements, w.id)}) — ${esc(defs[c.skins[w.id] || 'factory']?.name || 'Factory')}</option>`).join('')}</optgroup>`).join('')}</select></label>
+        ${this.masteryLine(wid)}` : ''}
       ${kind === 'emote' ? `<div class="emote-slots">${WHEEL.map((dir, i) => `<button class="eslot ${i === this.emoteSlot ? 'sel' : ''}" data-slot="${i}"><span>${dir}</span><b>${esc(defs[c.emotes[i]]?.name || '—')}</b></button>`).join('')}</div>
         <p class="m-sub">Pick a wheel slot, then an emote to put there. Hold G in a match to use the wheel. Click any emote to preview it.</p>` : ''}
       ${kind === 'effect' ? '<p class="m-sub">Click an effect to see it play beside your operator.</p>' : ''}
@@ -920,13 +992,13 @@ export class UI {
     el.querySelector('#ar-w')?.addEventListener('change', (e) => { this.armoryWeapon = e.target.value; this.renderArmory(el); });
     el.querySelectorAll('[data-slot]').forEach((b) => { b.onclick = () => { this.emoteSlot = +b.dataset.slot; this.renderArmory(el); }; });
     el.querySelectorAll('[data-item]').forEach((b) => { b.onclick = () => {
-      const id = b.dataset.item, own = this.owned(kind, id), d = defs[id];
+      const id = b.dataset.item, own = this.owned(kind, id, kind === 'finish' ? wid : null), d = defs[id];
       // Previews work for everything; equipping needs the item.
       if (kind === 'effect') this.scene?.killFx(id);
       if (kind === 'emote') this.scene?.emote(id);
       if (kind === 'finish' && !own) { const prev = { ...c, skins: { ...c.skins, [wid]: id } }; this.scene?.setChar(prev, wid); this.scene?.faceFront(); }
       if (kind === 'outfit' && !own) { this.scene?.setChar({ ...c, outfit: id }, 'ar7'); this.scene?.faceFront(); }
-      if (!own) { const ss = d.season ? seasonById(d.season) : null; this.toast(`${d.name} is locked. ${d.milestone ? d.milestone.label + ' to unlock it.' : ss ? `It's a Season ${ss.num} (${ss.name}) ${d.rankedReward ? 'ranked reward' : 'reward-track item'}${Date.parse(ss.start) > Date.now() ? `, available from ${fmtDate(ss.start)}` : ''}.` : 'Win matches to earn drops.'}`, 'bad'); return; }
+      if (!own) { const ss = d.season ? seasonById(d.season) : null; this.toast(`${d.name} is locked. ${d.mastery ? `Reach mastery level ${d.mastery} with the ${WEAPONS[wid]?.name} to unlock it for that weapon.` : d.milestone ? d.milestone.label + ' to unlock it.' : ss ? `It's a Season ${ss.num} (${ss.name}) ${d.rankedReward ? 'ranked reward' : 'reward-track item'}${Date.parse(ss.start) > Date.now() ? `, available from ${fmtDate(ss.start)}` : ''}.` : 'Win matches to earn drops.'}`, 'bad'); return; }
       if (kind === 'finish') { if (id === 'factory') delete c.skins[wid]; else c.skins[wid] = id; }
       else if (kind === 'outfit') c.outfit = id;
       else if (kind === 'card') c.card = id;
@@ -940,9 +1012,15 @@ export class UI {
       save(c);
     }; });
     el.querySelector('#apply-all')?.addEventListener('click', () => {
-      for (const w of Object.keys(WEAPONS)) { if (current === 'factory') delete c.skins[w]; else c.skins[w] = current; }
+      // Mastery finishes only go on the weapons that have earned them.
+      let skipped = 0;
+      for (const w of Object.keys(WEAPONS)) {
+        if (current === 'factory') delete c.skins[w];
+        else if (this.owned('finish', current, w)) c.skins[w] = current;
+        else skipped++;
+      }
       save(c);
-      this.toast(`${defs[current].name} is now on every weapon`, 'good');
+      this.toast(`${defs[current].name} is now on ${skipped ? `every weapon that has earned it (${Object.keys(WEAPONS).length - skipped})` : 'every weapon'}`, 'good');
     });
   }
 
@@ -951,11 +1029,31 @@ export class UI {
     if (chip) chip.style.backgroundImage = `linear-gradient(90deg, rgba(14,18,13,.92), rgba(14,18,13,.5)), url(${cardImage(this.app.char.card || 'standard', 360, 90)})`;
   }
 
+  // One weapon's mastery level and progress bar (armory and the stats page).
+  masteryLine(wid) {
+    const m = masteryInfo(this.app.achievements, wid);
+    const next = Object.entries(KINDS.finish.defs).filter(([, d]) => d.mastery > m.level).sort((a, b) => a[1].mastery - b[1].mastery)[0];
+    return `<div class="mastery-line"><b>Mastery ${m.level}${m.max ? ' · MAX' : ''}</b>
+      <div class="ach-bar"><i style="width:${m.max ? 100 : pct(m.into, m.need)}%"></i></div>
+      <span>${m.max ? `${m.xp.toLocaleString()} XP` : `${m.into} / ${m.need} XP to level ${m.level + 1}`}${next ? ` · ${esc(next[1].name)} at level ${next[1].mastery}` : ''}</span></div>`;
+  }
+
   // ───────────────────────── stats ─────────────────────────
-  // Stats has two views: the overview and achievements.
+  // Stats has three views: the overview, achievements and weapon mastery.
   statsSwitch() {
     const v = this.statsView || 'overview';
-    return `<div class="m-switch" role="tablist">${[['overview', 'Overview'], ['achievements', 'Achievements']].map(([k, l]) => `<button data-sv="${k}" class="${v === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+    return `<div class="m-switch" role="tablist">${[['overview', 'Overview'], ['achievements', 'Achievements'], ['mastery', 'Mastery']].map(([k, l]) => `<button data-sv="${k}" class="${v === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  }
+
+  renderMastery(el) {
+    const rec = this.app.achievements, list = Object.values(WEAPONS);
+    const maxed = list.filter((w) => masteryLevel(rec, w.id) >= MAX_LEVEL).length;
+    const total = list.reduce((a, w) => a + masteryLevel(rec, w.id), 0);
+    el.innerHTML = `${this.statsSwitch()}
+      <div class="st-nums"><div><b>${total} / ${list.length * MAX_LEVEL}</b><span>Mastery levels</span></div><div><b>${maxed} / ${list.length}</b><span>Weapons mastered</span></div></div>
+      <p class="m-sub">Every kill with a weapon earns it 1 mastery XP (2 for a headshot). Levels 3, 5, 7 and 10 unlock Mastery Bronze, Silver, Gold and Dark Matter finishes for that weapon in the Armory. Bot matches count; the Training Range doesn't.</p>
+      ${Object.keys(CLASS_NAMES).map((t) => `<h3 class="m-h3">${CLASS_NAMES[t]}</h3><div class="mastery-grid">${list.filter((w) => w.type === t).map((w) => `<div class="mastery-card"><span class="mastery-name">${esc(w.name)}</span>${this.masteryLine(w.id)}</div>`).join('')}</div>`).join('')}`;
+    this.bindStatsSwitch(el);
   }
 
   bindStatsSwitch(el) {
@@ -982,6 +1080,7 @@ export class UI {
 
   async renderStats(el, mapId = null) {
     if (this.statsView === 'achievements') return this.renderAchievements(el);
+    if (this.statsView === 'mastery') return this.renderMastery(el);
     const app = this.app, p = app.profile;
     el.innerHTML = '<p class="m-sub">Loading your stats…</p>';
     let rows = [];
@@ -1009,7 +1108,7 @@ export class UI {
     const bots = agg.h2h?.bot;
     const deathMaps = Object.keys(agg.deaths || {}).filter((k) => MAPS[k] && agg.deaths[k].length);
     const heatMap = mapId && deathMaps.includes(mapId) ? mapId : deathMaps[0];
-    if (this.statsView === 'achievements') return;
+    if (this.statsView === 'achievements' || this.statsView === 'mastery') return;
     el.innerHTML = `${this.statsSwitch()}<div class="st-head">
         <div><h2 class="m-h1">${esc(app.me().name)}</h2><p class="m-sub">${p ? `Joined ${new Date(p.created_at).toLocaleDateString()} · level ${lvl.level}` : 'Playing as a guest. Stats below are from this browser only.'}</p></div>
         <span class="spacer"></span>${p ? rankBadge(p.elo, true) : ''}

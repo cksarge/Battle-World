@@ -28,6 +28,10 @@ export class Player {
     this.name = info.name;
     this.team = info.team ?? 0;
     this.isBot = !!info.isBot;
+    // Zombies-mode horde slot (team 1). `scale` grows the body and hitboxes (brutes).
+    this.zombie = !!info.zombie;
+    this.scale = 1;
+    this.maxHp = 100;
     this.char = info.char;
     this.elo = info.elo ?? 1000;
     this.pos = new THREE.Vector3();
@@ -69,8 +73,8 @@ export class Player {
   }
   get weapon() { return WEAPONS[this.weaponId] || null; }
 
-  height() { return 1.8 - this.crouch * 0.55; }
-  eyeY() { return this.pos.y + 1.64 - this.crouch * 0.5; }
+  height() { return (1.8 - this.crouch * 0.55) * this.scale; }
+  eyeY() { return this.pos.y + (1.64 - this.crouch * 0.5) * this.scale; }
   eye(out = new THREE.Vector3()) { return out.set(this.pos.x, this.eyeY(), this.pos.z); }
   forward(out = new THREE.Vector3()) {
     const cp = Math.cos(this.pitch);
@@ -87,15 +91,17 @@ export class Player {
     // Push-ups lay the model flat in front of the player (measured from the emote's whole cycle).
     const em = this.model?.emote;
     if (em?.id === 'pushups' && em.t > 0.3 && em.t < em.dur - 0.3) return PRONE;
-    const c = this.crouch, eye = this.eyeY() - this.pos.y;
+    const k = this.scale;
+    const c = this.crouch, eye = (this.eyeY() - this.pos.y) / k;
     const fwd = 0.17 * c - 0.137 * this.pitch;
     const hips = 0.86 - 0.4 * c;
     const stride = 0.2 * Math.min(1, (this.isRemoteView ? this.netSpeed : Math.hypot(this.vel.x, this.vel.z)) / 5.5);
-    return [
+    const boxes = [
       ['head', -0.13, eye - 0.15, -fwd - 0.13, 0.13, eye + 0.17, -fwd + 0.13],
       ['body', -0.21, hips, -0.21 - 0.06 * c, 0.21, eye - 0.15, 0.17 - 0.05 * c],
       ['legs', -0.18, 0, -0.16 + 0.11 * c - stride, 0.18, hips, 0.1 + 0.35 * c + stride],
     ];
+    return k === 1 ? boxes : boxes.map(([part, ...v]) => [part, ...v.map((n) => n * k)]);
   }
 
   // Centre of the head hitbox in world space (what bots aim at for headshots).
@@ -111,7 +117,7 @@ export class Player {
     if (!this.alive) return null;
     const p = this.pos;
     // Broad phase (wide enough for the push-up pose, which reaches 1.8 m in front)
-    tmpMin.set(p.x - 1.9, p.y, p.z - 1.9); tmpMax.set(p.x + 1.9, p.y + this.height() + 0.15, p.z + 1.9);
+    tmpMin.set(p.x - 1.9, p.y, p.z - 1.9); tmpMax.set(p.x + 1.9, p.y + this.height() + 0.15 * this.scale, p.z + 1.9);
     const broad = rayBox(o, d, tmpMin, tmpMax);
     if (broad < 0 || broad > maxDist) return null;
     // Into the player's frame: the model faces -z when yaw = 0 and turns with yaw.
@@ -131,6 +137,7 @@ export class Player {
   ensureModel(scene, teamColored) {
     if (this.model) return this.model;
     this.model = new CharacterModel(this.char, { team: teamColored ? this.team : -1, match: true });
+    if (this.scale !== 1) this.model.root.scale.setScalar(this.scale);
     scene.add(this.model.root);
     return this.model;
   }

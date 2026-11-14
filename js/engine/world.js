@@ -545,7 +545,7 @@ export class World {
     if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return null;
     const ch = this.chars[cy][cx];
     if (ch === '.' || ch === 'L' || isPlatform(ch)) return this.H[cy * this.w + cx];
-    if (ch === 'D') return 0; // bots open doors on their way through
+    if (ch === 'D') return this.locked?.has(cx + ',' + cy) ? null : 0; // bots open doors on their way through (not locked ones: zombies mode)
     if (ch === 'Y' || ch === 'E') return 0; // barriers drop at the start; lifts are boarded at the bottom
     // Closed gates count as a way through for bots that know to throw the gate's switch first.
     if (ch === 'P' && this.navGates && this.prop(cx, cy)?.link && !this.navGates.has(cx + ',' + cy)) return 0;

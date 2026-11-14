@@ -719,6 +719,18 @@ export class CharacterModel {
     this.gunHolder = new THREE.Group();
     this.gunHolder.position.set(0.1, 0.28, -0.3);
     this.torso.add(this.gunHolder);
+    // The undead (zombies mode, infected players): glowing eyes, torn shirt, arms reaching forward.
+    this.zombie = c.zombie || null;
+    if (this.zombie) {
+      const eyeC = this.zombie === 'infected' ? '#9dff2e' : this.zombie === 'brute' ? '#ff3a1f' : '#ffd23f';
+      const glow = new THREE.MeshStandardMaterial({ color: eyeC, emissive: eyeC, emissiveIntensity: 2.2 });
+      for (const x of [-0.05, 0.05]) bx(this.head, 0.045, 0.03, 0.02, x, 0.14, -0.122, glow);
+      const rot = mat('#3a1612', 0.9);
+      bx(this.torso, 0.16, 0.12, 0.03, -0.08 * bw, 0.2, -0.125, rot);
+      bx(this.torso, 0.1, 0.08, 0.03, 0.11 * bw, 0.36, -0.125, rot);
+      bx(this.head, 0.1, 0.05, 0.02, 0.03, 0.05, -0.118, rot);
+      this.lurch = Math.random() * 6;
+    }
 
     this.phase = 0;
     this.dead = false;
@@ -881,6 +893,19 @@ export class CharacterModel {
     // Only a slight lean with aim pitch, so the head stays where its hitbox is.
     this.torso.rotation.x = -cr * 0.25 + st.pitch * 0.12;
     this.head.rotation.x = st.pitch * 0.5;
+    if (this.zombie && !(this.zombie === 'infected' && this.weaponId && !WEAPONS[this.weaponId]?.type?.includes('knife'))) {
+      // Arms out in front, swaying with the shamble; a swipe while "firing".
+      this.lurch += dt * (2 + st.speed);
+      const sway = Math.sin(this.lurch) * 0.12, swipe = st.firing ? -0.7 : 0;
+      this.arms[0].rotation.set(Math.PI / 2 - 0.15 + sway + swipe, 0, 0.12);
+      this.arms[1].rotation.set(Math.PI / 2 - 0.05 - sway + swipe * 0.6, 0, -0.12);
+      this.arms[0].userData.elbow.rotation.x = 0.15; this.arms[1].userData.elbow.rotation.x = 0.25;
+      this.arms[0].userData.elbow.rotation.z = 0;
+      this.head.rotation.z = Math.sin(this.lurch * 0.5) * 0.18;
+      this.torso.rotation.x = 0.2 - cr * 0.25;
+      this.gunHolder.visible = !!this.weaponId && this.zombie === 'infected';
+      return;
+    }
     // arms aim the weapon
     const pistol = this.pistolPose;
     // Shoulders rotate the hanging arm forward (+X rotation swings -Y toward -Z).

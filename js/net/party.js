@@ -1,10 +1,10 @@
 import { Room, newId } from './realtime.js';
-import { MODES, SOLO_KINDS } from '../data/modes.js';
+import { MODES, POOL_KINDS } from '../data/modes.js';
 
 // Largest party that can queue for a mode together (everyone on the same team).
 export function partyLimit(modeId) {
   const m = MODES[modeId];
-  return SOLO_KINDS.has(m.kind) ? m.maxPlayers : m.teamSize;
+  return POOL_KINDS.has(m.kind) ? m.maxPlayers : m.teamSize;
 }
 
 // Parties: friends group up in the menu, then the leader queues or opens a lobby for everyone.
