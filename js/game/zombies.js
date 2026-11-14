@@ -38,6 +38,9 @@ function textSprite(lines, { color = '#fff', w = 256, h = 96, scale = 1.6 } = {}
   return s;
 }
 
+// How much squad bots want each tonic (wall guns score 4 + price/1000 once they have a gun).
+const SQUAD_PERK_VALUE = { ironhide: 8, overdrive: 7, quickload: 6, rebound: 5 };
+
 // Zombies mode. The host runs the waves (state.z) and every client draws the stations, drops and
 // fallen teammates from it. Station layout is worked out from the map on every client the same way,
 // so nothing about it has to be sent.
@@ -340,7 +343,7 @@ export class ZombieMode {
     let fallback = null;
     for (let i = 0; i < 40; i++) {
       const c = W.allFloor[Math.floor(Math.random() * W.allFloor.length)];
-      if (W.navH(c.x, c.y) === null || W.blocked(c.x, c.y)) continue;
+      if (W.navH(c.x, c.y) === null) continue;
       const x = (c.x + 0.5) * CELL, z = (c.y + 0.5) * CELL, pt = [x, W.heightAt(x, z), z];
       const near = Math.min(...watchers.map((w) => Math.hypot(w[0] - x, w[2] - z)));
       if (near < 10 || near > 48) continue;
@@ -791,13 +794,14 @@ export class ZombieMode {
       if (s.kind === 'wall') {
         const w = WEAPONS[s.id], mine = p.inv[w.slot] === s.id, a = p.ammo[s.id];
         if (mine && a && a.reserve < w.reserve * 0.3 && p.money >= s.price / 2) opts.push({ s, v: 9 });
-        else if (!mine && w.slot === 'primary' && s.price > curPrice && p.money >= s.price + (cur ? 600 : 0)) opts.push({ s, v: (cur ? 5 : 12) + s.price / 1000 });
-      } else if (s.kind === 'perk' && s.id !== 'rebound' && !p.zperks?.has(s.id) && p.money >= s.price + 800) opts.push({ s, v: s.id === 'ironhide' ? 6 : 4 });
-      else if (s.kind === 'forge' && p.inv.primary && !p.forged?.has(p.inv.primary) && p.money >= s.price + 1500) opts.push({ s, v: 3 });
+        // A new gun only when it's a real step up (swapping between similar guns wastes points).
+        else if (!mine && w.slot === 'primary' && (cur ? s.price >= curPrice + 500 && p.money >= s.price + 400 : p.money >= s.price)) opts.push({ s, v: cur ? 4 + s.price / 1000 : 12 });
+      } else if (s.kind === 'perk' && !p.zperks?.has(s.id) && p.money >= s.price + 300) opts.push({ s, v: SQUAD_PERK_VALUE[s.id] || 5 });
+      else if (s.kind === 'forge' && p.inv.primary && !p.forged?.has(p.inv.primary) && p.money >= s.price + 500) opts.push({ s, v: 5.5 });
     }
-    const door = this.doors.filter((d) => this.W.locked?.has(d.key) && p.money >= d.price + 3500)
+    const door = this.doors.filter((d) => this.W.locked?.has(d.key) && p.money >= d.price + 1000)
       .map((d) => ({ d, dist: Math.hypot(p.pos.x - (d.x + 0.5) * CELL, p.pos.z - (d.y + 0.5) * CELL) })).filter((o) => o.dist < 30).sort((a, b) => a.dist - b.dist)[0];
-    if (door) opts.push({ s: { kind: 'door', ...door.d }, v: 2 });
+    if (door) opts.push({ s: { kind: 'door', ...door.d }, v: 3 });
     if (!opts.length) return;
     brain.shop = opts.sort((a, b) => b.v - a.v)[0].s;
     brain.shopUntil = performance.now() + 20000;

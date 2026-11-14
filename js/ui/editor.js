@@ -11,7 +11,7 @@ import { esc } from './social.js';
 const ARROWS = ['↑', '→', '↓', '←'];
 // Ground cells, grouped for the palette. Ramps and stairs are picked with a direction (R turns them).
 export const PALETTE = [
-  ['Floor and walls', [['.', 'Floor'], ['#', 'Wall'], ['X', 'Wall, second texture'], ['Q', 'Cracked wall (explosives break it)'], ['Y', 'Spawn barrier (gone when the round starts)']]],
+  ['Floor and walls', [['.', 'Floor'], ['#', 'Wall'], ['X', 'Wall, second texture'], ['Q', 'Cracked wall (explosives break it)']]],
   ['Cover', [['h', 'Half wall'], ['c', 'Crate, 1 m'], ['C', 'Tall crate, 2 m'], ['M', 'Shipping container'], ['k', 'Wooden crate (breakable)'], ['W', 'Wooden barricade (breakable)'], ['B', 'Explosive barrels'], ['A', 'Ammo crate']]],
   ['Heights', [['1', 'Platform 0.5 m'], ['2', 'Platform 1 m'], ['3', 'Platform 1.5 m'], ['4', 'Platform 2 m'], ['5', 'Catwalk 2.5 m'], ['6', 'Catwalk 3 m'], ['7', 'Catwalk 3.5 m'], ['8', 'Catwalk 4 m']]],
   ['Ramps and stairs', [['ramp', 'Ramp (rises the way the arrow points)'], ['stairs', 'Stairs (rise the way the arrow points)'], ['L', 'Ladder (floor next to a catwalk)'], ['E', 'Lift (rides up to the platform beside it)']]],
@@ -36,7 +36,6 @@ export function cellColor(ch) {
   if (ch === 'G') return '#5f8fb0';
   if (ch === 'L') return '#9aa3ad';
   if (ch === 'Q') return '#3d434c';
-  if (ch === 'Y') return '#3f6f9e';
   if (ch === 'J') return '#c9a227';
   if (ch === 'E') return '#b5bcc6';
   if (DIR_OF[ch]) return DIR_OF[ch].kind === 'ramp' ? '#8f99a5' : '#a1a9b3';

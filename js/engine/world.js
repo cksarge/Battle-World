@@ -16,18 +16,17 @@ export const CELL = 2;
 // 'Q' cracked wall: solid, but explosives (and a lot of bullets) knock it down.
 // 'P' heavy gate, opened and closed by the nearest 'J' switch (press E at the switch).
 // 'E' elevator: a lift that rides between the floor and the tallest platform beside it.
-// 'Y' spawn barrier: holds everyone in place until the round goes live, then switches off.
-const SOLID_H = { '#': 6, 'X': 6, 'h': 1.15, 'c': 1.0, 'C': 2.0, 'M': 2.6, 'D': 6, 'G': 6, 'B': 1.2, 'A': 1.0, 'W': 3.0, 'k': 1.0, 'Q': 6, 'P': 6, 'J': 1.3, 'Y': 0 };
+const SOLID_H = { '#': 6, 'X': 6, 'h': 1.15, 'c': 1.0, 'C': 2.0, 'M': 2.6, 'D': 6, 'G': 6, 'B': 1.2, 'A': 1.0, 'W': 3.0, 'k': 1.0, 'Q': 6, 'P': 6, 'J': 1.3 };
 export const PROP_CHARS = new Set(['D', 'G', 'B', 'A', 'W', 'k', 'Q', 'P', 'J', 'E']);
 export const WOOD_HP = { W: 240, k: 120, g: 160, Q: 420 };
 // Cells you may never mantle onto (walls, doors, glass, gates).
-const NO_MANTLE = new Set(['#', 'X', 'D', 'G', 'Q', 'P', 'Y']);
+const NO_MANTLE = new Set(['#', 'X', 'D', 'G', 'Q', 'P']);
 // Lifts: seconds at the bottom, going up, at the top, coming down.
 const LIFT = { wait: 3, move: 2.5 };
 const LIFT_PERIOD = 2 * (LIFT.wait + LIFT.move);
 // Standing height of a body, for walking under bridges.
 const BODY_H = 1.8;
-// Full-height cells (walls, closed doors and gates, glass, spawn barriers) reach the sky as far as
+// Full-height cells (walls, closed doors and gates, glass) reach the sky as far as
 // bodies are concerned: an invisible barrier on top, so nobody can glitch up onto a wall. Bullets,
 // sight lines and grenades still use the real 6 m height.
 const FULL_H = 6, SKY = 1000;
@@ -40,8 +39,9 @@ const CONTAINER_TINTS = ['#a8432f', '#2f6aa8', '#3d7a45', '#c27a2c', '#7b7f86'];
 const PANEL_CHARS = new Set(['D', 'G', 'P']);
 const FOOTPRINTS = {
   D: { hx: 1, hz: 0.15, lo: 2.7 }, G: { hx: 1, hz: 0.15, lo: 3 }, P: { hx: 1, hz: 0.15, lo: 3.2 },
-  A: { hx: 0.88, hz: 0.58, lo: Infinity }, J: { hx: 0.3, hz: 0.25, dx: 0.05, lo: Infinity },
-  B: { hx: 0.78, hz: 0.72, dz: 0.06, lo: Infinity },
+  A: { hx: 0.88, hz: 0.58, lo: Infinity },
+  // Switches and barrel clusters are built the same way round whatever the walls around them.
+  J: { hx: 0.3, hz: 0.25, dx: 0.05, lo: Infinity, fixed: true }, B: { hx: 0.78, hz: 0.72, dz: 0.06, lo: Infinity, fixed: true },
 };
 
 function heightOf(ch) {
@@ -55,7 +55,8 @@ export class World {
     this.w = def.w; this.h = def.h;
     const g = Array.from({ length: def.h }, () => Array(def.w).fill('#'));
     const up = Array.from({ length: def.h }, () => Array(def.w).fill('.'));
-    const apply = (grid, op, ch = op[0]) => {
+    // 'Y' (the old spawn barrier) is plain floor now; community maps may still have it.
+    const apply = (grid, op, ch = op[0] === 'Y' ? '.' : op[0]) => {
       const [, x0, y0, x1, y1] = op;
       for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++)
         for (let x = Math.min(x0, x1); x <= Math.max(x0, x1); x++)
@@ -89,8 +90,8 @@ export class World {
     this.foot = new Map();
     for (const p of this.props.values()) {
       const f = FOOTPRINTS[p.ch];
-      if (!f) continue;
-      const ax = this.panelAlongX(p.x, p.y), hx = ax ? f.hx : f.hz, hz = ax ? f.hz : f.hx;
+      if (!f || this.glassBlock(p.x, p.y)) continue;
+      const ax = f.fixed || this.panelAlongX(p.x, p.y), hx = ax ? f.hx : f.hz, hz = ax ? f.hz : f.hx;
       const cx = (p.x + 0.5) * CELL + (ax ? f.dx || 0 : f.dz || 0), cz = (p.y + 0.5) * CELL + (ax ? f.dz || 0 : f.dx || 0);
       this.foot.set(p.y * def.w + p.x, { ch: p.ch, x0: cx - hx, x1: cx + hx, z0: cz - hz, z1: cz + hz, lo: f.lo });
     }
@@ -118,9 +119,6 @@ export class World {
     for (const p of this.props.values()) if (p.ch === 'P' && switches.length) {
       p.link = switches.reduce((a, b) => (Math.hypot(b.x - p.x, b.y - p.y) < Math.hypot(a.x - p.x, a.y - p.y) ? b : a));
     }
-    this.barrierCells = [];
-    for (let y = 0; y < def.h; y++) for (let x = 0; x < def.w; x++) if (g[y][x] === 'Y') this.barrierCells.push([x, y]);
-    this.barriersOn = false;
 
     // Bomb sites: one rectangle [x0, y0, x1, y1] or a list of them (any shape). x0..z1 is the bounding box.
     this.sites = {};
@@ -147,7 +145,7 @@ export class World {
     const [x0, y0, x1, y1] = r, out = [];
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const h = this.H[y * this.w + x];
-      if (floorOnly ? h === 0 && !this.blocked?.(x, y) : h <= 1) out.push({ x, y });
+      if (floorOnly ? h === 0 : h <= 1) out.push({ x, y });
     }
     return out;
   }
@@ -188,6 +186,12 @@ export class World {
   }
 
   inGrid(cx, cy) { return cx >= 0 && cy >= 0 && cx < this.w && cy < this.h; }
+
+  // Glass with more glass beside it both ways is a solid glass block (panes on every face), not a pane.
+  glassBlock(x, y) {
+    const g = (cx, cy) => this.chars[cy]?.[cx] === 'G';
+    return g(x, y) && (g(x - 1, y) || g(x + 1, y)) && (g(x, y - 1) || g(x, y + 1));
+  }
 
   // The part-cell box of a prop at cell index i, while it still stands (null otherwise).
   footAt(i) {
@@ -262,17 +266,6 @@ export class World {
     if (dx === rx && dy === ry) return this.RHi[i];
     if (dx === -rx && dy === -ry) return this.RLo[i];
     return null; // no stepping onto a ramp over its side
-  }
-
-  // Cells that aren't real floor even though nothing stands on them (spawn barriers).
-  blocked(x, y) { return this.chars[y]?.[x] === 'Y'; }
-
-  // Spawn barriers: solid to bodies (not bullets) while on.
-  setBarriers(on) {
-    if (on === this.barriersOn) return;
-    this.barriersOn = on;
-    for (const [x, y] of this.barrierCells) this.H[y * this.w + x] = on ? 6 : 0;
-    if (this.barrierView) this.barrierView.visible = on;
   }
 
   // Lifts follow a fixed cycle on the shared round clock, so every player sees the same thing.
@@ -419,8 +412,8 @@ export class World {
     for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) {
       let h = this.isRamp(cx, cz) ? this.rampUnder(cx, cz, x, z, r) : this.cellH(cx, cz);
       if (h >= FULL_H) continue; // never something to stand on
-      const f = h > 0 && this.inGrid(cx, cz) && this.footAt(cz * this.w + cx);
-      if (f && !(x + r > f.x0 && x - r < f.x1 && z + r > f.z0 && z - r < f.z1)) h = 0;
+      const box = h > 0 && this.inGrid(cx, cz) && this.footAt(cz * this.w + cx);
+      if (box && !(x + r > box.x0 && x - r < box.x1 && z + r > box.z0 && z - r < box.z1)) h = 0;
       if (h <= y + (this.isLift(cx, cz) ? 0.4 : 0.05) && h > f) f = h;
       const ut = this.UT[cz * this.w + cx] || 0;
       if (ut && ut <= y + 0.05 && ut > f) f = ut;
@@ -444,6 +437,9 @@ export class World {
   floorAt(x, z, y) {
     const cx = Math.floor(x / CELL), cy = Math.floor(z / CELL), d = this.deckAt(cx, cy);
     if (d && y >= d.lo) return d.top;
+    // Beside a thin or small prop (and below any lintel), the ground is open.
+    const f = this.inGrid(cx, cy) && this.footAt(cy * this.w + cx);
+    if (f && !(x > f.x0 && x < f.x1 && z > f.z0 && z < f.z1) && y < f.lo) return 0;
     return this.isRamp(cx, cy) ? this.rampAt(cx, cy, x, z) : this.cellH(cx, cy);
   }
 
@@ -618,7 +614,7 @@ export class World {
     const ch = this.chars[cy][cx];
     if (ch === '.' || ch === 'L' || isPlatform(ch)) return this.H[cy * this.w + cx];
     if (ch === 'D') return this.locked?.has(cx + ',' + cy) ? null : 0; // bots open doors on their way through (not locked ones: zombies mode)
-    if (ch === 'Y' || ch === 'E') return 0; // barriers drop at the start; lifts are boarded at the bottom
+    if (ch === 'E') return 0; // lifts are boarded at the bottom
     // Closed gates count as a way through for bots that know to throw the gate's switch first.
     if (ch === 'P' && this.navGates && this.prop(cx, cy)?.link && !this.navGates.has(cx + ',' + cy)) return 0;
     if (DIR_OF[ch]) return (this.RLo[cy * this.w + cx] + this.RHi[cy * this.w + cx]) / 2;
@@ -743,7 +739,7 @@ export class World {
     let boxIndex = 0;
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
       const ch = this.chars[y][x];
-      if (ch === '.' || ch === 'L' || ch === 'Y' || DIR_OF[ch] || seen[y * this.w + x]) continue;
+      if (ch === '.' || ch === 'L' || DIR_OF[ch] || seen[y * this.w + x]) continue;
       let x1 = x;
       while (x1 + 1 < this.w && this.chars[y][x1 + 1] === ch && !seen[y * this.w + x1 + 1]) x1++;
       let y1 = y;
@@ -783,15 +779,6 @@ export class World {
         }
       } else addRamp(b, x0, z0, lo, hi, rx, rz, rampMat);
     }
-    // Spawn barriers: glowing panels, shown while they're up.
-    this.barrierView = new THREE.Group();
-    for (const [x, y] of this.barrierCells) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(CELL, 3, CELL), getBarrierMat());
-      m.position.set((x + 0.5) * CELL, 1.5, (y + 0.5) * CELL);
-      this.barrierView.add(m);
-    }
-    this.barrierView.visible = this.barriersOn;
-    group.add(this.barrierView);
     // Upper layer: bridge decks and tunnel roofs, greedy-merged per kind (grates are props above).
     const useen = new Uint8Array(this.w * this.h);
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
@@ -846,7 +833,7 @@ export class World {
     const ctx = c.getContext('2d');
     for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
       const ch = this.chars[y][x];
-      ctx.fillStyle = ch === '#' || ch === 'X' ? '#1b1f25' : 'hcCMBA'.includes(ch) ? '#4a515b' : 'Wk'.includes(ch) ? '#7a5a36' : ch === 'D' ? '#8a6a3a' : ch === 'G' ? '#5f8fb0' : ch === '.' || ch === 'L' || ch === 'Y' ? '#7c8591'
+      ctx.fillStyle = ch === '#' || ch === 'X' ? '#1b1f25' : 'hcCMBA'.includes(ch) ? '#4a515b' : 'Wk'.includes(ch) ? '#7a5a36' : ch === 'D' ? '#8a6a3a' : ch === 'G' ? '#5f8fb0' : ch === '.' || ch === 'L' ? '#7c8591'
         : ch === 'Q' ? '#3d434c' : ch === 'P' ? '#6f5a2a' : ch === 'J' ? '#c9a227' : ch === 'E' ? '#b5bcc6' : DIR_OF[ch] ? '#8f99a5'
         : isPlatform(ch) ? `rgb(${140 + platformH(ch) * 18},${150 + platformH(ch) * 16},${165 + platformH(ch) * 14})` : '#959eaa';
       ctx.fillRect(x * scale, y * scale, scale, scale);
@@ -941,10 +928,6 @@ function addRamp(b, x0, z0, lo, hi, rx, rz, name) {
   quad([[x1, 0, z0], [x0, 0, z0], [x0, hAt(x0, z0), z0], [x1, hAt(x1, z0), z0]], [0, 0, -1]);
 }
 
-let barrierMat;
-function getBarrierMat() {
-  return (barrierMat ||= new THREE.MeshBasicMaterial({ color: 0x4ea3ff, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
-}
 
 function siteDecal(letter, s) {
   const c = document.createElement('canvas');

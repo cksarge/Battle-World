@@ -369,7 +369,10 @@ export function buildProp(world, p, theme) {
     root.add(lintel);
     const frameMat = getMaterial(theme.trim || 'trim');
     const jambW = 0.12;
-    for (const s of [-1, 1]) {
+    // A block of glass (glass beside it both ways) gets a pane on every face and posts at the corners.
+    const block = p.ch === 'G' && world.glassBlock(p.x, p.y);
+    if (block) for (const sx of [-1, 1]) for (const sz of [-1, 1]) root.add(mesh(new THREE.BoxGeometry(jambW, top, jambW), frameMat, sx * (CELL / 2 - jambW / 2), top / 2, sz * (CELL / 2 - jambW / 2)));
+    else for (const s of [-1, 1]) {
       const g = alongX ? new THREE.BoxGeometry(jambW, top, 0.3) : new THREE.BoxGeometry(0.3, top, jambW);
       root.add(mesh(g, frameMat, alongX ? s * (CELL / 2 - jambW / 2) : 0, top / 2, alongX ? 0 : s * (CELL / 2 - jambW / 2)));
     }
@@ -392,10 +395,23 @@ export function buildProp(world, p, theme) {
         if (alongX) panel.position.x = e * (w - 0.1); else panel.position.z = e * (w - 0.1);
       };
     } else {
-      const pane = mesh(alongX ? new THREE.BoxGeometry(CELL - jambW * 2, top, 0.04) : new THREE.BoxGeometry(0.04, top, CELL - jambW * 2), propMat('glass'), 0, top / 2, 0, false);
-      pane.renderOrder = 2;
-      const mull = mesh(alongX ? new THREE.BoxGeometry(CELL, 0.08, 0.14) : new THREE.BoxGeometry(0.14, 0.08, CELL), frameMat, 0, 1.1, 0);
-      const sill = mesh(alongX ? new THREE.BoxGeometry(CELL, 0.12, 0.34) : new THREE.BoxGeometry(0.34, 0.12, CELL), frameMat, 0, 0.06, 0);
+      // Each glass face: a pane, a glazing bar and a sill (which stays when the glass shatters),
+      // running along x (or z) at offset `o` across it.
+      const sills = new THREE.Group();
+      const face = (ax, o) => {
+        const g = new THREE.Group();
+        const pane = mesh(ax ? new THREE.BoxGeometry(CELL - jambW * 2, top, 0.04) : new THREE.BoxGeometry(0.04, top, CELL - jambW * 2), propMat('glass'), ax ? 0 : o, top / 2, ax ? o : 0, false);
+        pane.renderOrder = 2;
+        const t = block ? 0.08 : 0.14, st = block ? 0.12 : 0.34;
+        g.add(pane);
+        g.add(mesh(ax ? new THREE.BoxGeometry(CELL, 0.08, t) : new THREE.BoxGeometry(t, 0.08, CELL), frameMat, ax ? 0 : o, 1.1, ax ? o : 0));
+        sills.add(mesh(ax ? new THREE.BoxGeometry(CELL, 0.12, st) : new THREE.BoxGeometry(st, 0.12, CELL), frameMat, ax ? 0 : o, 0.06, ax ? o : 0));
+        return g;
+      };
+      const edge = CELL / 2 - 0.06;
+      const pane = new THREE.Group();
+      if (block) pane.add(face(true, -edge), face(true, edge), face(false, -edge), face(false, edge));
+      else pane.add(face(alongX, 0));
       const shards = new THREE.Group();
       const r = seeded(p.x * 131 + p.y);
       for (let i = 0; i < 14; i++) {
@@ -405,8 +421,8 @@ export function buildProp(world, p, theme) {
         shards.add(s);
       }
       shards.visible = false;
-      root.add(pane, mull, sill, shards);
-      view.setBroken = (b) => { pane.visible = !b; mull.visible = !b; shards.visible = b; };
+      root.add(pane, sills, shards);
+      view.setBroken = (b) => { pane.visible = !b; shards.visible = b; };
     }
   } else if (p.ch === 'B') {
     const barrels = new THREE.Group(), geo = new THREE.CylinderGeometry(0.36, 0.36, 1.12, 20);

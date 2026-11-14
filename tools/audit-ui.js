@@ -38,7 +38,7 @@ export async function auditMenus() {
   const app = window.jps, ui = app.ui, out = [];
   for (const m of ['login', 'signup', 'reset']) { ui.showAuth(m); await sleep(300); out.push(...audit('auth-' + m)); }
   app.loginGuest(); await sleep(400);
-  for (const src of ['online', 'offline']) { ui.source = src; ui.showMenu('play'); await sleep(300); out.push(...audit('play-' + src)); }
+  for (const src of ['online', 'offline', 'zombies']) { ui.source = src; ui.showMenu('play'); await sleep(300); out.push(...audit('play-' + src)); }
   ui.source = 'online'; ui.allModes = true; ui.showMenu('play'); await sleep(300); out.push(...audit('play-all-modes')); ui.allModes = false;
   ui.showMenu('season'); await sleep(800); out.push(...audit('season'));
   // The admin screen only exists for the admin account; audit it when signed in as admin.

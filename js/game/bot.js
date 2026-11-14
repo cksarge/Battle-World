@@ -222,6 +222,9 @@ export class BotBrain {
         const ax = -d.x / dist, az = -d.z / dist;
         wish.set(ax - az * 0.5 * this.strafeDir, 0, az + ax * 0.5 * this.strafeDir).normalize();
       }
+      // Capture the flag: the carrier keeps running home and shoots on the move; runners keep heading
+      // for the enemy flag unless the fight is close.
+      if (g.objectives?.isCarrier(p) || (g.objectives?.isRunner(p) && dist > 8)) wish = this.navigate(dt);
       // Zombies: finish a revive or keep walking to the shop while the nearest one is still far off.
       if (g.zombies && dist > 7) {
         if (this.action === 'revive') { this.doAction(dt); wish.set(0, 0, 0); fire = false; }
@@ -300,7 +303,7 @@ export class BotBrain {
       this.goal = goal.clone(); this.goalT = 4 + Math.random() * 4;
       this.repath();
     }
-    // Stuck detection (not while deliberately waiting for a lift or a spawn barrier)
+    // Stuck detection (not while deliberately waiting for a lift)
     if (!this.waiting && p.pos.distanceTo(this.lastPos) < 0.15 && this.path && this.pathI < this.path.length) {
       this.stuckT += 0.2;
       if (this.stuckT > 1.2) { this.detour = null; this.repath(); this.stuckT = 0; }
@@ -336,12 +339,10 @@ export class BotBrain {
     this.path = this.g.world.findPath(this.p.pos, this.goal, { gates: true, avoid: this.avoidGates() }); this.pathI = 0;
   }
 
-  // The new map pieces: throw a gate's switch before walking through it, wait for lifts, and hold
-  // still behind spawn barriers. Returns a move vector, or null to carry on as normal.
+  // The new map pieces: throw a gate's switch before walking through it, and wait for lifts.
+  // Returns a move vector, or null to carry on as normal.
   useMapPieces() {
     const p = this.p, W = this.g.world, here = [Math.floor(p.pos.x / 2), Math.floor(p.pos.z / 2)];
-    // Buy time behind a spawn barrier: just wait.
-    if (W.barriersOn && W.barrierCells.length) { this.waiting = true; return new THREE.Vector3(); }
     // On the way to a switch: throw it once in reach, then head back to the goal.
     if (this.detour) {
       const { sw, gate } = this.detour;

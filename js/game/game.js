@@ -294,10 +294,8 @@ export class Game {
     this.training?.update(dt);
     this.tutorial?.update(dt);
     this.pings?.update(dt);
-    // Lifts run on the shared round clock (training's clock is frozen, so they keep their own time there);
-    // spawn barriers hold until the round goes live.
+    // Lifts run on the shared round clock (training's clock is frozen, so they keep their own time there).
     this.world.clock = this.mode.kind === 'training' ? (this.world.clock || 0) + dt : -this.state.time;
-    this.world.setBarriers(this.state.phase === 'buy' || (this.state.phase === 'warmup' && !RESPAWN_KINDS.has(this.mode.kind)));
     this.world.update(dt);
     if (this.isHost && RESPAWN_KINDS.has(this.mode.kind)) this.tickPropRespawn(dt);
     if (this.pendingLeave.size) this.tickPendingLeaves(dt);

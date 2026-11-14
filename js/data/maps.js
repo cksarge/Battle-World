@@ -7,7 +7,7 @@
 //        platform or bridge they lead to · 'E' lift up to the platform beside it
 //        'D' sliding door · 'G' breakable glass pane · 'B' explosive barrels · 'A' ammo crate
 //        'W' wooden barricade · 'k' wooden crate (both can be shot through and destroyed)
-//        'Q' cracked wall (explosives knock it down) · 'P' gate + 'J' switch · 'Y' spawn barrier (buy time only)
+//        'Q' cracked wall (explosives knock it down) · 'P' gate + 'J' switch
 // upper: [char, x0, y0, x1, y1] ops for the overhead layer (see UPPER in engine/grid.js): '=' bridge 4 m,
 //        '-' low bridge 2 m, 'R' / 'r' with railings, 'g' breakable grate catwalk, 'T' tunnel roof.
 //        ('=' in the ground ops is the older way to write a 4 m bridge.)
@@ -33,8 +33,8 @@ export const MAPS = {
       ['B', 10, 1, 10, 1], ['G', 6, 3, 7, 3], ['A', 1, 10, 1, 10],
       // catwalk + ladder, wooden cover
       ['6', 1, 1, 3, 2], ['L', 4, 2, 4, 2], ['k', 7, 7, 7, 7], ['W', 13, 2, 13, 2],
-      // new pieces: a lift to the catwalk, a cracked wall shortcut, spawn barriers
-      ['E', 4, 1, 4, 1], ['Q', 6, 1, 7, 2], ['Y', 1, 4, 3, 4], ['Y', 1, 9, 3, 9],
+      // new pieces: a lift to the catwalk, a cracked wall shortcut
+      ['E', 4, 1, 4, 1], ['Q', 6, 1, 7, 2],
     ],
     spawns: [[1, 5, 2, 8], [19, 5, 20, 8]],
     theme: {
@@ -61,8 +61,8 @@ export const MAPS = {
       ['#', 5, 7, 5, 12],
       ['B', 4, 4, 4, 4], ['G', 20, 7, 20, 9], ['A', 1, 13, 1, 13],
       ['6', 1, 17, 2, 18], ['L', 3, 18, 3, 18], ['k', 17, 13, 17, 13], ['W', 11, 4, 11, 5],
-      // new pieces: stairs up to the catwalks, spawn barriers
-      ['n', 25, 3, 26, 4], ['Y', 1, 6, 4, 6], ['Y', 2, 13, 4, 13],
+      // new pieces: stairs up to the catwalks
+      ['n', 25, 3, 26, 4],
     ],
     spawns: [[1, 7, 3, 12], [24, 7, 26, 12]],
     theme: {
@@ -111,8 +111,8 @@ export const MAPS = {
       // sniper nests with ladders, breakable cover
       ['6', 26, 14, 27, 15], ['L', 25, 14, 25, 14], ['6', 43, 1, 44, 1], ['L', 42, 1, 42, 1],
       ['W', 20, 25, 21, 25], ['W', 4, 20, 4, 21], ['k', 5, 25, 5, 25], ['k', 41, 9, 41, 9], ['k', 3, 10, 3, 10],
-      // new pieces: stairs to A short, cracked long doors, spawn barriers (the B tunnels get a roof below)
-      ['w', 28, 14, 29, 15], ['Q', 40, 23, 41, 24], ['Y', 15, 35, 30, 35], ['Y', 16, 2, 16, 6], ['Y', 29, 2, 29, 6], ['Y', 20, 7, 25, 7],
+      // new pieces: stairs to A short, cracked long doors (the B tunnels get a roof below)
+      ['w', 28, 14, 29, 15], ['Q', 40, 23, 41, 24],
     ],
     upper: [
       ['T', 2, 15, 6, 29], // the B tunnels are roofed
@@ -153,8 +153,8 @@ export const MAPS = {
       ['G', 23, 12, 24, 12], ['G', 25, 31, 26, 31],
       ['6', 18, 1, 19, 1], ['L', 20, 1, 20, 1], ['6', 31, 41, 32, 42], ['L', 30, 41, 30, 41],
       ['W', 23, 15, 24, 15], ['W', 25, 28, 26, 28], ['k', 30, 2, 30, 2],
-      // new pieces: stairs up to both site cranes, spawn barriers (the mid connectors get roofs below)
-      ['w', 20, 1, 22, 1], ['e', 28, 41, 30, 41], ['Y', 4, 15, 8, 15], ['Y', 4, 28, 8, 28], ['Y', 8, 19, 8, 24], ['Y', 39, 15, 44, 15], ['Y', 39, 28, 44, 28], ['Y', 39, 19, 39, 24],
+      // new pieces: stairs up to both site cranes (the mid connectors get roofs below)
+      ['w', 20, 1, 22, 1], ['e', 28, 41, 30, 41],
     ],
     upper: [
       ['T', 23, 13, 26, 18], ['T', 23, 25, 26, 30], // covered loading tunnels between mid and the sites
@@ -183,8 +183,8 @@ export const MAPS = {
       ['X', 4, 6, 4, 9],
       ['B', 6, 12, 6, 12], ['G', 11, 7, 12, 7], ['A', 8, 4, 8, 4],
       ['6', 10, 4, 13, 4], ['L', 9, 4, 9, 4], ['W', 17, 9, 17, 10],
-      // new pieces: stairs at the other end of each catwalk, a cracked pillar, spawn barriers
-      ['w', 14, 4, 15, 4], ['Q', 5, 3, 6, 4], ['Y', 1, 5, 3, 5], ['Y', 1, 10, 3, 10],
+      // new pieces: stairs at the other end of each catwalk, a cracked pillar
+      ['w', 14, 4, 15, 4], ['Q', 5, 3, 6, 4],
     ],
     spawns: [[1, 6, 2, 9], [21, 6, 22, 9]],
     theme: {
@@ -209,8 +209,8 @@ export const MAPS = {
       ['#', 5, 7, 5, 10],
       ['B', 10, 13, 10, 13], ['G', 12, 4, 13, 4], ['A', 15, 4, 15, 4],
       ['6', 9, 1, 11, 1], ['L', 12, 1, 12, 1], ['W', 15, 7, 15, 8], ['k', 16, 12, 16, 12],
-      // new pieces: stairs to the catwalks, a gate (and its switch) through the side walls, spawn barriers
-      ['n', 10, 2, 10, 3], ['P', 18, 5, 19, 5], ['J', 17, 6, 17, 6], ['Y', 1, 6, 4, 6], ['Y', 1, 11, 4, 11],
+      // new pieces: stairs to the catwalks, a gate (and its switch) through the side walls
+      ['n', 10, 2, 10, 3], ['P', 18, 5, 19, 5], ['J', 17, 6, 17, 6],
     ],
     spawns: [[1, 7, 3, 10], [22, 7, 24, 10]],
     theme: {
@@ -247,8 +247,8 @@ export const MAPS = {
       ['A', 4, 28, 4, 28], ['A', 36, 11, 36, 11], ['G', 21, 27, 22, 27],
       ['6', 45, 2, 46, 3], ['L', 44, 2, 44, 2], ['6', 1, 2, 2, 3], ['L', 3, 2, 3, 2],
       ['W', 40, 28, 41, 28], ['W', 6, 28, 7, 28], ['k', 10, 10, 10, 10],
-      // new pieces: stairs to both site perches, cracked ruin pillars, spawn barriers (the temple passages get roofs below)
-      ['w', 3, 2, 5, 2], ['e', 42, 2, 44, 2], ['Q', 6, 22, 8, 23], ['Q', 38, 20, 40, 21], ['Y', 17, 37, 18, 37], ['Y', 29, 37, 30, 37], ['Y', 18, 3, 18, 4], ['Y', 29, 3, 29, 4],
+      // new pieces: stairs to both site perches, cracked ruin pillars (the temple passages get roofs below)
+      ['w', 3, 2, 5, 2], ['e', 42, 2, 44, 2], ['Q', 6, 22, 8, 23], ['Q', 38, 20, 40, 21],
     ],
     upper: [
       ['T', 21, 17, 21, 23], ['T', 26, 17, 26, 23], // roofed passages either side of the temple
@@ -300,8 +300,8 @@ export const MAPS = {
       ['C', 19, 3, 19, 3], ['c', 29, 4, 29, 4], ['M', 31, 2, 32, 3], ['B', 14, 5, 14, 5],
       // spawn screens
       ['#', 5, 32, 8, 32], ['#', 37, 7, 40, 7],
-      // new pieces: cracked sections in the lab divider, spawn barriers
-      ['Q', 20, 20, 21, 20], ['Q', 24, 20, 25, 20], ['Y', 2, 31, 6, 31], ['Y', 11, 36, 11, 40], ['Y', 34, 2, 34, 5], ['Y', 39, 8, 44, 8],
+      // new pieces: cracked sections in the lab divider
+      ['Q', 20, 20, 21, 20], ['Q', 24, 20, 25, 20],
     ],
     upper: [
       ['R', 24, 30, 26, 31], ['g', 27, 30, 28, 31], ['R', 29, 30, 31, 31], // railed ice bridge with a grate middle you can shoot out

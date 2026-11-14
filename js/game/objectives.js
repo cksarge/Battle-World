@@ -25,8 +25,9 @@ export class Objectives {
   get obj() { return this.g.state.obj; }
 
   // ───────────── placement (host) ─────────────
-  // A walkable, fairly open ground cell near the point (x, z) in cells, outside both spawn zones.
-  snap(x, z) {
+  // A walkable, fairly open ground cell near the point (x, z) in cells, outside both spawn zones and
+  // at least 7 m from every point in `avoid`. `fair` prefers cells the same distance from both spawns.
+  snap(x, z, avoid = [], fair = false) {
     const W = this.g.world, spawns = this.g.mapDef.spawns || [];
     const inSpawn = (c) => spawns.some((r) => c.x >= r[0] - 1 && c.x <= r[2] + 1 && c.y >= r[1] - 1 && c.y <= r[3] + 1);
     const open = (c) => {
@@ -38,9 +39,11 @@ export class Objectives {
     let best = null, bs = -Infinity;
     for (const c of W.allFloor) {
       if (W.navH(c.x, c.y) !== 0 || inSpawn(c)) continue;
+      if (avoid.some((q) => Math.hypot(q[0] - (c.x + 0.5) * CELL, q[2] - (c.y + 0.5) * CELL) <= 7)) continue;
       const d = Math.hypot(c.x - x, c.y - z);
       if (d > 14) continue;
-      const score = open(c) * 0.6 - d;
+      let score = open(c) * 0.6 - d;
+      if (fair) { const [ax, ay] = this.spawnCentre(0), [bx, by] = this.spawnCentre(1); score -= 2 * Math.abs(Math.hypot(c.x - ax, c.y - ay) - Math.hypot(c.x - bx, c.y - by)); }
       if (score > bs) { bs = score; best = c; }
     }
     best ||= W.allFloor[Math.floor(W.allFloor.length / 2)];
@@ -54,13 +57,25 @@ export class Objectives {
     return [(r[0] + r[2]) / 2, (r[1] + r[3]) / 2];
   }
 
+  // Where `p` lands on a mirrored map (turned half a turn about the middle), or null if that spot
+  // isn't open floor or is within 7 m of a point in `avoid`.
+  mirrorOf(p, avoid = []) {
+    const W = this.g.world;
+    if (!this.g.mapDef.mirror) return null;
+    const x = W.w * CELL - p[0], z = W.h * CELL - p[2];
+    if (W.navH(Math.floor(x / CELL), Math.floor(z / CELL)) !== 0) return null;
+    if (avoid.some((q) => Math.hypot(q[0] - x, q[2] - z) <= 7)) return null;
+    return [+x.toFixed(2), +W.heightAt(x, z).toFixed(2), +z.toFixed(2)];
+  }
+
   // Three points on the line between the two spawns: one near each side and one in the middle.
   linePoints(ts) {
     const [ax, ay] = this.spawnCentre(0), [bx, by] = this.spawnCentre(1);
     const out = [];
     for (const t of ts) {
-      const p = this.snap(ax + (bx - ax) * t, ay + (by - ay) * t);
-      // Keep points apart (tiny maps can snap two targets to the same spot).
+      // Keep points apart: on tiny maps two targets can snap to the same spot, so the later one
+      // looks a little further out instead.
+      const p = this.snap(ax + (bx - ax) * t, ay + (by - ay) * t, out);
       if (out.every((q) => Math.hypot(q[0] - p[0], q[2] - p[2]) > 7)) out.push(p);
     }
     return out;
@@ -69,7 +84,18 @@ export class Objectives {
   initialState() {
     const W = this.g.world;
     if (this.kind === 'dom') {
-      const pts = this.linePoints([0.27, 0.5, 0.73]);
+      // B first, the same distance from both spawns (slid onto the exact halfway line when that's open
+      // floor); then A toward the attackers and C toward the defenders, C being A's mirror image on
+      // mirrored maps. So neither side starts nearer more points.
+      const [ax, ay] = this.spawnCentre(0), [bx, by] = this.spawnCentre(1);
+      let mid = this.snap((ax + bx) / 2, (ay + by) / 2, [], true);
+      const mx = ((ax + bx) / 2 + 0.5) * CELL, mz = ((ay + by) / 2 + 0.5) * CELL, len = Math.hypot(bx - ax, by - ay) || 1;
+      const ux = (bx - ax) / len, uz = (by - ay) / len, k = (mid[0] - mx) * ux + (mid[2] - mz) * uz;
+      const hx = mid[0] - k * ux, hz = mid[2] - k * uz;
+      if (W.navH(Math.floor(hx / CELL), Math.floor(hz / CELL)) === 0) mid = [+hx.toFixed(2), +W.heightAt(hx, hz).toFixed(2), +hz.toFixed(2)];
+      const a = this.snap(ax + (bx - ax) * 0.27, ay + (by - ay) * 0.27, [mid]);
+      const c = this.mirrorOf(a, [mid, a]) || this.snap(ax + (bx - ax) * 0.73, ay + (by - ay) * 0.73, [mid, a]);
+      const pts = [a, mid, c].filter((p, i, all) => all.slice(0, i).every((q) => Math.hypot(q[0] - p[0], q[2] - p[2]) > 7));
       return { points: pts.map((pos, i) => ({ id: LETTERS[i], pos, owner: -1, cap: -1, prog: 0 })) };
     }
     if (this.kind === 'koth') {
@@ -80,13 +106,38 @@ export class Objectives {
       }
       return { hills, i: 0, t: this.g.mode.hillTime, owner: -1 };
     }
-    // Capture the flag: each flag sits in the middle of its team's spawn zone.
-    const flags = [0, 1].map((team) => {
-      const [cx, cy] = this.spawnCentre(team), c = W.nearestWalkable(Math.round(cx), Math.round(cy)) || { x: Math.round(cx), y: Math.round(cy) };
-      const at = W.navH(Math.round(cx), Math.round(cy)) !== null ? W.cellCenter(Math.round(cx), Math.round(cy)) : W.cellCenter(c.x, c.y);
-      const home = [+at.x.toFixed(2), +at.y.toFixed(2), +at.z.toFixed(2)];
-      return { team, home, pos: [...home], state: 'home', carrier: null, t: 0 };
-    });
+    // Capture the flag: each flag sits a little way out of its team's spawn toward the enemy (further
+    // on large maps), so whoever grabs it has a chance to get away before the enemies respawning
+    // around it cut them down. When the spawns are very close (Vault) that would make captures too
+    // easy, so the flag stays in the middle of the spawn zone. On maps that aren't mirrored, each
+    // flag may sit a little further back so the enemy has about as far to walk to either flag.
+    const [s0x, s0y] = this.spawnCentre(0), [s1x, s1y] = this.spawnCentre(1);
+    const gap = Math.hypot(s1x - s0x, s1y - s0y), out = gap < 19 ? 0 : this.g.mapDef.size === 'large' ? 0.18 : 0.1;
+    const homeAt = (team, f) => {
+      const [ax, ay] = this.spawnCentre(team), [bx, by] = this.spawnCentre(1 - team);
+      if (f) return this.snap(ax + (bx - ax) * f, ay + (by - ay) * f);
+      const cx = Math.round(ax), cy = Math.round(ay), c = W.nearestWalkable(cx, cy) || { x: cx, y: cy };
+      const at = W.navH(cx, cy) !== null ? W.cellCenter(cx, cy) : W.cellCenter(c.x, c.y);
+      return [+at.x.toFixed(2), +at.y.toFixed(2), +at.z.toFixed(2)];
+    };
+    const walk = (team, home) => {
+      const [x, y] = this.spawnCentre(1 - team), from = W.cellCenter(Math.round(x), Math.round(y)), path = W.findPath(from, new THREE.Vector3(...home));
+      if (!path) return Infinity;
+      let d = 0, prev = from;
+      for (const q of path) { d += Math.hypot(q.x - prev.x, q.z - prev.z); prev = q; }
+      return d;
+    };
+    let homes = [homeAt(0, out), homeAt(1, out)];
+    if (out && !this.g.mapDef.mirror) {
+      const steps = [out, out * 0.66, out * 0.33, 0];
+      const opts = [0, 1].map((team) => steps.map((f, i) => { const home = homeAt(team, f); return { home, i, d: walk(team, home) }; }));
+      let best = Infinity;
+      for (const a of opts[0]) for (const b of opts[1]) {
+        const cost = Math.abs(a.d - b.d) + 3 * (a.i + b.i); // each step back costs a little
+        if (cost < best) { best = cost; homes = [a.home, b.home]; }
+      }
+    }
+    const flags = homes.map((home, team) => ({ team, home, pos: [...home], state: 'home', carrier: null, t: 0 }));
     return { flags };
   }
 
@@ -199,6 +250,14 @@ export class Objectives {
   }
 
   isCarrier(p) { return this.kind === 'ctf' && !!this.obj?.flags?.some((f) => f.carrier === p.id); }
+
+  // Capture the flag: each team's bots take turns being defender, runner and hunter (see botGoal),
+  // so both teams get the same mix.
+  botRole(p) {
+    const mates = [...this.g.players.values()].filter((q) => q.team === p.team && q.isBot).map((q) => String(q.id)).sort();
+    return Math.max(0, mates.indexOf(String(p.id))) % 3;
+  }
+  isRunner(p) { return this.kind === 'ctf' && this.botRole(p) === 1; }
 
   // ───────────── events (every client) ─────────────
   apply(d) {
@@ -416,9 +475,12 @@ export class Objectives {
     if (theirs.carrier === p.id) return v(mine.home); // bring it home (waits there if our flag is gone)
     if (mine.state === 'dropped') return v(mine.pos);
     if (mine.state === 'carried') { const c = this.g.players.get(mine.carrier); if (c) return c.pos.clone(); }
-    if (theirs.state === 'carried') { const c = this.g.players.get(theirs.carrier); if (c && roleOf(p.id) % 2) return c.pos.clone(); }
-    if (brain.lastSeen && brain.lostT < 2) return brain.lastSeen;
-    if (roleOf(p.id) % 3 === 0) return spotIn(mine.home, 5, 'defend');
+    if (theirs.state === 'carried') { const c = this.g.players.get(theirs.carrier); if (c && this.botRole(p) !== 0) return c.pos.clone(); }
+    // A third of the team defends, a third runs straight for the enemy flag (still shooting on the way
+    // but not chasing fights), and the rest chase whoever they last saw.
+    const role = this.botRole(p);
+    if (role !== 1 && brain.lastSeen && brain.lostT < 2) return brain.lastSeen;
+    if (role === 0) return spotIn(mine.home, 5, 'defend');
     return v(theirs.pos);
   }
 }

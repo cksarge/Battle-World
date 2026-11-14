@@ -13,7 +13,7 @@ import { STEPS, SECTIONS } from '../js/game/tutorial.js';
 function floorH(w, x, y) {
   const ch = w.chars[y]?.[x];
   if (ch === undefined) return null;
-  if (ch === '.' || ch === 'L' || ch === 'Y' || ch === 'E' || isPlatform(ch) || ch === 'D' || ch === 'P') return isPlatform(ch) ? w.H[y * w.w + x] : 0;
+  if (ch === '.' || ch === 'L' || ch === 'E' || isPlatform(ch) || ch === 'D' || ch === 'P') return isPlatform(ch) ? w.H[y * w.w + x] : 0;
   if (ch === 'c' || ch === 'k' || ch === 'A' || ch === 'h' || ch === 'J' || ch === 'B') return w.H[y * w.w + x]; // stand on top of low props
   return null;
 }
