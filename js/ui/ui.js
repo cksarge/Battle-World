@@ -1328,6 +1328,7 @@ export class UI {
         <span>Scoped sensitivity</span>${range('scopedSens', 0.2, 2, 0.05, (v) => (+v).toFixed(2))}
         <span>Invert mouse Y</span>${toggle('invertY')}
         <span>Kill cam</span>${toggle('killcam')}
+        <span>Auto reload on empty</span>${toggle('autoReload')}
         <span>Master volume</span>${range('volume', 0, 1, 0.05, (v) => Math.round(v * 100) + '%')}
       </div>
       <h2 class="m-h2">Accessibility</h2>

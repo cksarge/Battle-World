@@ -33,7 +33,7 @@ export const WEAPONS = {
     recoil: 0.011, recoilYaw: 0.008, moveSpeed: 0.98, price: 500, killReward: 300,
   },
   magnum: {
-    id: 'magnum', name: 'Magnum .50', slot: 'secondary', type: 'pistol',
+    id: 'magnum', name: 'Desert Eagle', slot: 'secondary', type: 'pistol',
     damage: 56, hsMult: 3.8, legMult: 0.75, armorPen: 0.9, rangeMod: 0.82,
     fireRate: 0.32, auto: false, mag: 7, reserve: 35, reload: 2.2, draw: 0.75,
     spread: 0.004, moveSpread: 0.06, airSpread: 0.16, spreadPerShot: 0.035, spreadRecover: 0.45,
@@ -223,7 +223,7 @@ export const WEAPONS = {
 
 // Thrown utility. `explosive` marks blast damage (Blast Suit reduces it).
 export const GRENADES = {
-  he: { id: 'he', name: 'Frag Grenade', short: 'Frag', price: 300, damage: 98, radius: 6.5, fuse: 1.6, explosive: true },
+  he: { id: 'he', name: 'Frag Grenade', short: 'Frag', price: 300, damage: 130, radius: 6.5, fuse: 1.6, explosive: true },
   flash: { id: 'flash', name: 'Flashbang', short: 'Flash', price: 200, radius: 22, fuse: 1.4, blind: 4.5 },
   smoke: { id: 'smoke', name: 'Smoke Grenade', short: 'Smoke', price: 300, radius: 4.2, duration: 16, fuse: 1.6 },
   fire: { id: 'fire', name: 'Incendiary', short: 'Fire', price: 500, radius: 3.3, duration: 7, dps: 34, fuse: 2.2 },
@@ -233,7 +233,7 @@ export const GRENADES = {
 
 // Projectiles fired by weapons. They share grenade physics and detonate on impact.
 export const PROJECTILES = {
-  gl: { id: 'gl', name: 'Thumper round', damage: 115, radius: 5, fuse: 4, explosive: true, impact: true, speed: 34, weapon: 'thumper' },
+  gl: { id: 'gl', name: 'Thumper round', damage: 130, radius: 6.5, fuse: 4, explosive: true, impact: true, speed: 34, weapon: 'thumper' },
 };
 export const nadeDef = (kind) => GRENADES[kind] || PROJECTILES[kind] || null;
 

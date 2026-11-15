@@ -503,11 +503,21 @@ function buildGunInner(id) {
       break;
     }
     case 'magnum': {
-      part(g, 0.04, 0.045, 0.27, 0, 0.06, -0.1, 'steel');
-      part(g, 0.036, 0.024, 0.2, 0, 0.026, -0.07, 'metal');
-      part(g, 0.034, 0.12, 0.05, 0, -0.03, 0.01, 'wood', 0.2);
-      part(g, 0.012, 0.012, 0.25, 0, 0.088, -0.1, 'metal');
-      muzzle = new THREE.Vector3(0, 0.06, -0.24);
+      // Desert Eagle: long squared slide over the barrel, top rib, exposed hammer.
+      part(g, 0.038, 0.048, 0.27, 0, 0.064, -0.1, 'metal');
+      part(g, 0.016, 0.008, 0.24, 0, 0.092, -0.11, 'steel');
+      part(g, 0.032, 0.026, 0.19, 0, 0.03, -0.07, 'metal');
+      part(g, 0.03, 0.022, 0.06, 0, 0.034, -0.2, 'metal');
+      cyl(g, 0.009, 0.004, 0, 0.066, -0.236, 'polymer');
+      for (let i = 0; i < 5; i++) part(g, 0.039, 0.036, 0.003, 0, 0.064, 0.01 + i * 0.006, 'polymer');
+      part(g, 0.008, 0.006, 0.055, 0, -0.004, -0.06, 'metal');
+      part(g, 0.008, 0.03, 0.006, 0, 0.01, -0.087, 'metal');
+      part(g, 0.006, 0.022, 0.006, 0, 0.012, -0.045, 'steel');
+      part(g, 0.035, 0.12, 0.054, 0, -0.035, 0.015, 'polymer', 0.22);
+      part(g, 0.014, 0.022, 0.014, 0, 0.088, 0.036, 'steel');
+      part(g, 0.024, 0.012, 0.008, 0, 0.1, 0.018, 'metal');
+      part(g, 0.006, 0.012, 0.01, 0, 0.102, -0.222, 'metal');
+      muzzle = new THREE.Vector3(0, 0.066, -0.245);
       break;
     }
     case 'vex': {

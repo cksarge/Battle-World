@@ -74,6 +74,8 @@ export class Game {
     this.fires = [];
     this.decoys = [];
     this.nadeSeq = 0;
+    this.drops = new Map();
+    this.dropSeq = 0;
     // Detailed personal stats for the stats page (weapons, accuracy, head-to-head, where you died).
     // multi: most kills within 5 s · streak: most kills without dying · long: longest kill (m).
     this.myStats = { shots: 0, hits: 0, weapons: {}, victims: {}, killers: {}, deaths: [], nades: 0, plants: 0, defuses: 0, rescues: 0, multi: 0, streak: 0, long: 0 };
@@ -289,6 +291,7 @@ export class Game {
     }
     if (this.emoteT > 0) { this.emoteT -= dt; if (!this.local?.model?.emote) this.emoteT = 0; }
     this.updateNades(dt);
+    this.updateDrops(dt);
     this.updateBomb(dt);
     this.hostageView?.update(dt);
     this.objectives?.update(dt);
@@ -429,6 +432,8 @@ export class Game {
       if (inp.pressed('KeyQ')) this.selectSlot(p, hasSlot(p, p.lastSlot) ? p.lastSlot : bestSlot(p));
       if (inp.mouse.wheel) { cycleSlot(p, inp.mouse.wheel > 0 ? 1 : -1); this.viewmodel.setWeapon(p.weaponId, p.char); }
       if (inp.pressed('KeyR') && startReload(p)) sfx.reload(null);
+      // Auto reload: once the last shot has cycled, an empty mag reloads without another click.
+      else if (this.settings.autoReload !== false && p.weapon?.mag && p.ammo[p.weapon.id]?.mag === 0 && ready(p) && startReload(p)) sfx.reload(null);
       if (inp.pressed('KeyV')) this.inspect(p);
       if (inp.clicked('right')) this.altFire(p);
     }
@@ -1115,12 +1120,14 @@ export class Game {
       if (p !== thrower && thrower && !this.canDamage(thrower, p)) continue;
       // Exposure is checked at the head, chest and knees at the player's real height (crouching lowers
       // them): any of them in the open takes damage, fully behind cover is safe. Damage falls off with
-      // distance to the chest (1.1 m up when standing, lower when crouched).
+      // distance to the chest (1.1 m up when standing, lower when crouched). Inside the core (about
+      // 1.5 m) the blast does full damage, so a grenade at your feet is deadly, your own included.
       const eye = p.eyeY(), chest = p.pos.clone().setY(eye - 0.55);
       const d = chest.distanceTo(c);
       if (d > g.radius) continue;
       if (![eye, eye - 0.55, p.pos.y + 0.35].some((y) => this.world.lineOfSight(c, p.pos.clone().setY(y)))) continue;
-      this.hostDamage(thrower || null, p, g.damage * (1 - d / g.radius) * (p === thrower ? 0.5 : 1), 'body', weapon);
+      const core = Math.min(1.5, g.radius * 0.25);
+      this.hostDamage(thrower || null, p, g.damage * Math.min(1, 1 - (d - core) / (g.radius - core)), 'body', weapon);
     }
   }
 
@@ -1193,6 +1200,90 @@ export class Game {
     this.nades = []; this.decoys = []; this.fires = [];
   }
 
+  // ───────────────────────── dropped weapons ─────────────────────────
+  // Dead players drop their main gun where they fell. Walking over one picks it up if that slot is
+  // empty; pressing E swaps it for the gun you're holding in that slot. The host decides who gets it.
+  dropsAllowed() { return !['gungame', 'infect', 'zombies', 'training'].includes(this.mode.kind); }
+
+  dropInfo(p, id) {
+    const w = WEAPONS[id], a = p.ammo[id];
+    return { did: `${p.id}:${++this.dropSeq}`, item: id, skin: p.char?.skins?.[id] || null, pos: [+p.pos.x.toFixed(2), +p.pos.y.toFixed(2), +p.pos.z.toFixed(2)],
+      mag: Math.min(w.mag, a?.mag ?? w.mag), reserve: Math.min(w.reserve, a?.reserve ?? w.reserve) };
+  }
+
+  hostDropWeapon(p) {
+    if (!this.dropsAllowed() || p.zombie) return;
+    const id = WEAPONS[p.inv.primary] ? p.inv.primary : p.inv.secondary;
+    if (!WEAPONS[id]?.mag) return;
+    this.broadcast('drop', this.dropInfo(p, id));
+  }
+
+  addDrop(d) {
+    if (!WEAPONS[d.item]) return;
+    const mesh = buildGun(d.item, d.skin);
+    // Lying on its side at a random heading.
+    mesh.rotation.set(0, Math.random() * Math.PI * 2, Math.PI / 2);
+    mesh.position.set(d.pos[0], d.pos[1] + 0.035, d.pos[2]);
+    mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    this.scene.add(mesh);
+    this.drops.set(d.did, { ...d, mesh, t: 0 });
+    if (this.drops.size > 24) this.removeDrop(this.drops.keys().next().value);
+  }
+
+  removeDrop(did) {
+    const d = this.drops.get(did);
+    if (!d) return;
+    d.mesh.removeFromParent();
+    this.drops.delete(did);
+  }
+
+  clearDrops() {
+    for (const d of this.drops.values()) d.mesh.removeFromParent();
+    this.drops.clear();
+  }
+
+  nearDrop(p, range = 1.6) {
+    if (!p?.alive || !this.dropsAllowed()) return null;
+    let best = null, bd = range;
+    for (const d of this.drops.values()) {
+      const dist = Math.hypot(d.pos[0] - p.pos.x, d.pos[2] - p.pos.z);
+      if (dist < bd && Math.abs(d.pos[1] - p.pos.y) < 1.2) { bd = dist; best = d; }
+    }
+    return best;
+  }
+
+  updateDrops(dt) {
+    for (const d of [...this.drops.values()]) {
+      d.t += dt;
+      // Respawn modes would fill up with guns; they vanish after a while.
+      if (RESPAWN_KINDS.has(this.mode.kind) && d.t > 60) this.removeDrop(d.did);
+    }
+    // Walking over a gun picks it up when that slot is empty.
+    const p = this.local, now = performance.now();
+    if (!p?.alive || now < (this.grabAt || 0)) return;
+    const d = this.nearDrop(p, 1);
+    if (d && !p.inv[WEAPONS[d.item].slot]) { this.grabAt = now + 500; this.request('grab', { did: d.did }, p); }
+  }
+
+  hostGrab(p, did) {
+    const d = this.drops.get(did);
+    if (!d || !p.alive || !this.dropsAllowed() || Math.hypot(d.pos[0] - p.pos.x, d.pos[2] - p.pos.z) > 2.2) return;
+    const cur = p.inv[WEAPONS[d.item].slot];
+    const swap = WEAPONS[cur]?.mag ? this.dropInfo(p, cur) : null;
+    this.broadcast('grab', { did, id: p.id, item: d.item, mag: d.mag, reserve: d.reserve, swap });
+  }
+
+  applyGrab(g) {
+    this.removeDrop(g.did);
+    const p = this.players.get(g.id), w = WEAPONS[g.item];
+    if (!p || !w) return;
+    if (g.swap) this.addDrop(g.swap);
+    p.inv[w.slot] = g.item;
+    p.ammo[g.item] = { mag: g.mag, reserve: g.reserve };
+    switchSlot(p, w.slot);
+    if (p.isLocal) { sfx.pickup(); this.viewmodel.setWeapon(p.weaponId, p.char); this.hud.info(`Picked up the ${w.name}`, 1.5); }
+  }
+
   // ───────────────────────── interactive props ─────────────────────────
   // Nearest door or ammo crate the player can use, or null.
   usableProp(p) {
@@ -1215,6 +1306,11 @@ export class Game {
     if (!p?.alive) return '';
     const z = this.zombies?.hint(p) || this.objectives?.hint(p);
     if (z) return z;
+    const dr = this.nearDrop(p);
+    if (dr) {
+      const w = WEAPONS[dr.item], cur = WEAPONS[p.inv[w.slot]];
+      return `Press ${pad.label('use')} to pick up the ${w.name}${cur ? ` (drops your ${cur.name})` : ''}`;
+    }
     const pr = this.usableProp(p);
     if (!pr) return '';
     if (pr.ch === 'D') return `Press ${pad.label('use')} to ${pr.open ? 'close' : 'open'} the door`;
@@ -1225,6 +1321,8 @@ export class Game {
 
   interact(p) {
     if (this.zombies?.interact(p)) return;
+    const dr = this.nearDrop(p);
+    if (dr) return this.request('grab', { did: dr.did }, p);
     const pr = this.usableProp(p);
     if (!pr) return;
     if (pr.ch === 'D') return this.request('door', { cell: [pr.x, pr.y] }, p);
@@ -1372,14 +1470,14 @@ export class Game {
       return;
     }
     pos.y = 0.7;
-    this.effects.explosion(pos, 0, pos.y);
-    this.effects.explosion(pos.clone().setY(1.6));
+    this.effects.explosion(pos, 2, 0);
     sfx.explosion(pos);
+    // A fuel barrel hits harder and wider than a frag.
     if (this.isHost) {
-      this.blastDamage(pos, { damage: 120, radius: 5.5 }, this.players.get(d.by) || null, 'barrel');
-      this.chainBarrels(pos, 5.5, d.by);
-      this.breakGlassAround(pos, 4);
-      this.blastWood(pos, 5.5, 120);
+      this.blastDamage(pos, { damage: 150, radius: 7 }, this.players.get(d.by) || null, 'barrel');
+      this.chainBarrels(pos, 7, d.by);
+      this.breakGlassAround(pos, 4.5);
+      this.blastWood(pos, 7, 150);
     }
   }
 
@@ -1438,6 +1536,7 @@ export class Game {
     else if (type === 'plant') this.rules.onPlant(p, data.pos);
     else if (type === 'defuse') this.rules.onDefuse(p);
     else if (type === 'pickup') this.rules.onPickup?.(p, data.i);
+    else if (type === 'grab') this.hostGrab(p, data.did);
     else if (type === 'zbuy' || type === 'zrevive') this.zombies?.handleRequest(type, p, data);
   }
 
@@ -1451,7 +1550,8 @@ export class Game {
     let dmg = raw, armorLoss = 0;
     const armored = part === 'head' ? victim.helmet : part !== 'legs' && victim.armor > 0;
     if (armored && victim.armor > 0) {
-      const pen = w?.armorPen ?? 0.5;
+      // Kevlar stops fragments poorly: explosions get through far more than bullets.
+      const pen = w?.armorPen ?? (explosive ? 0.85 : 0.5);
       const reduced = raw * pen;
       armorLoss = (raw - reduced) * 0.5;
       dmg = reduced;
@@ -1465,6 +1565,7 @@ export class Game {
     if (hp <= 0) {
       const killReward = this.econ && attacker && attacker !== victim ? (w?.killReward ?? 300) : 0;
       if (attacker && killReward) attacker.money = Math.min(this.econ.max, attacker.money + killReward);
+      this.hostDropWeapon(victim);
       this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', money: attacker ? attacker.money : 0 });
       this.rules.onKill(attacker, victim, weapon, part);
     }
@@ -1676,6 +1777,8 @@ export class Game {
       }
       case 'points': for (const [id, v] of Object.entries(d.list || {})) { const p = this.players.get(id); if (p) p.score = v; } break;
       case 'give': this.applyGive(d); break;
+      case 'drop': this.addDrop(d); break;
+      case 'grab': this.applyGrab(d); break;
       case 'nade': this.spawnNade(d); break;
       case 'emote': {
         const p = this.players.get(d.id), def = EMOTES[d.e];
@@ -1796,6 +1899,7 @@ export class Game {
     if (d.z) { s.z = d.z; this.zombies?.refreshPlayers(); }
     this.effects.clearRound();
     this.clearNades();
+    this.clearDrops();
     if (!RESPAWN_KINDS.has(this.mode.kind)) this.world.resetProps();
     for (const [id, team] of Object.entries(d.teams || {})) { const p = this.players.get(id); if (p) this.setTeam(p, team); }
     for (const [id, m] of Object.entries(d.money || {})) { const p = this.players.get(id); if (p) p.money = m; }
@@ -1857,7 +1961,7 @@ export class Game {
   // ───────────────────────── networking ─────────────────────────
   bindNet() {
     const n = this.net;
-    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
+    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'drop', 'grab', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
     for (const e of evs) n.on(e, (d) => this.onEvent(e, d));
     n.on('S', (d) => this.onStates(d));
     n.on('req', (d) => { if (this.isHost) this.handleRequest(d.type, d.data, d.from); });

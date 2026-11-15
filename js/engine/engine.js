@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS = {
   preset: 'high', ...PRESETS.high,
   fov: 90, viewmodelFov: 70, sens: 1.0, scopedSens: 0.8, invertY: false,
   padSens: 1.0, padInvertY: false, padDeadzone: 0.15, padVibration: true, offlineMode: false,
-  volume: 0.7, showFps: true, maxFps: 0, keepLoadout: false, killcam: true, menuScene: true,
+  volume: 0.7, showFps: true, maxFps: 0, keepLoadout: false, killcam: true, autoReload: true, menuScene: true,
   crosshairColor: '#3dff8f', crosshairSize: 6, crosshairGap: 4, crosshairThick: 2, crosshairDot: false,
   colorblind: 'off', soundCues: false, toggleCrouch: false, toggleWalk: false, reduceFlash: false, reduceMotion: false, hudScale: 1,
 };

@@ -404,18 +404,30 @@ export class Effects {
   }
 
   // Frags, launcher rounds, mines, barrels and charges. `kind` 1 is a mine going off at ground level,
-  // which throws its blast and dirt upward. `floorY` (when given) puts the scorch and dust ring on the floor.
+  // which throws its blast and dirt upward; 2 is a fuel barrel: a bigger, taller fireball that rains
+  // burning debris. `floorY` (when given) puts the scorch and dust ring on the floor.
   explosion(pos, kind = 0, floorY = null) {
-    const mine = kind === 1;
+    const mine = kind === 1, barrel = kind === 2, big = barrel ? 1.4 : 1;
     const onFloor = floorY !== null && floorY !== undefined && pos.y - floorY < 2.2;
     const base = onFloor ? pos.clone().setY(floorY) : null;
     this.sprite(this.whiteTex, pos, 5, 0.12, { additive: true, color: 0xfff0d0 });
     // Fireball: fast-expanding tongues that slow down and roll upward.
-    for (let i = 0; i < 12; i++) {
-      const v = new THREE.Vector3(rand(-1, 1), mine ? rand(0.6, 1.6) : rand(-0.3, 1), rand(-1, 1)).normalize().multiplyScalar(rand(4, 9));
-      this.sprite(this.fireTex, pos, rand(1.2, 2.2), rand(0.35, 0.6), { vel: v, drag: 4, grow: 1.6, rot: rand(-2, 2), additive: true, color: pick([0xffd690, 0xffa040, 0xff7428]) });
+    for (let i = 0; i < (barrel ? 18 : 12); i++) {
+      const v = new THREE.Vector3(rand(-1, 1), mine || barrel ? rand(0.6, 1.6) : rand(-0.3, 1), rand(-1, 1)).normalize().multiplyScalar(rand(4, 9) * big);
+      this.sprite(this.fireTex, pos, rand(1.2, 2.2) * big, rand(0.35, 0.6) * big, { vel: v, drag: 4, grow: 1.6, rot: rand(-2, 2), additive: true, color: pick([0xffd690, 0xffa040, 0xff7428]) });
     }
-    for (let i = 0; i < 3; i++) this.sprite(this.flameTex, pos.clone().setY(pos.y + 0.3), rand(1.6, 2.4), rand(0.6, 0.85), { vel: new THREE.Vector3(0, rand(1, 2.5), 0), drag: 1.5, grow: 0.8, additive: true, color: 0xff6a20 });
+    for (let i = 0; i < (barrel ? 6 : 3); i++) this.sprite(this.flameTex, pos.clone().setY(pos.y + 0.3), rand(1.6, 2.4) * big, rand(0.6, 0.85) * big, { vel: new THREE.Vector3(rand(-0.5, 0.5), rand(1, 2.5) * (barrel ? 2 : 1), rand(-0.5, 0.5)), drag: 1.5, grow: 0.8, additive: true, color: 0xff6a20 });
+    // Burning fuel and torn metal thrown out of a barrel, falling back down.
+    if (barrel) {
+      for (let i = 0; i < 14; i++) {
+        const v = new THREE.Vector3(rand(-1, 1), rand(0.8, 2), rand(-1, 1)).normalize().multiplyScalar(rand(5, 10));
+        this.sprite(this.flameTex, pos, rand(0.35, 0.6), rand(1.1, 1.8), { vel: v, grav: 9, drag: 0.5, rot: rand(-3, 3), additive: true, color: pick([0xffa040, 0xff7a28]) });
+      }
+      for (let i = 0; i < 10; i++) {
+        const v = new THREE.Vector3(rand(-1, 1), rand(0.4, 1.6), rand(-1, 1)).normalize().multiplyScalar(rand(7, 13));
+        this.sprite(this.dustTex, pos, rand(0.1, 0.18), rand(0.9, 1.4), { vel: v, grav: 18, rot: rand(-8, 8), color: 0x3a1c14 });
+      }
+    }
     // Glowing fragments and sparks on long arcs.
     for (let i = 0; i < 22; i++) {
       const v = new THREE.Vector3(rand(-1, 1), rand(0.1, mine ? 1.8 : 1.1), rand(-1, 1)).normalize().multiplyScalar(rand(8, 17));
@@ -439,9 +451,9 @@ export class Effects {
         const a = (i / 12) * Math.PI * 2 + rand(-0.2, 0.2);
         this.sprite(this.dustTex, base.clone().setY(base.y + 0.3), rand(0.8, 1.3), rand(1, 1.6), { vel: new THREE.Vector3(Math.cos(a) * rand(6, 9), rand(0.2, 0.8), Math.sin(a) * rand(6, 9)), drag: 2.6, grow: 1.4, alpha: 0.8, color: 0x8a7c68 });
       }
-      this.scorch(base, mine ? 3.6 : 3.2);
+      this.scorch(base, barrel ? 4.4 : mine ? 3.6 : 3.2);
     }
-    this.pulse(pos.clone().setY(pos.y + 1), 0xffa050, 110, 28, 0.35);
+    this.pulse(pos.clone().setY(pos.y + 1), 0xffa050, barrel ? 160 : 110, barrel ? 34 : 28, barrel ? 0.5 : 0.35);
   }
 
   // Smoke grenade cloud. Returned object is used for line-of-sight blocking.
