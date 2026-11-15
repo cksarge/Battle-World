@@ -5,7 +5,7 @@ import { PERKS, OPERATORS, CHAR_OPTIONS, sanitizeChar } from '../data/characters
 import { WEAPONS, CLASS_NAMES, itemInfo } from '../data/weapons.js';
 import { RARITIES, KINDS, owns } from '../data/skins.js';
 import { MAPS, VARIANTS, variantName } from '../data/maps.js';
-import { PRESETS, saveSettings } from '../engine/engine.js';
+import { PRESETS, saveSettings, detectPreset } from '../engine/engine.js';
 import { World } from '../engine/world.js';
 import { Matchmaker, Lobby, listLobbies } from '../net/matchmaking.js';
 import { partyLimit } from '../net/party.js';
@@ -1311,6 +1311,7 @@ export class UI {
     return `<h2 class="m-h2">Graphics</h2>
       <div class="settings-grid">
         <span>Quality preset</span>${seg('preset', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra'], ['custom', 'Custom']])}<span></span>
+        <span>Auto-detect</span><button class="btn small" data-autodetect style="justify-self:start">Find the best preset for this device</button><span></span>
         <span>Render resolution</span>${range('renderScale', 0.5, 2, 0.25, (v) => Math.round(v * 100) + '%')}
         <span>Shadows</span>${seg('shadows', [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']])}<span></span>
         <span>Anti-aliasing</span>${seg('aa', [['off', 'Off'], ['fxaa', 'FXAA'], ['smaa', 'SMAA'], ['msaa', 'MSAA 4x']])}<span></span>
@@ -1392,6 +1393,16 @@ export class UI {
       cam.updateProjectionMatrix();
     };
     const GRAPHICS = new Set(['renderScale', 'shadows', 'aa', 'bloom', 'ao']);
+    const auto = root.querySelector('[data-autodetect]');
+    if (auto) auto.onclick = () => {
+      auto.disabled = true; auto.textContent = 'Testing…';
+      // Let the button repaint before the benchmark briefly holds up the page.
+      setTimeout(() => {
+        const v = detectPreset(app.engine);
+        apply({ preset: v, ...PRESETS[v] }, true);
+        this.rebindAfterPreset(root, `Auto-detected: ${v[0].toUpperCase() + v.slice(1)} preset`);
+      }, 50);
+    };
     root.querySelectorAll('[data-seg]').forEach((g) => {
       g.querySelectorAll('button').forEach((b) => { b.onclick = () => {
         const key = g.dataset.seg;
@@ -1476,14 +1487,14 @@ export class UI {
     layoutCrosshair(this.chPreview.parts, s, s.crosshairGap);
   }
 
-  rebindAfterPreset(root) {
+  rebindAfterPreset(root, message = 'Graphics preset applied') {
     // Re-render the whole settings body so every control reflects the preset.
     const done = root.querySelector('[data-done]');
     if (done) {
       const onClose = done.onclick;
       this.openSettingsModal(root, onClose);
     } else this.renderSettings(root);
-    this.toast('Graphics preset applied', 'good');
+    this.toast(message, 'good');
     initAudio();
   }
 }

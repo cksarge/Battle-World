@@ -27,6 +27,48 @@ export const DEFAULT_SETTINGS = {
 };
 
 const SHADOW_SIZE = { off: 0, low: 1024, high: 2048, ultra: 4096 };
+const PRESET_ORDER = ['low', 'medium', 'high', 'ultra'];
+
+// The highest preset worth trying on this machine, from the GPU's name and the device's specs.
+function presetCeiling(renderer) {
+  let name = '';
+  try {
+    const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+    name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)).toLowerCase();
+  } catch { /* unknown GPU: rely on the benchmark */ }
+  if (/swiftshader|llvmpipe|software|basic render/.test(name)) return 'low';
+  let cap = 'ultra';
+  if (/apple m\d+(?! (pro|max|ultra))/.test(name)) cap = 'high';
+  else if (/intel/.test(name) && !/arc/.test(name)) cap = 'medium';
+  else if (/mali|adreno|powervr|apple gpu/.test(name)) cap = 'medium';
+  const mobile = navigator.maxTouchPoints > 0 && /Mobi|Android|iPhone|iPad/.test(navigator.userAgent);
+  const lower = (to) => { if (PRESET_ORDER.indexOf(cap) > PRESET_ORDER.indexOf(to)) cap = to; };
+  if (mobile || (navigator.deviceMemory && navigator.deviceMemory <= 4)) lower('medium');
+  if (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) lower('high');
+  return cap;
+}
+
+// Picks a graphics preset: starting at the hardware ceiling, renders the current scene a few times at
+// each preset and keeps the first that stays under ~13 ms a frame (headroom for the game itself and
+// busier scenes than the menu). Restores the player's settings before returning.
+export function detectPreset(engine) {
+  const saved = { ...engine.settings }, cap = presetCeiling(engine.renderer);
+  const gl = engine.renderer.getContext(), px = new Uint8Array(4);
+  // Reading a pixel back waits for the GPU to finish, so the timing covers the whole frame.
+  const frame = () => { engine.composer.render(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); };
+  let pick = 'low';
+  try {
+    for (let i = PRESET_ORDER.indexOf(cap); i >= 0; i--) {
+      engine.applySettings({ ...saved, ...PRESETS[PRESET_ORDER[i]] });
+      for (let k = 0; k < 3; k++) frame(); // first frames compile shaders
+      const t0 = performance.now();
+      let n = 0;
+      while (n < 12 && performance.now() - t0 < 600) { frame(); n++; }
+      if ((performance.now() - t0) / n < 13 || i === 0) { pick = PRESET_ORDER[i]; break; }
+    }
+  } finally { engine.applySettings(saved); }
+  return pick;
+}
 
 export function loadSettings() {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('jps_settings') || '{}') }; }
