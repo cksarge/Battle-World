@@ -160,6 +160,238 @@ function cyl(g, r, len, x, y, z, mat, seg = 12) {
   return m;
 }
 
+// ───────────── grenades ─────────────
+// Shared by the held viewmodel, thrown grenades (scaled ×1.6) and replays. Each one sits upright
+// around the origin; the mine's base sits at y = 0 and every armed device has a child named 'led'.
+const nadeCache = new Map();
+function cached(key, make) {
+  if (!nadeCache.has(key)) nadeCache.set(key, make());
+  return nadeCache.get(key);
+}
+
+// Wear for painted metal: speckles, scuffs and a darker band of grime at the bottom.
+function grime(g, W, H, seed) {
+  let s = seed;
+  const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = rnd() < 0.5 ? `rgba(0,0,0,${0.05 + rnd() * 0.12})` : `rgba(255,255,255,${0.03 + rnd() * 0.07})`;
+    g.fillRect(rnd() * W, rnd() * H, 1 + rnd() * 3, 1 + rnd() * 2);
+  }
+  g.strokeStyle = 'rgba(200,200,200,0.18)'; g.lineWidth = 1;
+  for (let i = 0; i < 14; i++) { const x = rnd() * W, y = rnd() * H; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rnd() - 0.5) * 30, y + (rnd() - 0.5) * 8); g.stroke(); }
+  const fade = g.createLinearGradient(0, H * 0.7, 0, H);
+  fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,0.3)');
+  g.fillStyle = fade; g.fillRect(0, 0, W, H);
+}
+
+function stencil(g, text, x, y, size, color) {
+  g.fillStyle = color;
+  g.font = `600 ${size}px "Big Shoulders Stencil Display", "Saira Stencil One", Impact, sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, x, y);
+}
+
+// Canvas wrapped around a canister: x runs around it, y runs top (0) to bottom (H).
+function nadeTexture(key, draw) {
+  return cached('tex:' + key, () => {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 128;
+    draw(c.getContext('2d'), 256, 128);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
+  });
+}
+
+const NADE_SKINS = {
+  // Segmented frag body: olive with grooves and a yellow fill marking under the fuse.
+  he: (g, W, H) => {
+    g.fillStyle = '#4b5434'; g.fillRect(0, 0, W, H);
+    for (let r = 0; r < 6; r++) for (let c = 0; c < 10; c++) {
+      const x = c * (W / 10), y = 12 + r * ((H - 18) / 6), w = W / 10, h = (H - 18) / 6;
+      const grad = g.createLinearGradient(x, y, x + w, y + h);
+      grad.addColorStop(0, 'rgba(255,255,255,0.12)'); grad.addColorStop(1, 'rgba(0,0,0,0.18)');
+      g.fillStyle = grad; g.fillRect(x + 2, y + 2, w - 4, h - 4);
+    }
+    g.fillStyle = 'rgba(15,18,10,0.75)';
+    for (let c = 0; c <= 10; c++) g.fillRect(c * (W / 10) - 1.5, 12, 3, H);
+    for (let r = 0; r <= 6; r++) g.fillRect(0, 12 + r * ((H - 18) / 6) - 1.5, W, 3);
+    g.fillStyle = '#c9a627'; g.fillRect(0, 2, W, 7);
+    grime(g, W, H, 11);
+  },
+  // Flashbang: bare steel, rows of vent holes and a white band.
+  flash: (g, W, H) => {
+    const grad = g.createLinearGradient(0, 0, W, 0);
+    for (let i = 0; i <= 8; i++) grad.addColorStop(i / 8, i % 2 ? '#9aa0a6' : '#7d838a');
+    g.fillStyle = grad; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#e8e8e2'; g.fillRect(0, 10, W, 9); g.fillRect(0, H - 19, W, 9);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 12; c++) {
+      const x = (c + (r % 2) * 0.5) * (W / 12) + 10, y = 38 + r * 22;
+      g.fillStyle = '#111316'; g.beginPath(); g.ellipse(x, y, 5, 7, 0, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(255,255,255,0.3)'; g.lineWidth = 1; g.beginPath(); g.ellipse(x, y + 1, 6, 8, 0, 0.2, Math.PI - 0.2); g.stroke();
+    }
+    grime(g, W, H, 23);
+  },
+  // Smoke: grey-green with a wide white band and stencilled name.
+  smoke: (g, W, H) => {
+    g.fillStyle = '#5a6255'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#d9dad3'; g.fillRect(0, 44, W, 34);
+    stencil(g, 'SMOKE', W * 0.25, 62, 30, '#2a2d29'); stencil(g, 'SMOKE', W * 0.75, 62, 30, '#2a2d29');
+    g.fillStyle = '#3d4239'; g.fillRect(0, 0, W, 8);
+    grime(g, W, H, 37);
+  },
+  // Incendiary: oxide red with a hazard-orange band.
+  fire: (g, W, H) => {
+    g.fillStyle = '#6a2318'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#e8781e'; g.fillRect(0, 40, W, 30);
+    g.fillStyle = 'rgba(0,0,0,0.85)';
+    for (let x = -30; x < W + 30; x += 22) { g.beginPath(); g.moveTo(x, 40); g.lineTo(x + 10, 40); g.lineTo(x + 20, 70); g.lineTo(x + 10, 70); g.fill(); }
+    g.fillStyle = '#e8781e'; g.fillRect(0, 48, W, 14);
+    stencil(g, 'INC', W * 0.25, 56, 16, '#1a0b07'); stencil(g, 'INC', W * 0.75, 56, 16, '#1a0b07');
+    grime(g, W, H, 41);
+  },
+  // Decoy: tan shell with a black speaker grille and a red band.
+  decoy: (g, W, H) => {
+    g.fillStyle = '#8c7a58'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#a5262a'; g.fillRect(0, 14, W, 12);
+    g.fillStyle = '#16161a'; g.fillRect(W * 0.08, 40, W * 0.34, 64); g.fillRect(W * 0.58, 40, W * 0.34, 64);
+    g.fillStyle = '#3a3a40';
+    for (const x0 of [W * 0.08, W * 0.58]) for (let y = 46; y < 100; y += 7) g.fillRect(x0 + 4, y, W * 0.34 - 8, 3);
+    grime(g, W, H, 53);
+  },
+  // Mine rim: olive with yellow/black hazard chevrons.
+  mine: (g, W, H) => {
+    g.fillStyle = '#4c5238'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#d4ac22'; g.fillRect(0, 34, W, 60);
+    g.fillStyle = '#141414';
+    for (let x = -60; x < W + 60; x += 32) { g.beginPath(); g.moveTo(x, 34); g.lineTo(x + 16, 34); g.lineTo(x + 46, 94); g.lineTo(x + 30, 94); g.fill(); }
+    grime(g, W, H, 67);
+  },
+};
+
+function bodyMat(kind, opts = {}) {
+  return cached('mat:' + kind, () => {
+    const map = nadeTexture(kind, NADE_SKINS[kind]);
+    return new THREE.MeshStandardMaterial({ map, roughness: opts.roughness ?? 0.6, metalness: opts.metalness ?? 0.3, bumpMap: map, bumpScale: opts.bump ?? 1.2 });
+  });
+}
+const nadeMat = (key, def) => cached('m:' + key, () => new THREE.MeshStandardMaterial(def));
+const brass = () => nadeMat('brass', { color: 0xb38a3e, roughness: 0.35, metalness: 0.9 });
+const darkSteel = () => nadeMat('dsteel', { color: 0x3a3d42, roughness: 0.4, metalness: 0.85 });
+function glowMat(color) {
+  return cached('glow:' + color, () => {
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const g = c.getContext('2d'), gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, 'rgba(255,255,255,0.5)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 32, 32);
+    return new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  });
+}
+
+// Bright indicator light with a soft halo; hiding it hides both.
+function led(g, color, x, y, z, r = 0.006) {
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), cached('led:' + color, () => new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(4), toneMapped: false })));
+  bulb.name = 'led'; bulb.position.set(x, y, z);
+  const halo = new THREE.Sprite(glowMat(color));
+  halo.scale.setScalar(r * 7);
+  bulb.add(halo);
+  g.add(bulb);
+  return bulb;
+}
+
+function addMesh(g, geo, mat, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  g.add(m);
+  return m;
+}
+
+// Fuse head, safety lever running down the body and the pull ring, on top of a body that ends at `top`.
+function fuse(g, top, bodyR) {
+  addMesh(g, new THREE.CylinderGeometry(0.014, 0.016, 0.018, 14), darkSteel(), 0, top + 0.009);
+  addMesh(g, new THREE.CylinderGeometry(0.009, 0.009, 0.012, 10), brass(), 0, top + 0.024);
+  const steel = gm('steel');
+  // Lever: across the top of the fuse, then bent down along the body.
+  const z0 = 0.026, y0 = top + 0.02, z1 = bodyR + 0.004, y1 = top - 0.065;
+  addMesh(g, new THREE.BoxGeometry(0.012, 0.004, z0 + 0.004), steel, 0, y0, z0 / 2);
+  const arm = addMesh(g, new THREE.BoxGeometry(0.012, Math.hypot(z1 - z0, y1 - y0), 0.004), steel, 0, (y0 + y1) / 2, (z0 + z1) / 2);
+  arm.rotation.x = Math.atan2(z0 - z1, y0 - y1);
+  // Pin and ring on the far side.
+  addMesh(g, new THREE.CylinderGeometry(0.0018, 0.0018, 0.03, 6), steel, 0.012, top + 0.014, 0).rotation.z = Math.PI / 2;
+  const ring = addMesh(g, new THREE.TorusGeometry(0.011, 0.0016, 6, 18), steel, 0.03, top + 0.012, 0);
+  ring.rotation.y = Math.PI / 2;
+}
+
+function canister(g, kind, r, h, opts) {
+  addMesh(g, new THREE.CylinderGeometry(r, r, h, 20), bodyMat(kind, opts));
+  // Rolled seams at both ends.
+  for (const y of [h / 2, -h / 2]) addMesh(g, new THREE.TorusGeometry(r - 0.001, 0.0025, 6, 24), darkSteel(), 0, y).rotation.x = Math.PI / 2;
+  addMesh(g, new THREE.CylinderGeometry(r - 0.002, r - 0.002, 0.003, 20), darkSteel(), 0, h / 2 + 0.001);
+}
+
+function buildNade(g, id) {
+  switch (id) {
+    case 'he': {
+      // Egg-shaped body turned on a lathe.
+      const prof = [[0, -0.05], [0.016, -0.048], [0.03, -0.039], [0.039, -0.024], [0.042, -0.006], [0.041, 0.012], [0.036, 0.028], [0.027, 0.04], [0.016, 0.047], [0.012, 0.05]];
+      const body = addMesh(g, new THREE.LatheGeometry(prof.map(([x, y]) => new THREE.Vector2(x, y)), 22), bodyMat('he', { roughness: 0.7, metalness: 0.15, bump: 2 }));
+      body.rotation.y = 0.3;
+      fuse(g, 0.05, 0.04);
+      break;
+    }
+    case 'flash': {
+      canister(g, 'flash', 0.029, 0.11, { roughness: 0.35, metalness: 0.75, bump: 1.5 });
+      fuse(g, 0.056, 0.029);
+      break;
+    }
+    case 'smoke': {
+      canister(g, 'smoke', 0.032, 0.112, { roughness: 0.75, metalness: 0.2 });
+      // Emission ports on the top cap.
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + 0.4;
+        addMesh(g, new THREE.CylinderGeometry(0.004, 0.004, 0.003, 8), nadeMat('port', { color: 0x0d0e0f, roughness: 1 }), Math.cos(a) * 0.022, 0.058, Math.sin(a) * 0.022);
+      }
+      fuse(g, 0.057, 0.032);
+      break;
+    }
+    case 'fire': {
+      canister(g, 'fire', 0.031, 0.108, { roughness: 0.55, metalness: 0.35 });
+      // Raised igniter collar under the fuse.
+      addMesh(g, new THREE.CylinderGeometry(0.02, 0.026, 0.008, 16), darkSteel(), 0, 0.058);
+      fuse(g, 0.062, 0.031);
+      break;
+    }
+    case 'decoy': {
+      canister(g, 'decoy', 0.028, 0.104, { roughness: 0.7, metalness: 0.15 });
+      // Stubby antenna and status light instead of a fuse.
+      addMesh(g, new THREE.CylinderGeometry(0.012, 0.014, 0.012, 12), darkSteel(), 0, 0.058);
+      addMesh(g, new THREE.CylinderGeometry(0.0018, 0.0018, 0.06, 6), gm('polymer'), 0.008, 0.094);
+      addMesh(g, new THREE.SphereGeometry(0.004, 8, 6), gm('polymer'), 0.008, 0.125);
+      led(g, 0x40ff70, -0.007, 0.066, 0.006, 0.004);
+      break;
+    }
+    case 'mine': {
+      // Housing: rim with hazard band, ridged pressure plate, sensor dome, antenna and arming light.
+      const housing = new THREE.CylinderGeometry(0.074, 0.08, 0.03, 28);
+      addMesh(g, housing, [bodyMat('mine', { roughness: 0.75, metalness: 0.1, bump: 0.8 }), gm('olive'), gm('olive')], 0, 0.015);
+      addMesh(g, new THREE.TorusGeometry(0.074, 0.004, 6, 32), darkSteel(), 0, 0.03).rotation.x = Math.PI / 2;
+      addMesh(g, new THREE.CylinderGeometry(0.052, 0.056, 0.008, 28), gm('olive'), 0, 0.034);
+      for (const r of [0.042, 0.03]) addMesh(g, new THREE.TorusGeometry(r, 0.0025, 5, 28), darkSteel(), 0, 0.038).rotation.x = Math.PI / 2;
+      const dome = addMesh(g, new THREE.SphereGeometry(0.016, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), nadeMat('lens', { color: 0x10161c, roughness: 0.05, metalness: 0.9 }), 0, 0.038);
+      dome.scale.y = 0.8;
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2;
+        addMesh(g, new THREE.BoxGeometry(0.012, 0.006, 0.006), darkSteel(), Math.cos(a) * 0.066, 0.033, Math.sin(a) * 0.066).rotation.y = -a;
+      }
+      addMesh(g, new THREE.CylinderGeometry(0.0016, 0.0016, 0.05, 6), gm('polymer'), -0.05, 0.058, 0.03);
+      led(g, 0xff2a2a, 0.04, 0.042, 0.022);
+      break;
+    }
+  }
+}
+
 // Weapon model pointing down -Z, grip roughly at the origin. `skin` is a WEAPON_SKINS id.
 export function buildGun(id, skin = null) {
   activeSkin = skin && skin !== 'factory' && WEAPON_SKINS[skin] ? skin : null;
@@ -517,55 +749,14 @@ function buildGunInner(id) {
       break;
     }
     // ───── grenades & projectiles ─────
-    case 'flash': {
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.12, 14), gm('steel'));
-      g.add(c);
-      for (let i = 0; i < 3; i++) part(g, 0.062, 0.008, 0.062, 0, -0.035 + i * 0.035, 0, 'polymer');
-      part(g, 0.016, 0.03, 0.016, 0, 0.075, 0, 'metal');
+    case 'he': case 'flash': case 'smoke': case 'fire': case 'mine': case 'decoy':
+      buildNade(g, id);
       break;
-    }
-    case 'fire': {
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.038, 0.1, 14), new THREE.MeshStandardMaterial({ color: 0x8a4a12, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.85 }));
-      g.add(body);
-      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.03, 0.05, 10), body.material); neck.position.y = 0.075; g.add(neck);
-      const rag = part(g, 0.02, 0.04, 0.02, 0, 0.115, 0, 'tan'); rag.rotation.z = 0.3;
-      break;
-    }
-    case 'mine': {
-      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.035, 18), gm('olive'));
-      disc.position.y = 0.017; g.add(disc);
-      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.02, 14), gm('metal'));
-      top.position.y = 0.045; g.add(top);
-      const led = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a2a, toneMapped: false }));
-      led.name = 'led'; led.position.set(0.03, 0.04, 0); g.add(led);
-      break;
-    }
-    case 'decoy': {
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.11, 12), gm('tan'));
-      g.add(c);
-      part(g, 0.058, 0.014, 0.058, 0, 0.03, 0, 'red');
-      part(g, 0.014, 0.03, 0.014, 0, 0.07, 0, 'steel');
-      break;
-    }
     case 'gl': {
       const c = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.06, 12), gm('olive'));
       c.rotation.x = Math.PI / 2; g.add(c);
       const tip = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), gm('steel'));
       tip.position.z = -0.03; g.add(tip);
-      break;
-    }
-    case 'he': {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.04, 14, 10), gm('green'));
-      s.scale.y = 1.25; g.add(s);
-      part(g, 0.02, 0.03, 0.02, 0, 0.055, 0, 'steel');
-      part(g, 0.008, 0.06, 0.012, 0.02, 0.035, 0, 'steel');
-      break;
-    }
-    case 'smoke': {
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.11, 14), gm('polymer'));
-      g.add(c);
-      part(g, 0.066, 0.02, 0.066, 0, 0.03, 0, 'metal');
-      part(g, 0.016, 0.03, 0.016, 0, 0.07, 0, 'steel');
       break;
     }
     case 'bomb': {

@@ -39,6 +39,8 @@ const FFA_NADES = ['he', 'flash', 'fire', 'mine', 'decoy', 'smoke', 'he'];
 const BOT_TDM_WEAPONS = ['ar7', 'm5', 'trident', 'kestrel', 'falcon', 'vex', 'reaper', 'mako', 'mauler', 'warden', 'hornet', 'striker'];
 const BOT_SMGS = ['vex', 'kestrel', 'breacher', 'sparrow', 'hornet', 'mako', 'coach', 'striker', 'nailer'];
 const BOT_NADES = ['he', 'smoke', 'flash', 'fire', 'mine', 'he'];
+// Half the thrown model's thickness (models are scaled ×1.6 in flight), so it rests on the floor.
+const NADE_REST = { he: 0.067, flash: 0.047, smoke: 0.051, fire: 0.05, decoy: 0.045, gl: 0.035 };
 const loadoutKey = (mode) => 'jps_loadout_' + (econFor(mode) ? 'bomb' : 'free');
 
 // One match. Runs identically online and offline; when `net` is null this client is the host.
@@ -1000,10 +1002,19 @@ export class Game {
       let hit = { floor: false, wall: false, player: false };
       if (n.state === 'fly') {
         hit = this.stepNade(n, dt);
-        n.mesh.rotation.x += dt * n.vel.length() * 2;
-        if (n.vel.length() < 0.4) n.still += dt;
+        const speed = n.vel.length();
+        n.mesh.rotation.x += dt * speed * 2;
+        // Slow grenades tip over onto their side instead of resting at whatever angle they spun to.
+        if (speed < 1.5 && n.kind !== 'mine') {
+          const rx = n.mesh.rotation.x, side = Math.round((rx - Math.PI / 2) / Math.PI) * Math.PI + Math.PI / 2;
+          n.mesh.rotation.x += (side - rx) * Math.min(1, dt * 10);
+        }
+        if (speed < 0.4) n.still += dt;
+        this.nadeTrail(n, dt, speed);
       }
       n.mesh.position.copy(n.pos);
+      // The physics point is at floor level; lift the model so it rests on the floor rather than in it.
+      n.mesh.position.y += NADE_REST[n.kind] || 0;
       const floorY = () => W.floorAt(n.pos.x, n.pos.z, n.pos.y + 0.1);
       if (g.impact) {
         if (hit.floor || hit.wall || hit.player || n.t >= g.fuse) this.detonate(i);
@@ -1055,6 +1066,24 @@ export class Game {
     this.updateDecoys(dt);
   }
 
+  // Flight trails. Drawn live only: replays show the grenade itself without them.
+  nadeTrail(n, dt, speed) {
+    n.trailT = (n.trailT || 0) - dt;
+    if (n.trailT > 0 || speed < 2) return;
+    const fx = this.effects, at = n.pos.clone(), jitter = () => new THREE.Vector3((Math.random() - 0.5) * 1.2, 0.4, (Math.random() - 0.5) * 1.2);
+    if (n.kind === 'fire') {
+      n.trailT = 0.03;
+      fx.sprite(fx.sparkTex, at, 0.06, 0.35, { vel: jitter(), grav: 4, additive: true, color: 0xffa040 });
+    } else if (n.kind === 'gl') {
+      n.trailT = 0.025;
+      fx.sprite(fx.puffTex[0], at, 0.3, 0.8, { grow: 1.6, alpha: 0.55, angle: Math.random() * 6, color: 0xbdbdbd });
+      fx.sprite(fx.fireTex, at, 0.22, 0.06, { additive: true });
+    } else if (n.kind === 'smoke') {
+      n.trailT = 0.07;
+      fx.sprite(fx.puffTex[1], at, 0.16, 0.6, { vel: jitter(), grow: 1.8, alpha: 0.3, angle: Math.random() * 6, color: 0xd0d3d6 });
+    }
+  }
+
   removeNade(i) {
     if (i < 0 || !this.nades[i]) return;
     this.nades[i].mesh.removeFromParent();
@@ -1068,7 +1097,7 @@ export class Game {
     const g = nadeDef(n.kind);
     const pos = n.pos.clone();
     if (n.kind === 'mine') pos.y += 0.15;
-    this.effects.explosion(pos);
+    this.effects.explosion(pos, n.kind === 'mine' ? 1 : 0, this.world.floorAt(pos.x, pos.z, pos.y + 0.1));
     sfx.explosion(pos);
     this.removeNade(i);
     this.breakGlassAround(pos, g.radius * 0.6);
@@ -1143,8 +1172,12 @@ export class Game {
       const d = this.decoys[i];
       d.t -= dt; d.nextT -= dt; d.firingT -= dt;
       if (d.t <= 0) { d.mesh.removeFromParent(); sfx.bounce(d.pos); this.decoys.splice(i, 1); continue; }
+      // Status light: slow blink while waiting, rapid flicker during a burst.
+      const led = d.mesh.getObjectByName('led');
+      if (led) led.visible = Math.floor(d.t * (d.firingT > 0 ? 14 : 1.6)) % 2 === 0;
       if (d.nextT <= 0) {
         sfx.shot(d.weapon, d.pos);
+        this.effects.muzzle(d.pos.clone().setY(d.pos.y + 0.12), 0.45);
         d.firingT = 0.8;
         d.burst = (d.burst || 0) - 1;
         if (d.burst <= 0) { d.burst = 1 + Math.floor(Math.random() * 5); d.nextT = 0.7 + Math.random() * 1.6; }
@@ -1339,7 +1372,7 @@ export class Game {
       return;
     }
     pos.y = 0.7;
-    this.effects.explosion(pos);
+    this.effects.explosion(pos, 0, pos.y);
     this.effects.explosion(pos.clone().setY(1.6));
     sfx.explosion(pos);
     if (this.isHost) {
@@ -1613,7 +1646,7 @@ export class Game {
         if (d.state === 'planted' && prev !== 'planted' && d.planter === this.localId) this.myStats.plants++;
         if (d.state === 'defused' && d.defuser === this.localId) this.myStats.defuses++;
         if (d.state === 'planted' && prev !== 'planted') { this.hud.center('CHARGE PLANTED', `Site ${d.site} · ${this.mode.bombTime}s`, 3); sfx.plantDone(new THREE.Vector3(...d.pos)); }
-        if (d.state === 'exploded') { const pos = new THREE.Vector3(...d.pos); this.effects.explosion(pos); this.effects.explosion(pos.clone().setY(pos.y + 1.5)); sfx.explosion(pos); }
+        if (d.state === 'exploded') { const pos = new THREE.Vector3(...d.pos); this.effects.explosion(pos, 0, pos.y); this.effects.explosion(pos.clone().setY(pos.y + 1.5)); sfx.explosion(pos); }
         if (d.state === 'defused') sfx.plantDone(new THREE.Vector3(...d.pos));
         break;
       }
