@@ -141,6 +141,15 @@ export class Api {
     return data;
   }
 
+  // Every account, a page at a time (admin player list). sort: a profiles column, newest/highest first
+  // except username.
+  async listPlayers(sort = 'created_at', offset = 0, limit = 50) {
+    const { data, error, count } = await this.sb.from('profiles').select('id,username,elo,matches,created_at,last_seen', { count: 'exact' })
+      .order(sort, { ascending: sort === 'username' }).range(offset, offset + limit - 1);
+    if (error) throw friendly(error);
+    return { rows: data, total: count ?? data.length };
+  }
+
   async reportRanked(matchId, winner, loser) {
     const { data, error } = await this.sb.rpc('report_ranked', { p_match_id: matchId, p_winner: winner, p_loser: loser });
     if (error) throw friendly(error);

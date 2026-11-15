@@ -109,11 +109,12 @@ export class AdminPanel {
 
   // ───────────── players ─────────────
   async players() {
-    this.body.innerHTML = `<div class="row" style="gap:8px"><input type="text" id="adm-q" placeholder="Search by username" aria-label="Search players" value="${esc(this.query || '')}"><button class="btn small" id="adm-search">Search</button></div>
+    this.body.innerHTML = `<div class="row" style="gap:8px"><input type="text" id="adm-q" placeholder="Search by username" aria-label="Search players" value="${esc(this.query || '')}"><button class="btn small" id="adm-search">Search</button><button class="btn small" id="adm-all">See all players</button></div>
       <div id="adm-results"></div><div id="adm-player"></div>`;
     const q = this.body.querySelector('#adm-q');
     const go = async () => {
       this.query = q.value.trim();
+      this.showAll = false;
       const res = this.body.querySelector('#adm-results');
       if (!this.query) { res.innerHTML = ''; return; }
       const rows = await this.app.api.searchPlayers(this.query);
@@ -121,9 +122,28 @@ export class AdminPanel {
       this.bindPlayerLinks(res);
     };
     this.body.querySelector('#adm-search').onclick = go;
+    this.body.querySelector('#adm-all').onclick = () => { q.value = ''; this.query = ''; this.showAll = true; this.allPlayers(); };
     q.onkeydown = (e) => { if (e.key === 'Enter') go(); };
-    if (this.query) go();
+    if (this.showAll) this.allPlayers();
+    else if (this.query) go();
     if (this.playerId) this.showPlayer(this.playerId);
+  }
+
+  // Every account, 50 at a time, with a choice of order.
+  async allPlayers(more = false) {
+    const res = this.body.querySelector('#adm-results');
+    if (!res) return;
+    this.allSort ||= 'created_at';
+    if (!more) this.allRows = [];
+    const { rows, total } = await this.app.api.listPlayers(this.allSort, this.allRows.length);
+    this.allRows.push(...rows);
+    const SORTS = [['created_at', 'Newest'], ['last_seen', 'Last online'], ['username', 'Name'], ['elo', 'Rating'], ['matches', 'Matches']];
+    res.innerHTML = `<div class="row" style="gap:8px;margin:10px 0"><b>${total.toLocaleString()} players</b><span class="spacer"></span><div class="seg" id="adm-sort">${SORTS.map(([k, l]) => `<button data-k="${k}" class="${k === this.allSort ? 'sel' : ''}">${l}</button>`).join('')}</div></div>
+      <div class="adm-list">${this.allRows.map((r) => `<button class="adm-row" data-player="${r.id}"><b>${esc(r.username)}</b>${rankBadge(r.elo)}<span class="m-sub">${r.matches} matches</span><span class="spacer"></span><span class="m-sub">joined ${new Date(r.created_at).toLocaleDateString()} · last online ${when(r.last_seen)}</span></button>`).join('')}</div>
+      ${this.allRows.length < total ? `<div class="row" style="justify-content:center;margin-top:8px"><button class="btn small" id="adm-more">Load more (${(total - this.allRows.length).toLocaleString()} left)</button></div>` : ''}`;
+    res.querySelectorAll('#adm-sort button').forEach((b) => { b.onclick = () => { this.allSort = b.dataset.k; this.allPlayers(); }; });
+    res.querySelector('#adm-more')?.addEventListener('click', () => this.allPlayers(true));
+    this.bindPlayerLinks(res);
   }
 
   bindPlayerLinks(root) {
@@ -335,21 +355,18 @@ export class AdminPanel {
   // ───────────── game switches ─────────────
   async settings() {
     const o = await this.call('overview');
-    const s = o.settings || {}, mt = s.maintenance || {}, boost = s.xp_boost || {}, motd = s.motd || {};
+    const s = o.settings || {}, mt = s.maintenance || {}, boost = s.xp_boost || {};
     const boostOn = boost.until && new Date(boost.until) > new Date() && boost.multiplier > 1;
     this.body.innerHTML = `<div class="adm-switch"><div><b>Maintenance mode</b><p class="m-sub">Removes everyone except you from the game within 30 seconds, matches included, and shows them a full-screen notice with your message until you turn it off. Then they're let back in automatically.</p>
         <input type="text" id="mt-msg" maxlength="200" placeholder="Message to players" value="${esc(mt.message || '')}"></div>
         <button class="btn small ${mt.on ? 'danger' : ''}" id="mt-toggle">${mt.on ? 'Turn off' : 'Turn on'}</button></div>
       <div class="adm-switch"><div><b>XP event</b><p class="m-sub">${boostOn ? `${boost.multiplier}× XP until ${when(boost.until)}.` : 'Multiply match XP (and season track XP) for everyone.'}</p>
         <div class="row" style="gap:8px"><select id="xb-m"><option value="1.5">1.5×</option><option value="2" selected>2×</option><option value="3">3×</option></select><select id="xb-h"><option value="2">2 hours</option><option value="24">1 day</option><option value="48" selected>Weekend (2 days)</option><option value="168">1 week</option></select></div></div>
-        <div class="row" style="gap:6px">${boostOn ? '<button class="btn small" id="xb-off">End event</button>' : ''}<button class="btn small primary" id="xb-on">${boostOn ? 'Restart' : 'Start'}</button></div></div>
-      <div class="adm-switch"><div><b>Message of the day</b><p class="m-sub">A standing line in the menu banner, until you clear it.</p><input type="text" id="motd" maxlength="200" value="${esc(motd.text || '')}" placeholder="e.g. Season 1 ends Dec 31 — finish your track!"></div>
-        <button class="btn small" id="motd-save">Save</button></div>`;
+        <div class="row" style="gap:6px">${boostOn ? '<button class="btn small" id="xb-off">End event</button>' : ''}<button class="btn small primary" id="xb-on">${boostOn ? 'Restart' : 'Start'}</button></div></div>`;
     const $ = (q) => this.body.querySelector(q);
     $('#mt-toggle').onclick = async () => { await this.call('set_setting', { p_key: 'maintenance', p_value: { on: !mt.on, message: $('#mt-msg').value.trim() } }, mt.on ? 'Maintenance off' : 'Maintenance on'); this.app.pollStatus(); this.refresh(); };
     $('#xb-on').onclick = async () => { const h = +$('#xb-h').value; await this.call('set_setting', { p_key: 'xp_boost', p_value: { multiplier: +$('#xb-m').value, until: new Date(Date.now() + h * 3600e3).toISOString() } }, 'XP event started'); this.app.pollStatus(); this.refresh(); };
     $('#xb-off')?.addEventListener('click', async () => { await this.call('set_setting', { p_key: 'xp_boost', p_value: { multiplier: 1, until: new Date().toISOString() } }, 'XP event ended'); this.app.pollStatus(); this.refresh(); });
-    $('#motd-save').onclick = async () => { await this.call('set_setting', { p_key: 'motd', p_value: { text: $('#motd').value.trim() } }, 'Saved'); this.app.pollStatus(); };
   }
 
   // ───────────── audit log ─────────────

@@ -143,7 +143,5 @@ export function bannerHTML(app) {
   const boost = app.appSettings?.xp_boost;
   if (boost && Date.parse(boost.until) > Date.now() && boost.multiplier > 1) items.push({ kind: 'event', message: `${boost.multiplier}× XP event — ends ${new Date(boost.until).toLocaleString()}` });
   for (const a of app.announcementsList || []) items.push(a);
-  const motd = app.appSettings?.motd;
-  if (motd?.text) items.push({ kind: 'info', message: motd.text });
   return items.slice(0, 3).map((a) => `<div class="m-banner ${esc(a.kind || 'info')}"><b>${a.kind === 'warn' ? 'Notice' : a.kind === 'event' ? 'Event' : 'News'}</b><span>${esc(a.message)}</span></div>`).join('');
 }
