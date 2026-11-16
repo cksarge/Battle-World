@@ -104,7 +104,7 @@ h3 { font-size: 16px; color: var(--muted); }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > span { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
-input[type=text], input[type=email], input[type=password], select {
+input[type=text], input[type=email], input[type=password], input[type=datetime-local], select {
   background: rgba(0,0,0,.35); border: 1px solid var(--line2); border-radius: 4px; padding: 10px 12px; outline: none;
 }
 input:focus, select:focus { border-color: var(--accent); }

@@ -141,7 +141,10 @@ export function bannerHTML(app) {
   const mt = app.maintenance;
   if (mt) items.push({ kind: 'warn', message: mt.message || 'Online play is paused for maintenance. Training and bot matches still work.' });
   const boost = app.appSettings?.xp_boost;
-  if (boost && Date.parse(boost.until) > Date.now() && boost.multiplier > 1) items.push({ kind: 'event', message: `${boost.multiplier}× XP event — ends ${new Date(boost.until).toLocaleString()}` });
+  if (boost && Date.parse(boost.until) > Date.now() && boost.multiplier > 1) {
+    const soon = boost.from && Date.parse(boost.from) > Date.now();
+    items.push({ kind: 'event', message: soon ? `${boost.multiplier}× XP event — starts ${new Date(boost.from).toLocaleString()}` : `${boost.multiplier}× XP event — ends ${new Date(boost.until).toLocaleString()}` });
+  }
   for (const a of app.announcementsList || []) items.push(a);
   return items.slice(0, 3).map((a) => `<div class="m-banner ${esc(a.kind || 'info')}"><b>${a.kind === 'warn' ? 'Notice' : a.kind === 'event' ? 'Event' : 'News'}</b><span>${esc(a.message)}</span></div>`).join('');
 }

@@ -662,9 +662,11 @@ begin
 
   perform ensure_season(uid);
   gained := k * 10 + case p_result when 'win' then 100 when 'draw' then 50 else 25 end;
-  -- Admin XP events: {"multiplier": 2, "until": "<timestamp>"} in app_settings.xp_boost.
+  -- Admin XP events: {"multiplier": 2, "from": "<timestamp>", "until": "<timestamp>"} in app_settings.xp_boost.
+  -- "from" is optional (scheduled events); without it the event runs until "until".
   gained := round(gained * coalesce((select least(greatest((value ->> 'multiplier')::numeric, 1), 3) from app_settings
-    where key = 'xp_boost' and (value ->> 'until')::timestamptz > now()), 1))::int;
+    where key = 'xp_boost' and (value ->> 'until')::timestamptz > now()
+      and coalesce((value ->> 'from')::timestamptz, '-infinity') <= now()), 1))::int;
 
   if p_online then
     update profiles set
@@ -904,12 +906,17 @@ begin
 end;
 $$;
 
-create or replace function public.admin_announce(p_message text, p_hours numeric, p_kind text default 'info')
+-- p_starts schedules it for later (null = now). The old three-argument version is dropped so calls aren't ambiguous.
+drop function if exists public.admin_announce(text, numeric, text);
+create or replace function public.admin_announce(p_message text, p_hours numeric, p_kind text default 'info', p_starts timestamptz default null)
 returns void language plpgsql security definer set search_path = public as $$
+declare
+  starts timestamptz := greatest(coalesce(p_starts, now()), now());
 begin
   perform admin_guard();
-  insert into announcements (message, kind, ends_at, created_by) values (left(p_message, 300), p_kind, now() + make_interval(secs => (greatest(0.1, p_hours) * 3600)::double precision), auth.uid());
-  perform admin_log('announce', null, json_build_object('message', p_message, 'hours', p_hours, 'kind', p_kind)::jsonb);
+  insert into announcements (message, kind, starts_at, ends_at, created_by)
+  values (left(p_message, 300), p_kind, starts, starts + make_interval(secs => (greatest(0.1, p_hours) * 3600)::double precision), auth.uid());
+  perform admin_log('announce', null, json_build_object('message', p_message, 'hours', p_hours, 'kind', p_kind, 'starts', starts)::jsonb);
 end;
 $$;
 
@@ -1033,7 +1040,7 @@ begin
     'admin_ban(uuid, int, text)', 'admin_unban(uuid)', 'admin_mute(uuid, int, text)', 'admin_unmute(uuid)',
     'admin_kick(uuid, text)', 'admin_warn(uuid, text)', 'admin_rename(uuid, text)', 'admin_set_stats(uuid, jsonb)',
     'admin_reset_stats(uuid)', 'admin_grant_item(uuid, text, text, boolean)', 'admin_void_ranked(text)',
-    'admin_moderated(int)', 'admin_announce(text, numeric, text)', 'admin_end_announcement(bigint)',
+    'admin_moderated(int)', 'admin_announce(text, numeric, text, timestamptz)', 'admin_end_announcement(bigint)',
     'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);

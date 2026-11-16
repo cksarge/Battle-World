@@ -9,6 +9,13 @@ import { FEATURED_SLOTS, registerRow } from '../data/custommaps.js';
 import { REPORT_REASONS, COMMENDS, FEEDBACK_KINDS, esc, banUntil, isActive } from './social.js';
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
+// A "Starts" picker: empty means now. Returns an ISO time, or null for now; false if it's in the past.
+const startsField = (id) => `<label class="field"><span>Starts (leave empty for now)</span><input type="datetime-local" id="${id}"></label>`;
+function readStarts(input) {
+  if (!input.value) return null;
+  const t = new Date(input.value);
+  return t.getTime() > Date.now() + 30e3 ? t.toISOString() : false;
+}
 // Report evidence is written by the reporting player, so numbers are forced to numbers.
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const REASON = Object.fromEntries(REPORT_REASONS.map(([k, l]) => [k, l.split(' (')[0]]));
@@ -342,12 +349,18 @@ export class AdminPanel {
       <label class="field"><span>Message (shown at the top of everyone's menu)</span><textarea id="an-msg" rows="2" maxlength="300"></textarea></label>
       <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field"><span>Style</span><select id="an-kind"><option value="info">News</option><option value="warn">Notice</option><option value="event">Event</option></select></label>
       <label class="field"><span>Show for</span><select id="an-h"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24" selected>1 day</option><option value="72">3 days</option><option value="168">1 week</option></select></label>
+      ${startsField('an-start')}
       <button class="btn small primary" id="an-post" style="align-self:flex-end">Post</button></div></div>
-      <h3 class="m-h3">Recent</h3>${list.length ? list.map((a) => `<div class="adm-ann ${live(a) ? 'live' : ''}"><span class="tag">${esc(ANNOUNCE_KINDS[a.kind] || a.kind)}</span><span>${esc(a.message)}</span><span class="spacer"></span><span class="m-sub">${live(a) ? 'until ' + when(a.ends_at) : 'ended'}</span>${live(a) ? `<button class="btn tiny ghost" data-end="${a.id}">End now</button>` : ''}</div>`).join('') : '<p class="m-empty">None yet.</p>'}`;
+      <h3 class="m-h3">Recent</h3>${list.length ? list.map((a) => {
+        const later = new Date(a.starts_at) > new Date();
+        return `<div class="adm-ann ${live(a) ? 'live' : ''}"><span class="tag">${esc(ANNOUNCE_KINDS[a.kind] || a.kind)}</span><span>${esc(a.message)}</span><span class="spacer"></span><span class="m-sub">${later && new Date(a.ends_at) > new Date() ? `scheduled · ${when(a.starts_at)} to ${when(a.ends_at)}` : live(a) ? 'until ' + when(a.ends_at) : 'ended'}</span>${live(a) || (later && new Date(a.ends_at) > new Date()) ? `<button class="btn tiny ghost" data-end="${a.id}">${later ? 'Cancel' : 'End now'}</button>` : ''}</div>`;
+      }).join('') : '<p class="m-empty">None yet.</p>'}`;
     this.body.querySelector('#an-post').onclick = async () => {
       const msg = this.body.querySelector('#an-msg').value.trim();
       if (!msg) return this.ui.toast('Write a message first', 'bad');
-      await this.call('announce', { p_message: msg, p_hours: +this.body.querySelector('#an-h').value, p_kind: this.body.querySelector('#an-kind').value }, 'Announcement posted');
+      const starts = readStarts(this.body.querySelector('#an-start'));
+      if (starts === false) return this.ui.toast('Pick a start time in the future, or leave it empty', 'bad');
+      await this.call('announce', { p_message: msg, p_hours: +this.body.querySelector('#an-h').value, p_kind: this.body.querySelector('#an-kind').value, p_starts: starts }, starts ? 'Announcement scheduled' : 'Announcement posted');
       this.app.pollStatus();
       this.refresh();
     };
@@ -358,17 +371,26 @@ export class AdminPanel {
   async settings() {
     const o = await this.call('overview');
     const s = o.settings || {}, mt = s.maintenance || {}, boost = s.xp_boost || {};
-    const boostOn = boost.until && new Date(boost.until) > new Date() && boost.multiplier > 1;
+    const now = new Date(), live = boost.until && new Date(boost.until) > now && boost.multiplier > 1;
+    const boostOn = live && !(boost.from && new Date(boost.from) > now), scheduled = live && !boostOn;
     this.body.innerHTML = `<div class="adm-switch"><div><b>Maintenance mode</b><p class="m-sub">Removes everyone except you from the game within 30 seconds, matches included, and shows them a full-screen notice with your message until you turn it off. Then they're let back in automatically.</p>
         <input type="text" id="mt-msg" maxlength="200" placeholder="Message to players" value="${esc(mt.message || '')}"></div>
         <button class="btn small ${mt.on ? 'danger' : ''}" id="mt-toggle">${mt.on ? 'Turn off' : 'Turn on'}</button></div>
-      <div class="adm-switch"><div><b>XP event</b><p class="m-sub">${boostOn ? `${boost.multiplier}× XP until ${when(boost.until)}.` : 'Multiply match XP (and season track XP) for everyone.'}</p>
-        <div class="row" style="gap:8px"><select id="xb-m"><option value="1.5">1.5×</option><option value="2" selected>2×</option><option value="3">3×</option></select><select id="xb-h"><option value="2">2 hours</option><option value="24">1 day</option><option value="48" selected>Weekend (2 days)</option><option value="168">1 week</option></select></div></div>
-        <div class="row" style="gap:6px">${boostOn ? '<button class="btn small" id="xb-off">End event</button>' : ''}<button class="btn small primary" id="xb-on">${boostOn ? 'Restart' : 'Start'}</button></div></div>`;
+      <div class="adm-switch"><div><b>XP event</b><p class="m-sub">${boostOn ? `${boost.multiplier}× XP until ${when(boost.until)}.` : scheduled ? `${boost.multiplier}× XP scheduled from ${when(boost.from)} to ${when(boost.until)}.` : 'Multiply match XP (and season track XP) for everyone.'} Only one event at a time: starting or scheduling another replaces it.</p>
+        <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end"><select id="xb-m"><option value="1.5">1.5×</option><option value="2" selected>2×</option><option value="3">3×</option></select><select id="xb-h"><option value="2">2 hours</option><option value="24">1 day</option><option value="48" selected>Weekend (2 days)</option><option value="168">1 week</option></select>${startsField('xb-start')}</div></div>
+        <div class="row" style="gap:6px">${live ? `<button class="btn small" id="xb-off">${scheduled ? 'Cancel' : 'End event'}</button>` : ''}<button class="btn small primary" id="xb-on">${live ? 'Replace' : 'Start'}</button></div></div>`;
     const $ = (q) => this.body.querySelector(q);
     $('#mt-toggle').onclick = async () => { await this.call('set_setting', { p_key: 'maintenance', p_value: { on: !mt.on, message: $('#mt-msg').value.trim() } }, mt.on ? 'Maintenance off' : 'Maintenance on'); this.app.pollStatus(); this.refresh(); };
-    $('#xb-on').onclick = async () => { const h = +$('#xb-h').value; await this.call('set_setting', { p_key: 'xp_boost', p_value: { multiplier: +$('#xb-m').value, until: new Date(Date.now() + h * 3600e3).toISOString() } }, 'XP event started'); this.app.pollStatus(); this.refresh(); };
-    $('#xb-off')?.addEventListener('click', async () => { await this.call('set_setting', { p_key: 'xp_boost', p_value: { multiplier: 1, until: new Date().toISOString() } }, 'XP event ended'); this.app.pollStatus(); this.refresh(); });
+    $('#xb-on').onclick = async () => {
+      const starts = readStarts($('#xb-start'));
+      if (starts === false) return this.ui.toast('Pick a start time in the future, or leave it empty', 'bad');
+      const from = starts ? new Date(starts) : new Date();
+      const value = { multiplier: +$('#xb-m').value, until: new Date(from.getTime() + +$('#xb-h').value * 3600e3).toISOString() };
+      if (starts) value.from = starts;
+      await this.call('set_setting', { p_key: 'xp_boost', p_value: value }, starts ? 'XP event scheduled' : 'XP event started');
+      this.app.pollStatus(); this.refresh();
+    };
+    $('#xb-off')?.addEventListener('click', async () => { await this.call('set_setting', { p_key: 'xp_boost', p_value: { multiplier: 1, until: new Date().toISOString() } }, scheduled ? 'XP event cancelled' : 'XP event ended'); this.app.pollStatus(); this.refresh(); });
   }
 
   // ───────────── audit log ─────────────

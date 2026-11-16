@@ -1,4 +1,4 @@
-import { Engine, loadSettings } from './engine/engine.js';
+import { Engine, loadSettings, saveSettings, detectPreset, PRESETS } from './engine/engine.js';
 import { UI } from './ui/ui.js';
 import { Game } from './game/game.js';
 import { OPERATORS, sanitizeChar } from './data/characters.js';
@@ -26,6 +26,8 @@ const step = (pct, msg) => { bootBar.style.width = pct + '%'; bootMsg.textConten
 class App {
   async init() {
     step(10, 'Loading settings');
+    // Nothing saved yet means the game has never run on this device: graphics get auto-detected.
+    try { this.firstRun = !localStorage.getItem('jps_settings'); } catch { this.firstRun = false; }
     this.settings = loadSettings();
     applyAccess(this.settings);
     // Community maps saved on this device (downloads and the last known featured maps).
@@ -213,6 +215,7 @@ class App {
     this.grantSeasonRewards();
     this.claimPending();
     this.ui.showMenu('play');
+    this.maybeAutoDetect();
   }
 
   loginGuest() {
@@ -222,6 +225,29 @@ class App {
     this.achievements = this.loadLocalAchievements();
     this.pollStatus();
     this.ui.showMenu('play');
+    this.maybeAutoDetect();
+  }
+
+  // Picks a graphics preset from a quick benchmark the first time the game runs on this device, and
+  // the first time a brand new account (its first day, before any match) signs in on this device.
+  maybeAutoDetect() {
+    const p = this.profile;
+    const fresh = !!p && !p.matches && Date.now() - Date.parse(p.created_at) < 864e5;
+    let seen = [];
+    try { seen = JSON.parse(localStorage.getItem('jps_detected_for') || '[]'); } catch { /* ignore */ }
+    const newAccount = fresh && !seen.includes(p.id);
+    if (!this.firstRun && !newAccount) return;
+    this.firstRun = false;
+    if (newAccount) { try { localStorage.setItem('jps_detected_for', JSON.stringify([...seen, p.id].slice(-20))); } catch { /* ignore */ } }
+    // Give the menu backdrop a moment to start drawing so the benchmark measures a real scene.
+    setTimeout(() => {
+      if (this.game) return;
+      const v = detectPreset(this.engine);
+      Object.assign(this.settings, { preset: v, ...PRESETS[v] });
+      saveSettings(this.settings);
+      this.engine.applySettings(this.settings);
+      this.ui.toast(`Graphics set to ${v[0].toUpperCase() + v.slice(1)} for this device. You can change it in Settings.`, 'good', null, 6000);
+    }, 1500);
   }
 
   async signOut() {
