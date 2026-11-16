@@ -144,13 +144,9 @@ export class Api {
     if (error) throw friendly(error);
   }
 
+  // Leaderboards come from the database so players with an active ban can be left out.
   async leaderboard(kind = 'elo', limit = 100) {
-    const col = { elo: 'elo', kills: 'kills', wins: 'wins', xp: 'xp' }[kind] || 'elo';
-    let q = this.sb.from('profiles').select('id,username,elo,peak_elo,ranked_wins,ranked_losses,wins,losses,matches,kills,deaths,headshots,xp').order(col, { ascending: false }).limit(limit);
-    if (kind === 'elo') q = q.gt('ranked_wins', -1);
-    const { data, error } = await q;
-    if (error) throw friendly(error);
-    return data;
+    return (await this.rpc('leaderboard', { p_kind: kind, p_limit: limit })) || [];
   }
 
   async history(userId, limit = 15) {
@@ -314,10 +310,7 @@ export class Api {
   }
 
   async seasonLeaderboard(seasonId, limit = 100) {
-    const { data, error } = await this.sb.from('profiles').select('id,username,elo,season_peak,season_wins,season_losses,pass_xp')
-      .eq('season_id', seasonId).order('elo', { ascending: false }).limit(limit);
-    if (error) throw friendly(error);
-    return data;
+    return (await this.rpc('season_leaderboard', { p_season: seasonId, p_limit: limit })) || [];
   }
 
   // Admin calls. The database refuses every one of these unless the caller is in public.admins.

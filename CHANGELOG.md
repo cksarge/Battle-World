@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.2.1 · 2026-11-16
+#### 4.2.2 · 2026-11-16
+
+- Banned players no longer show on the leaderboards, including the season leaderboard. They come back if the ban ends or is lifted
+
+#### 4.2.1 · 2026-11-16 · [2267c2b](https://github.com/cksarge/John-Paul-Simulator/commit/2267c2b)
 
 - Kill feed tags each have their own color instead of all being yellow
 

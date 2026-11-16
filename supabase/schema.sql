@@ -1310,6 +1310,32 @@ begin
 end;
 $$;
 
+-- Leaderboards (4.2.2). Players with an active ban are left out, and come back if it ends or is lifted.
+create or replace function public.leaderboard(p_kind text default 'elo', p_limit int default 100)
+returns json language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(t order by t.pos), '[]') from (
+    select row_number() over (order by case p_kind when 'kills' then p.kills when 'wins' then p.wins when 'xp' then p.xp else p.elo end desc) as pos,
+      p.id, p.username, p.elo, p.peak_elo, p.ranked_wins, p.ranked_losses, p.wins, p.losses, p.matches, p.kills, p.deaths, p.headshots, p.xp
+    from profiles p
+    where not exists (select 1 from moderation m where m.user_id = p.id and m.banned_until > now())
+    order by case p_kind when 'kills' then p.kills when 'wins' then p.wins when 'xp' then p.xp else p.elo end desc
+    limit least(greatest(coalesce(p_limit, 100), 1), 200)
+  ) t;
+$$;
+
+create or replace function public.season_leaderboard(p_season text, p_limit int default 100)
+returns json language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(t order by t.pos), '[]') from (
+    select row_number() over (order by p.elo desc) as pos,
+      p.id, p.username, p.elo, p.season_peak, p.season_wins, p.season_losses, p.pass_xp
+    from profiles p
+    where p.season_id = p_season
+      and not exists (select 1 from moderation m where m.user_id = p.id and m.banned_until > now())
+    order by p.elo desc
+    limit least(greatest(coalesce(p_limit, 100), 1), 200)
+  ) t;
+$$;
+
 -- ───────────── function permissions ─────────────
 -- Internal helpers are not callable from the app at all.
 revoke all on function public.ensure_season(uuid) from public, anon, authenticated;
@@ -1328,6 +1354,10 @@ revoke all on function public.moderation_flags(uuid[]) from public, anon;
 grant execute on function public.moderation_flags(uuid[]) to authenticated;
 revoke all on function public.player_commends(uuid) from public;
 grant execute on function public.player_commends(uuid) to anon, authenticated;
+revoke all on function public.leaderboard(text, int) from public;
+grant execute on function public.leaderboard(text, int) to anon, authenticated;
+revoke all on function public.season_leaderboard(text, int) from public;
+grant execute on function public.season_leaderboard(text, int) to anon, authenticated;
 
 do $$
 declare f text;
