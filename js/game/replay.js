@@ -11,6 +11,7 @@ import { itemInfo, nadeDef } from '../data/weapons.js';
 import { pad, BTN } from '../engine/gamepad.js';
 import { sampleFrames, frameIndex, unpack, ITEM_IDS } from './recorder.js';
 import { SpectatorCam, CAM_LABELS } from './spectatorcam.js';
+import { killTagsHTML } from './hud.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (t) => { t = Math.max(0, Math.floor(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
@@ -308,7 +309,7 @@ export class ReplayViewer {
     const recent = this.kills.filter((k) => k.t <= this.t && k.t > this.t - 6).slice(-5).reverse();
     hud.querySelector('.rp-feed').innerHTML = recent.map((k) => {
       const w = itemInfo(k.a.w)?.name || k.a.w;
-      return `<div class="kf">${k.a.killer && k.a.killer !== k.a.victim ? `<span>${esc(this.nameOf(k.a.killer))}</span>` : ''}<span class="w">${esc(w)}</span>${k.a.hs ? '<span class="hs">◉ HS</span>' : ''}<span>${esc(this.nameOf(k.a.victim))}</span></div>`;
+      return `<div class="kf">${k.a.killer && k.a.killer !== k.a.victim ? `<span>${esc(this.nameOf(k.a.killer))}</span>` : ''}<span class="w">${esc(w)}</span>${killTagsHTML(k.a.hs, k.a.t)}<span>${esc(this.nameOf(k.a.victim))}</span></div>`;
     }).join('');
     const st = this.targetState(), p = d.players[this.targetIdx];
     hud.querySelector('.rp-target').innerHTML = p ? `<span class="muted small">${this.cam.mode === 'free' ? 'Free camera' : 'Watching'}</span><b>${esc(p.name)}</b>${st ? `<span>${st.alive ? st.hp + ' HP' : 'Dead'} · ${esc(itemInfo(st.weapon)?.name || '')}</span>` : ''}` : '';

@@ -1,6 +1,12 @@
 # Changelog
 
-## 4.0.0 · 2026-11-16
+### 4.1.0 · 2026-11-16
+
+- Kill feed tags besides headshots: NOSCOPE, 360, LASTBLT (last bullet in the magazine), AIR, FLASH (while flashed), SMOKE (through smoke), WALLBANG (through wooden cover), LONG (40 m or more) and BURN (victim standing in fire). They show in replays too
+- Background buildings, chimneys, tanks, trees and ships no longer poke into the playable area on any map
+- The buy menu has grenades in their own column on the right, matching gear on the left
+
+## 4.0.0 · 2026-11-16 · [0fef720](https://github.com/cksarge/John-Paul-Simulator/commit/0fef720)
 
 - **Anti-cheat** in online matches: the host throws out impossible hits (more damage than the gun does, a gun the player doesn't have, or shots faster than it fires), and every player's game reports impossible things it sees others do, the host included: moving too fast, firing too fast, kills through solid walls, buying outside buy time and round results that don't add up
 - Ranked results the two players' games disagree on are marked as disputed and flagged for review

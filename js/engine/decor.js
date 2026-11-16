@@ -817,11 +817,13 @@ function scenery(world, group, d, rand) {
     quay.receiveShadow = true;
     group.add(quay);
   }
-  const ring = (minR, maxR, n, fn) => {
+  // `pad` is the most an object reaches out from its centre (half its diagonal, so any rotation is
+  // covered); its centre is pushed out that much more so nothing pokes into the playable area.
+  const ring = (minR, maxR, n, fn, pad = 0) => {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rand() * 0.2;
       // Distance measured from the map's rectangle, not its centre.
-      const r = minR + rand() * (maxR - minR);
+      const r = pad + minR + rand() * (maxR - minR);
       const ex = Math.cos(a), ez = Math.sin(a);
       const k = Math.min(Math.abs((W / 2 + r) / (ex || 1e-6)), Math.abs((D / 2 + r) / (ez || 1e-6)));
       fn(cx + ex * k, cz + ez * k, a, i);
@@ -846,7 +848,7 @@ function scenery(world, group, d, rand) {
         const r = new THREE.Mesh(new THREE.BoxGeometry(2, 1.4, 2), getMaterial('trim'));
         r.position.set(x, h + 0.7, z); group.add(r);
       }
-    });
+    }, Math.hypot(16, 16) / 2);
   }
   if (kind === 'harbor') {
     const craneMat = new THREE.MeshStandardMaterial({ color: 0xc9572b, roughness: 0.6, metalness: 0.4 });
@@ -857,7 +859,7 @@ function scenery(world, group, d, rand) {
       const boom = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 46), craneMat); boom.position.set(0, 29, -14); crane.add(boom);
       crane.position.set(x, 0, z); crane.rotation.y = -a + Math.PI / 2;
       group.add(crane);
-    });
+    }, Math.hypot(4, 4));
     const hull = new THREE.MeshStandardMaterial({ color: 0x23303a, roughness: 0.7 });
     ring(50, 90, 4, (x, z, a) => {
       const ship = new THREE.Group();
@@ -866,7 +868,7 @@ function scenery(world, group, d, rand) {
       for (let i = 0; i < 6; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(6, 2.6, 12), getMaterial('container', ['#a8432f', '#2f6aa8', '#3d7a45', '#c27a2c'][i % 4])); c.position.set(-20 + i * 6.5, 7.8, 0); ship.add(c); }
       ship.position.set(x, -1, z); ship.rotation.y = -a + Math.PI / 2;
       group.add(ship);
-    });
+    }, Math.hypot(30, 7));
   }
   if (kind === 'industrial') {
     const stack = new THREE.MeshStandardMaterial({ color: 0x6b625a, roughness: 0.9 });
@@ -875,7 +877,7 @@ function scenery(world, group, d, rand) {
       const h = 22 + rand() * 24, r = 1.4 + rand() * 1.4;
       const c = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.8, r, h, 16), stack); c.position.set(x, h / 2, z); group.add(c);
       const b = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.82, r * 0.82, 1.5, 16), band); b.position.set(x, h - 3, z); group.add(b);
-    });
+    }, 2.8);
     ring(6, 30, 18, (x, z, a) => {
       const w = 10 + rand() * 14, h = 8 + rand() * 10, dd = 10 + rand() * 12;
       const geo = new THREE.BoxGeometry(w, h, dd);
@@ -884,12 +886,12 @@ function scenery(world, group, d, rand) {
       const b = new THREE.Mesh(geo, getMaterial(rand() < 0.5 ? 'panel' : 'concrete'));
       b.position.set(x, h / 2, z); b.rotation.y = -a;
       group.add(b);
-    });
+    }, Math.hypot(24, 22) / 2);
     ring(8, 26, 6, (x, z) => {
       const r = 3 + rand() * 3, h = 6 + rand() * 6;
       const tank = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 24), getMaterial('rust'));
       tank.position.set(x, h / 2, z); group.add(tank);
-    });
+    }, 6);
   }
   if (kind === 'mountains' || kind === 'desert') {
     const snow = kind === 'mountains';
@@ -933,7 +935,7 @@ function scenery(world, group, d, rand) {
         const c = new THREE.Color(pine ? 0x2c4a36 : 0x3d6a2c).offsetHSL((rand() - 0.5) * 0.04, 0, (rand() - 0.5) * 0.08);
         crowns.setColorAt(ci - 1, c);
       }
-    });
+    }, 6.5);
     crowns.count = ci;
     group.add(trunks, crowns);
   }

@@ -328,6 +328,9 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .kf .t { color: var(--t); } .kf .ct { color: var(--ct); } .kf .ffa { color: #ddd; }
 .kf .w { color: rgba(255,255,255,.65); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
 .kf .hs { color: #ff6b6b; font-size: 11px; }
+.kf .kt { font-size: 10px; letter-spacing: .5px; padding: 1px 5px; border-radius: 2px; background: rgba(255,255,255,.1); color: #f2c14e; }
+.kf .kt-flash, .kf .kt-smoke { color: #c9d6e3; }
+.kf .kt-burn { color: #ff8a3d; }
 
 .center-msg { position: absolute; top: 24%; left: 0; right: 0; text-align: center; font-family: var(--display); font-weight: 700; letter-spacing: 3px; text-transform: uppercase; text-shadow: 0 3px 12px rgba(0,0,0,.8); pointer-events: none; }
 .center-msg .big { font-size: 52px; }
@@ -380,13 +383,14 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .scoreboard .sb-head { display: flex; justify-content: space-between; font-family: var(--display); font-weight: 700; font-size: 22px; letter-spacing: 2px; text-transform: uppercase; padding: 4px 8px; }
 .scoreboard .sb-head.t { color: var(--t); } .scoreboard .sb-head.ct { color: var(--ct); }
 .scoreboard tr.dead td { opacity: .45; }
-.buy-menu { width: min(980px, 95vw); background: rgba(12,15,20,.95); border: 1px solid var(--line2); border-radius: 6px; padding: 18px; }
+.buy-menu { width: min(1180px, 96vw); background: rgba(12,15,20,.95); border: 1px solid var(--line2); border-radius: 6px; padding: 18px; }
 .buy-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
-.buy-body { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; margin-top: 14px; align-items: start; }
+.buy-body { display: grid; grid-template-columns: 200px minmax(0, 1fr) 200px; gap: 16px; margin-top: 14px; align-items: start; }
 .buy-gear { padding-right: 16px; border-right: 1px solid var(--line); }
+.buy-gear.buy-nades { padding-right: 0; padding-left: 16px; border-right: 0; border-left: 1px solid var(--line); }
 .buy-gear .buy-item { padding: 18px 14px; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
 .buy-gear .buy-item b { font-size: 14px; }
-@media (max-width: 640px) { .buy-body { grid-template-columns: 1fr; } .buy-gear { padding-right: 0; border-right: 0; } }
+@media (max-width: 900px) { .buy-body { grid-template-columns: 1fr; } .buy-gear, .buy-gear.buy-nades { padding: 0; border: 0; } }
 .buy-item.sell { border-style: dashed; }
 .buy-item.sell b { color: var(--accent); }
 .buy-cat h3 { font-size: 13px; }

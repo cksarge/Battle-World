@@ -21,6 +21,16 @@ const SOUND_CUES = {
 const CUE_RANK = Object.fromEntries(Object.keys(SOUND_CUES).map((k, i) => [k, i]));
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Kill feed tags, in the order they're shown after HS. The shooter's game works most of them out
+// (Game.shotTags); BURN is added by the host.
+export const KILL_TAGS = {
+  noscope: 'NOSCOPE', spin: '360', last: 'LASTBLT', air: 'AIR', flash: 'FLASH',
+  smoke: 'SMOKE', wallbang: 'WALLBANG', long: 'LONG', burn: 'BURN',
+};
+export function killTagsHTML(hs, tags) {
+  const t = Object.keys(KILL_TAGS).filter((k) => tags?.includes(k));
+  return (hs ? '<span class="hs">◉ HS</span>' : '') + t.map((k) => `<span class="kt kt-${k}">${KILL_TAGS[k]}</span>`).join('');
+}
 const fmtTime = (t) => { t = Math.max(0, Math.ceil(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 
 // In-match DOM overlay: vitals, scores, killfeed, radar and the interactive panels.
@@ -192,9 +202,11 @@ export class Hud {
       const cls = owned(id) ? 'owned' : p.money < price ? 'no' : '';
       return `<div class="buy-item ${cls}" data-id="${id}"><span>${esc(info.name)}</span><b>${free || !price ? 'FREE' : '$' + price}</b></div>`;
     };
-    // Gear gets its own column on the left with bigger buttons; the defuse kit only shows for defenders.
+    // Gear gets its own column on the left and grenades one on the right, both with bigger buttons;
+    // the defuse kit only shows for defenders.
     const gear = BUY_MENU.find((c) => c.title === 'Gear').items.filter((id) => id !== 'defusekit' || g.kitAllowed(p));
-    const cats = BUY_MENU.filter((c) => c.title !== 'Gear').map((c) => `<div class="buy-cat"><h3>${c.title}</h3>${c.items.map(item).join('')}</div>`).join('');
+    const nades = BUY_MENU.find((c) => c.title === 'Grenades').items;
+    const cats = BUY_MENU.filter((c) => c.title !== 'Gear' && c.title !== 'Grenades').map((c) => `<div class="buy-cat"><h3>${c.title}</h3>${c.items.map(item).join('')}</div>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay" data-close><div class="buy-menu">
       <div class="row"><h2 style="margin:0">${free ? 'Choose loadout' : 'Buy menu'}</h2><span class="spacer"></span>
       ${free ? '' : `<span class="hud-num" style="font-size:28px;color:var(--good)">$${p.money}</span>`}
@@ -209,7 +221,7 @@ export class Hud {
         <div class="preset-items small">${items ? names(items) : '<span class="muted">Empty</span>'}</div>
         <div class="row"><button class="btn small primary" data-preset="${i}" ${items ? '' : 'disabled'}>Equip</button><button class="btn small" data-save="${i}">Save current</button></div>
       </div>`).join('')}</div>
-      <div class="buy-body"><div class="buy-gear"><h3>Gear</h3>${gear.map(item).join('')}</div><div class="buy-cats">${cats}</div></div></div></div>`;
+      <div class="buy-body"><div class="buy-gear"><h3>Gear</h3>${gear.map(item).join('')}</div><div class="buy-cats">${cats}</div><div class="buy-gear buy-nades"><h3>Grenades</h3>${nades.map(item).join('')}</div></div></div></div>`;
     this.el.ovl.querySelectorAll('.buy-item[data-id]').forEach((e) => { e.onclick = () => g.buy(e.dataset.id); });
     this.el.ovl.querySelectorAll('.buy-item[data-sell]').forEach((e) => { e.onclick = () => g.sell(e.dataset.sell); });
     this.el.ovl.querySelector('[data-a=close]').onclick = () => this.closeOverlay(true);
@@ -413,13 +425,13 @@ export class Hud {
     }, kind === 'step' ? 500 : 1100);
   }
 
-  killfeed(k, v, w, hs) {
+  killfeed(k, v, w, hs, tags) {
     const cls = (p) => (SOLO_KINDS.has(this.g.mode.kind) ? 'ffa' : TEAM_CLASS[p.team]);
     const e = document.createElement('div');
     const lp = this.g.local;
     e.className = 'kf' + ((k && k === lp) || v === lp ? ' mine' : '');
     const wname = itemInfo(w)?.name || { bomb: 'Charge', barrel: 'Exploding barrel', fire: 'Incendiary', fall: 'Fall', claws: 'Claws', bloat: 'Bloater' }[w] || w;
-    e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${esc(k.name)}</span>` : ''}<span class="w">${esc(wname)}</span>${hs ? '<span class="hs">◉ HS</span>' : ''}<span class="${cls(v)}">${esc(v.name)}</span>`;
+    e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${esc(k.name)}</span>` : ''}<span class="w">${esc(wname)}</span>${killTagsHTML(hs, tags)}<span class="${cls(v)}">${esc(v.name)}</span>`;
     this.el.kf.prepend(e);
     while (this.el.kf.children.length > 6) this.el.kf.lastChild.remove();
     setTimeout(() => e.remove(), 7000);

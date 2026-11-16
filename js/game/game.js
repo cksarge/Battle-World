@@ -22,7 +22,7 @@ import { pad, BTN } from '../engine/gamepad.js';
 import { censor } from '../data/profanity.js';
 import { Rules } from './rules.js';
 import { BotBrain } from './bot.js';
-import { Hud } from './hud.js';
+import { Hud, KILL_TAGS } from './hud.js';
 import { EMOTES, KILL_FX, WEAPON_SKINS } from '../data/skins.js';
 import { Recorder, WORLD_EVENTS, unpack } from './recorder.js';
 import { AntiCheat } from './anticheat.js';
@@ -270,6 +270,7 @@ export class Game {
     const lp = this.local;
     if (lp) this.updateLocal(dt, lp);
     else if (this.spectator) this.spectatorInput();
+    for (const p of this.players.values()) if (p.owner === this.localId && p.alive) this.trackSpin(p, now);
     for (const [id, brain] of this.brains) {
       const p = this.players.get(id);
       if (p) { brain.update(dt); tickWeapon(p, dt, p.triggerHeld); }
@@ -737,6 +738,28 @@ export class Game {
   // ───────────────────────── combat ─────────────────────────
   releaseTrigger(p) { p.triggerHeld = false; }
 
+  // How far a player has turned in the last 1.5 s (for the 360 kill tag).
+  trackSpin(p, now) {
+    let d = p.yaw - (p.lastYaw ?? p.yaw);
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    p.lastYaw = p.yaw;
+    const log = (p.spinLog ||= []);
+    if (Math.abs(d) > 1e-4) log.push([now, Math.abs(d)]);
+    while (log.length && now - log[0][0] > 1500) log.shift();
+  }
+
+  // Kill feed tags the shooter's own game can see at the moment of the shot (see KILL_TAGS in hud.js).
+  // Per-victim ones (smoke, wallbang, long) are added where each hit is worked out.
+  shotTags(p, w, a) {
+    const t = [];
+    if (w.scope && !(p.ws.scope > 0)) t.push('noscope');
+    if ((p.spinLog || []).reduce((s, [, d]) => s + d, 0) >= (320 * Math.PI) / 180) t.push('spin');
+    if (a && w.mag > 1 && a.mag === 0) t.push('last');
+    if (!p.onGround && !p.mantle) t.push('air');
+    if (p.isLocal && this.hud.blindT > 0.3) t.push('flash');
+    return t;
+  }
+
   tryFire(p, isLocal) {
     if (!p.alive) return;
     // Grenades aren't in WEAPONS, so handle them before the weapon lookup.
@@ -775,11 +798,15 @@ export class Game {
     const dmgBy = new Map();
     const shots = [];
     const forged = p.forged?.has(w.id) ? 2 : 1;
+    const tags = this.shotTags(p, w, a);
     const addHit = (victim, part, dist, mult = 1) => {
       const d = bulletDamage(w, part, dist) * mult * forged;
-      const prev = dmgBy.get(victim) || { d: 0, part: 'legs' };
+      const prev = dmgBy.get(victim) || { d: 0, part: 'legs', tags: new Set(tags) };
       prev.d += d;
       if (part === 'head' || (part === 'body' && prev.part === 'legs')) prev.part = part;
+      if (mult < 1) prev.tags.add('wallbang');
+      if (dist >= 40) prev.tags.add('long');
+      if (this.effects.smokeBlocks(origin, victim.pos.clone().setY(victim.pos.y + 1.1))) prev.tags.add('smoke');
       dmgBy.set(victim, prev);
     };
     for (let i = 0; i < (w.pellets || 1); i++) {
@@ -825,8 +852,8 @@ export class Game {
       if (dmgBy.size) { ws.h++; this.myStats.hits++; }
       this.training?.onShot(dmgBy.size > 0);
     }
-    for (const [victim, { d, part }] of dmgBy) {
-      this.request('hit', { v: victim.id, d: Math.round(d), part, w: w.id }, p);
+    for (const [victim, { d, part, tags: vt }] of dmgBy) {
+      this.request('hit', { v: victim.id, d: Math.round(d), part, w: w.id, t: [...vt] }, p);
       if (isLocal) this.hud.hitmarker(part === 'head', false);
       if (isLocal) sfx.hit(part === 'head');
       if (isLocal && victim.zombie) this.hud.zpoints(10);
@@ -899,7 +926,7 @@ export class Game {
       const victimFwd = best.o.forward().setY(0).normalize();
       const back = victimFwd.dot(dir.clone().setY(0).normalize()) > 0.5;
       const dmg = (heavy ? w.altDamage : w.damage) * (back ? w.backstab : 1);
-      this.request('hit', { v: best.o.id, d: Math.round(dmg), part: 'body', w: w.id }, p);
+      this.request('hit', { v: best.o.id, d: Math.round(dmg), part: 'body', w: w.id, t: this.shotTags(p, w, null) }, p);
       const pt = origin.clone().addScaledVector(dir, best.dist);
       this.effects.impact(pt, dir.clone().negate(), { blood: true });
       if (p.isLocal) { this.hud.hitmarker(false, false); sfx.hit(false); if (best.o.zombie) this.hud.zpoints(10); }
@@ -1564,7 +1591,7 @@ export class Game {
       // Forged guns (zombies) hit twice as hard, so they get a higher ceiling.
       if (!v || !p.alive || data.d <= 0 || data.d > (this.zombies ? 1500 : 700)) return;
       if (this.anticheat.rejectHit(p, data)) return;
-      this.hostDamage(p, v, data.d, data.part, data.w);
+      this.hostDamage(p, v, data.d, data.part, data.w, data.t);
     } else if (type === 'buy') this.hostBuy(p, data.item);
     else if (type === 'sell') this.hostSell(p, data.item);
     else if (type === 'fall') { if (p.alive && data.d > 0 && data.d < 250) this.hostDamage(p, p, data.d, 'legs', 'fall'); }
@@ -1578,7 +1605,7 @@ export class Game {
     else if (type === 'zbuy' || type === 'zrevive') this.zombies?.handleRequest(type, p, data);
   }
 
-  hostDamage(attacker, victim, raw, part, weapon) {
+  hostDamage(attacker, victim, raw, part, weapon, tags = null) {
     if (!victim.alive || (this.state.phase !== 'live' && this.state.phase !== 'post')) return;
     if (attacker && attacker !== victim && !this.canDamage(attacker, victim)) return;
     const w = WEAPONS[weapon];
@@ -1604,7 +1631,11 @@ export class Game {
       const killReward = this.econ && attacker && attacker !== victim ? (w?.killReward ?? 300) : 0;
       if (attacker && killReward) attacker.money = Math.min(this.econ.max, attacker.money + killReward);
       this.hostDropWeapon(victim);
-      this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', money: attacker ? attacker.money : 0 });
+      // Kill feed tags: what the shooter's game reported (known tags only), plus BURN when the victim
+      // was standing in fire (but the fire isn't what killed them).
+      const t = (Array.isArray(tags) ? tags : []).filter((x) => KILL_TAGS[x]).slice(0, 8);
+      if (weapon !== 'fire' && this.fires.some((f) => Math.hypot(victim.pos.x - f.pos.x, victim.pos.z - f.pos.z) < f.radius && Math.abs(victim.pos.y - f.pos.y) < 1.2)) t.push('burn');
+      this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', t: t.length ? t : undefined, money: attacker ? attacker.money : 0 });
       this.rules.onKill(attacker, victim, weapon, part);
     }
   }
@@ -1740,7 +1771,7 @@ export class Game {
         this.trackKill(k, v, d);
         this.training?.onKill(k, v);
         this.tutorial?.onKill(k, v);
-        if (!v.zombie) this.hud.killfeed(k, v, d.w, d.hs);
+        if (!v.zombie) this.hud.killfeed(k, v, d.w, d.hs, d.t);
         else if (k?.isLocal) this.hud.zombieKill(d.hs, d.w);
         const fx = k && k !== v ? k.char?.killfx : null;
         if (fx && fx !== 'none' && KILL_FX[fx]) this.effects.killFx(fx, v.pos.clone().setY(v.pos.y + 1), KILL_FX[fx].color);
