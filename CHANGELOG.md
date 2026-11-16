@@ -1,6 +1,14 @@
 # Changelog
 
-### 4.1.0 · 2026-11-16
+### 4.2.0 · 2026-11-16
+
+- **Friendly fire** in every team mode (not Zombies, Infection or training): bullets, knives, grenades, fire and barrels all hurt teammates
+- Team kills earn no kill and cost $300, and show a red TK tag in the kill feed
+- Like CS2: a warning at the first team kill or 100 team damage, and a kick at 3 team kills or 300 team damage. In online matches each kick adds a matchmaking cooldown (30 minutes, then 2 hours, 24 hours and 7 days), and a fifth kick within 30 days brings a 14-day ban
+- Bots hold their fire when a teammate is in the way
+- WIN kill feed tag on the kill that ends the round, or the match in modes without rounds
+
+### 4.1.0 · 2026-11-16 · [7743bd4](https://github.com/cksarge/John-Paul-Simulator/commit/7743bd4)
 
 - Kill feed tags besides headshots: NOSCOPE, 360, LASTBLT (last bullet in the magazine), AIR, FLASH (while flashed), SMOKE (through smoke), WALLBANG (through wooden cover), LONG (40 m or more) and BURN (victim standing in fire). They show in replays too
 - Background buildings, chimneys, tanks, trees and ships no longer poke into the playable area on any map

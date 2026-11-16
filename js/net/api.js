@@ -186,6 +186,13 @@ export class Api {
     if (error) throw friendly(error);
   }
 
+  // Host: a player was kicked for team killing (see Game.teamDamage). Returns the penalty applied.
+  async reportFfKick(matchId, target, teamKills, teamDamage) {
+    const { data, error } = await this.sb.rpc('report_ff_kick', { p_match_id: matchId, p_target: target, p_team_kills: teamKills, p_team_damage: teamDamage });
+    if (error) throw friendly(error);
+    return data;
+  }
+
   // Something impossible another player did in an online match (see js/game/anticheat.js).
   async flagPlayer(matchId, target, kind, mode, details) {
     const { error } = await this.sb.rpc('flag_player', { p_match_id: matchId, p_target: target, p_kind: kind, p_mode: mode, p_details: details });

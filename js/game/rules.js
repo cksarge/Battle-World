@@ -232,6 +232,7 @@ export class Rules {
 
   endRound(winner, reason) {
     const s = this.s, g = this.g, m = this.mode;
+    if (reason === 'elim') g.tagWinningKill();
     s.phase = 'post';
     s.time = 5;
     if (winner >= 0) s.scores[winner]++;
@@ -317,7 +318,7 @@ export class Rules {
   // `force` returns the least-bad spot instead.
   respawnPoint(p, enemies = null, force = false) {
     const g = this.g, w = g.world;
-    if (!enemies) enemies = [...g.players.values()].filter((o) => o !== p && o.alive && g.canDamage(p, o)).map((o) => [o.pos.x, o.pos.y, o.pos.z]);
+    if (!enemies) enemies = [...g.players.values()].filter((o) => o !== p && o.alive && g.isEnemy(p, o)).map((o) => [o.pos.x, o.pos.y, o.pos.z]);
     const center = [w.size.x / 2, w.size.z / 2];
     let cells;
     if (!SOLO_KINDS.has(this.mode.kind) && this.mode.kind !== 'infect') {

@@ -24,8 +24,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 // Kill feed tags, in the order they're shown after HS. The shooter's game works most of them out
 // (Game.shotTags); BURN is added by the host.
 export const KILL_TAGS = {
-  noscope: 'NOSCOPE', spin: '360', last: 'LASTBLT', air: 'AIR', flash: 'FLASH',
-  smoke: 'SMOKE', wallbang: 'WALLBANG', long: 'LONG', burn: 'BURN',
+  tk: 'TK', noscope: 'NOSCOPE', spin: '360', last: 'LASTBLT', air: 'AIR', flash: 'FLASH',
+  smoke: 'SMOKE', wallbang: 'WALLBANG', long: 'LONG', burn: 'BURN', win: 'WIN',
 };
 export function killTagsHTML(hs, tags) {
   const t = Object.keys(KILL_TAGS).filter((k) => tags?.includes(k));
@@ -430,11 +430,19 @@ export class Hud {
     const e = document.createElement('div');
     const lp = this.g.local;
     e.className = 'kf' + ((k && k === lp) || v === lp ? ' mine' : '');
+    e.dataset.v = v.id;
     const wname = itemInfo(w)?.name || { bomb: 'Charge', barrel: 'Exploding barrel', fire: 'Incendiary', fall: 'Fall', claws: 'Claws', bloat: 'Bloater' }[w] || w;
     e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${esc(k.name)}</span>` : ''}<span class="w">${esc(wname)}</span>${killTagsHTML(hs, tags)}<span class="${cls(v)}">${esc(v.name)}</span>`;
     this.el.kf.prepend(e);
     while (this.el.kf.children.length > 6) this.el.kf.lastChild.remove();
     setTimeout(() => e.remove(), 7000);
+  }
+
+  // Adds a tag to the newest kill feed line for this victim (WIN arrives just after the kill).
+  addKillTag(victimId, tag) {
+    const e = [...this.el.kf.children].find((x) => x.dataset.v === victimId);
+    if (!e || e.querySelector('.kt-' + tag)) return;
+    e.lastElementChild.insertAdjacentHTML('beforebegin', `<span class="kt kt-${tag}">${KILL_TAGS[tag]}</span>`);
   }
 
   // Zombies: floating "+60" next to the crosshair. Hits get small ones from the local shot (see

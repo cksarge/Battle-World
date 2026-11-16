@@ -44,9 +44,22 @@ export class BotBrain {
 
   blind(t) { this.blindT = Math.max(this.blindT, t); if (t > 0.6) { this.target = null; this.seenT = 0; } }
 
+  // A teammate between this bot and what it's aiming at (closer than the target, or within 40 m).
+  teammateInLine() {
+    const g = this.g, p = this.p;
+    if (!g.friendlyFire) return false;
+    const eye = p.eye(), dir = p.forward(), range = this.target ? Math.min(60, this.target.pos.distanceTo(p.pos) + 1) : 40;
+    for (const o of g.players.values()) {
+      if (o === p || !o.alive || g.isEnemy(p, o)) continue;
+      if (o.pos.distanceTo(p.pos) > range + 2) continue;
+      if (o.hitTest(eye, dir, range)) return true;
+    }
+    return false;
+  }
+
   enemies() {
     const out = [];
-    for (const o of this.g.players.values()) if (o !== this.p && o.alive && this.g.canDamage(this.p, o)) out.push(o);
+    for (const o of this.g.players.values()) if (o !== this.p && o.alive && this.g.isEnemy(this.p, o)) out.push(o);
     return out;
   }
 
@@ -248,6 +261,8 @@ export class BotBrain {
     // Semi-automatic guns need the trigger let go between shots.
     if (fire && w && !w.auto && !w.burst && w.type !== 'knife' && p.triggerHeld && p.ws.cooldown <= -this.L.tap) g.releaseTrigger(p);
     g.movePlayer(p, wish, dt, { walk, crouch, jump: false });
+    // Friendly fire is on: hold fire while a teammate is in the way.
+    if ((fire || p.burstLeft > 0) && this.teammateInLine()) { fire = false; p.burstLeft = 0; }
     if (fire || p.burstLeft > 0) g.tryFire(p, false);
     if (!fire) g.releaseTrigger(p);
   }

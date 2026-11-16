@@ -231,6 +231,7 @@ export class AdminPanel {
         <button class="btn tiny" data-act="revoke" data-u="${p.id}">Remove item</button>
         <button class="btn tiny danger" data-act="reset" data-u="${p.id}">Reset stats</button>
       </div>
+      ${d.ff_penalties?.length ? `<h4 class="m-h3">Team-kill kicks</h4>${m.queue_cooldown_until && new Date(m.queue_cooldown_until) > new Date() ? `<div class="m-sub">Matchmaking cooldown until ${when(m.queue_cooldown_until)}</div>` : ''}${d.ff_penalties.map((f) => `<div class="m-sub">${when(f.created_at)} · ${f.team_kills} team kills, ${f.team_damage} team damage · match ${esc(f.match_id)}</div>`).join('')}` : ''}
       ${d.appeals?.length ? `<h4 class="m-h3">Ban appeals</h4>${d.appeals.map((a) => `<div class="m-sub">${when(a.created_at)} · ${esc(a.status)}: “${esc(a.message)}”${a.admin_note ? ` · your note: ${esc(a.admin_note)}` : ''}</div>`).join('')}` : ''}
       ${d.warnings.length ? `<h4 class="m-h3">Warnings</h4>${d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join('')}` : ''}
       ${d.reports_against.length ? `<h4 class="m-h3">Reports against them</h4>${d.reports_against.map((r) => `<div class="m-sub">${when(r.created_at)} · ${esc(REASON[r.reason])} from ${esc(r.reporter_name)} · ${esc(r.status)}${r.note ? ` · “${esc(r.note)}”` : ''}</div>`).join('')}` : ''}

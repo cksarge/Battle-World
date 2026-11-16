@@ -797,6 +797,8 @@ export class UI {
   async startQueue(mode) {
     if (this.blockedByMaintenance()) return;
     if (this.queue) return; // already searching
+    const cd = this.app.queueCooldown;
+    if (cd && Date.parse(cd) > Date.now()) return this.toast(`Matchmaking cooldown for team killing until ${new Date(cd).toLocaleString()}. Bot matches and custom lobbies still work.`, 'bad', null, 7000);
     const m = MODES[mode], party = this.app.party;
     if (party?.inParty) {
       if (!party.isLeader) return this.toast('Only your party leader can start a search', 'bad');

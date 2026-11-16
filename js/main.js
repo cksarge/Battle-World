@@ -303,6 +303,7 @@ class App {
     this.isAdmin = st.admin === true;
     if (st.friend_requests !== undefined && (st.friend_requests !== this.friendRequestCount || !this.friendsLoaded)) this.loadFriends();
     this.muted = st.muted_until ? { until: st.muted_until, reason: st.mute_reason } : null;
+    this.queueCooldown = st.queue_cooldown_until || null; // after team-kill kicks (report_ff_kick)
     const banned = st.banned_until ? { until: st.banned_until, reason: st.ban_reason, appealable: st.ban_appealable !== false, appeal: st.appeal || null } : null;
     const kickKey = 'jps_kick_' + this.user.id, lastKick = Number(localStorage.getItem(kickKey) || 0), kickAt = st.kick_at ? Date.parse(st.kick_at) : 0;
     if (kickAt > lastKick) {

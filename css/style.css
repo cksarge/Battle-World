@@ -331,6 +331,8 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .kf .kt { font-size: 10px; letter-spacing: .5px; padding: 1px 5px; border-radius: 2px; background: rgba(255,255,255,.1); color: #f2c14e; }
 .kf .kt-flash, .kf .kt-smoke { color: #c9d6e3; }
 .kf .kt-burn { color: #ff8a3d; }
+.kf .kt-win { color: #10140c; background: #f2c14e; }
+.kf .kt-tk { color: #fff; background: #c0392b; }
 
 .center-msg { position: absolute; top: 24%; left: 0; right: 0; text-align: center; font-family: var(--display); font-weight: 700; letter-spacing: 3px; text-transform: uppercase; text-shadow: 0 3px 12px rgba(0,0,0,.8); pointer-events: none; }
 .center-msg .big { font-size: 52px; }

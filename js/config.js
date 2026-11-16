@@ -5,6 +5,6 @@ export const SUPABASE_KEY = 'sb_publishable_tkHFJJC5lY6JHHijfV5I-g_LrRaQOuy';
 // Cloudflare Turnstile (sign-up / sign-in bot protection). The secret key lives only in Supabase.
 export const TURNSTILE_SITE_KEY = '0x4AAAAAAF8-kZzPxxkUI0iP';
 // MAJOR.Minor.patch, bumped with every change; each version is listed in CHANGELOG.md.
-export const GAME_VERSION = '4.1.0';
+export const GAME_VERSION = '4.2.0';
 // GitHub repository, for the latest-commit link in the menu footer.
 export const GITHUB_REPO = 'cksarge/John-Paul-Simulator';

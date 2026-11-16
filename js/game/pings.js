@@ -83,7 +83,7 @@ export class Pings {
     const g = this.g, eye = p.eye(), f = p.forward();
     let enemy = null, best = Math.cos(THREE.MathUtils.degToRad(4));
     for (const o of g.players.values()) {
-      if (!o.alive || o === p || !g.canDamage(p, o)) continue;
+      if (!o.alive || o === p || !g.isEnemy(p, o)) continue;
       const to = o.pos.clone().setY(o.pos.y + 1.2).sub(eye);
       const d = to.length(), dot = to.dot(f) / d;
       if (dot > best && d < 90 && g.world.lineOfSight(eye, o.pos.clone().setY(o.pos.y + 1.2)) && !g.effects.smokeBlocks?.(eye, o.pos.clone().setY(o.pos.y + 1.2))) { best = dot; enemy = o; }

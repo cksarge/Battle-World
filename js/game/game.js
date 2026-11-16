@@ -224,10 +224,20 @@ export class Game {
     this.brains.delete(id);
   }
 
-  canDamage(a, b) {
+  // Opponents: who bots aim at, pings mark and spawns stay hidden from.
+  isEnemy(a, b) {
     if (!a || !b || a === b) return false;
     if (SOLO_KINDS.has(this.mode.kind)) return true;
     return a.team !== b.team;
+  }
+
+  // Team modes have full friendly fire, except co-op Zombies, Infection and the training modes.
+  get friendlyFire() { const k = this.mode.kind; return !SOLO_KINDS.has(k) && k !== 'zombies' && k !== 'infect' && k !== 'training'; }
+
+  // Who can take damage from whom: opponents, and teammates too where friendly fire is on.
+  canDamage(a, b) {
+    if (!a || !b || a === b) return false;
+    return this.isEnemy(a, b) || this.friendlyFire;
   }
 
   waitingForPlayers() {
@@ -1623,21 +1633,69 @@ export class Game {
     }
     const hp = Math.max(0, Math.round(victim.hp - dmg));
     const armor = Math.max(0, Math.round(victim.armor - armorLoss));
-    if (attacker) attacker.damage += Math.min(victim.hp, dmg);
+    const teamHit = attacker && attacker !== victim && !this.isEnemy(attacker, victim);
+    if (attacker && !teamHit) attacker.damage += Math.min(victim.hp, dmg);
+    if (teamHit) this.teamDamage(attacker, Math.min(victim.hp, dmg), hp <= 0);
     if (!victim.zombie) victim.hurtAt = performance.now();
     this.zombies?.award(attacker, victim, part, weapon, hp <= 0);
     this.broadcast('hp', { id: victim.id, hp, armor, by: attacker?.id ?? null });
     if (hp <= 0) {
-      const killReward = this.econ && attacker && attacker !== victim ? (w?.killReward ?? 300) : 0;
-      if (attacker && killReward) attacker.money = Math.min(this.econ.max, attacker.money + killReward);
+      // Killing a teammate earns nothing and costs $300 instead.
+      const killReward = this.econ && attacker && attacker !== victim ? (teamHit ? -300 : w?.killReward ?? 300) : 0;
+      if (attacker && killReward) attacker.money = Math.max(0, Math.min(this.econ.max, attacker.money + killReward));
       this.hostDropWeapon(victim);
       // Kill feed tags: what the shooter's game reported (known tags only), plus BURN when the victim
       // was standing in fire (but the fire isn't what killed them).
       const t = (Array.isArray(tags) ? tags : []).filter((x) => KILL_TAGS[x]).slice(0, 8);
       if (weapon !== 'fire' && this.fires.some((f) => Math.hypot(victim.pos.x - f.pos.x, victim.pos.z - f.pos.z) < f.radius && Math.abs(victim.pos.y - f.pos.y) < 1.2)) t.push('burn');
+      if (teamHit) t.unshift('tk');
       this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', t: t.length ? t : undefined, money: attacker ? attacker.money : 0 });
+      // The kill that ends the round or match gets a WIN tag once the rules decide it: straight away for
+      // kill goals, or on the next rules update for eliminations (see tagWinningKill).
+      this.lastKill = attacker && attacker !== victim && !teamHit && !this.zombies ? { victim: victim.id, at: performance.now() } : null;
+      const phase = this.state.phase;
       this.rules.onKill(attacker, victim, weapon, part);
+      if (phase === 'live' && this.state.phase !== 'live') this.tagWinningKill();
     }
+  }
+
+  // Host: friendly fire adds up per human player per match, like CS2. A warning at the first team kill
+  // or 100 team damage; a kick at 3 team kills or 300 team damage. Online kicks are recorded, which
+  // brings queue cooldowns and, if it keeps happening, a ban (report_ff_kick in schema.sql).
+  teamDamage(p, dmg, killed) {
+    if (p.isBot || !this.friendlyFire || (this.ffKicked ||= new Set()).has(p.id)) return;
+    const ff = (p.ff ||= { dmg: 0, tk: 0, warned: false });
+    ff.dmg += dmg;
+    if (killed) ff.tk++;
+    if (ff.tk >= 3 || ff.dmg >= 300) {
+      this.ffKicked.add(p.id);
+      this.broadcast('ff', { id: p.id, kick: true, tk: ff.tk, dmg: Math.round(ff.dmg) });
+      if (this.online && p.owner) this.app.api?.reportFfKick(this.matchId, p.owner, ff.tk, Math.round(ff.dmg)).catch((e) => console.warn('Could not record team-kill kick', e));
+    } else if (!ff.warned && (ff.tk >= 1 || ff.dmg >= 100)) {
+      ff.warned = true;
+      this.broadcast('ff', { id: p.id, tk: ff.tk, dmg: Math.round(ff.dmg) });
+    }
+  }
+
+  onFriendlyFire(d) {
+    const p = this.players.get(d.id);
+    if (!p) return;
+    if (d.kick) (this.ffKicked ||= new Set()).add(d.id);
+    if (!p.isLocal) {
+      if (d.kick) this.hud.chatLine('', `${p.name} was kicked for team killing`, -1);
+      return;
+    }
+    if (!d.kick) { this.hud.center('WATCH YOUR FIRE', `${d.tk} team kill${d.tk === 1 ? '' : 's'} · ${d.dmg} team damage. 3 team kills or 300 team damage gets you kicked.`, 4); return; }
+    // Kicked: out of the match with no reconnect.
+    this.app.clearActiveMatch?.();
+    this.leave();
+    this.app.ui?.toast(`You were kicked for team killing (${d.tk} team kill${d.tk === 1 ? '' : 's'}, ${d.dmg} team damage).${this.online ? ' Repeated kicks lead to matchmaking cooldowns and bans.' : ''}`, 'bad', null, 9000);
+  }
+
+  tagWinningKill() {
+    const k = this.lastKill;
+    this.lastKill = null;
+    if (k && performance.now() - k.at < 2000) this.broadcast('kt', { victim: k.victim, t: 'win' });
   }
 
   hostBuy(p, item) {
@@ -1767,7 +1825,9 @@ export class Game {
         v.deaths++;
         const dir = k ? (new THREE.Vector3().subVectors(v.pos, k.pos).dot(v.forward()) > 0 ? -1 : 1) : 1;
         v.model?.die(dir);
-        if (k && k !== v) { k.kills++; if (d.hs) k.hs++; if (this.isHost || this.zombies) k.money = d.money ?? k.money; }
+        const tk = k && k !== v && !this.isEnemy(k, v);
+        if (k && k !== v && !tk) { k.kills++; if (d.hs) k.hs++; }
+        if (k && k !== v && (this.isHost || this.zombies)) k.money = d.money ?? k.money;
         this.trackKill(k, v, d);
         this.training?.onKill(k, v);
         this.tutorial?.onKill(k, v);
@@ -1851,6 +1911,18 @@ export class Game {
       case 'points': for (const [id, v] of Object.entries(d.list || {})) { const p = this.players.get(id); if (p) p.score = v; } break;
       case 'give': this.anticheat.onGive(d); this.applyGive(d); break;
       case 'sold': this.applySold(d); break;
+      case 'ff': this.onFriendlyFire(d); break;
+      case 'kt': {
+        // A tag decided after the kill was announced: add it to the feed and to the recorded kill.
+        if (!KILL_TAGS[d.t]) break;
+        this.hud.addKillTag(d.victim, d.t);
+        const rec = this.rec?.events;
+        for (let i = (rec?.length || 0) - 1; i >= 0; i--) {
+          const e = rec[i];
+          if (e.k === 'ev' && e.n === 'kill' && e.a?.victim === d.victim) { e.a.t = [...(e.a.t || []), d.t]; break; }
+        }
+        break;
+      }
       case 'drop': this.addDrop(d); break;
       case 'grab': this.applyGrab(d); break;
       case 'nade': this.spawnNade(d); break;
@@ -2042,11 +2114,12 @@ export class Game {
   // ───────────────────────── networking ─────────────────────────
   bindNet() {
     const n = this.net;
-    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'sold', 'drop', 'grab', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
+    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'sold', 'kt', 'ff', 'drop', 'grab', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
     for (const e of evs) n.on(e, (d) => this.onEvent(e, d));
     n.on('S', (d) => this.onStates(d));
     n.on('req', (d) => { if (this.isHost) this.handleRequest(d.type, d.data, d.from); });
     n.on('hello', (d) => {
+      if (this.ffKicked?.has(d.id)) return; // kicked for team killing: no way back into this match
       this.peerReturned(d.id);
       if (!this.isHost) return;
       this.helloFrom.add(d.id);
@@ -2364,7 +2437,7 @@ export class Game {
     const st = this.myStats, lp = this.local;
     if (!lp) return;
     const key = (p) => (p.isBot ? 'bot' : p.id);
-    if (k === lp && v !== lp) {
+    if (k === lp && v !== lp && this.isEnemy(k, v)) {
       const ws = (st.weapons[d.w] ||= { k: 0, s: 0, h: 0, hs: 0 });
       ws.k++; if (d.hs) ws.hs++;
       const e = (st.victims[key(v)] ||= { n: v.isBot ? 'Bots' : (v.baseName || v.name), c: 0 }); e.c++;

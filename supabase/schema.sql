@@ -256,6 +256,23 @@ create index if not exists ban_appeals_status_idx on public.ban_appeals (status,
 alter table public.ban_appeals enable row level security;
 revoke all on public.ban_appeals from anon, authenticated;
 
+-- Friendly-fire kicks (4.2.0). The match host records them; repeated ones bring matchmaking cooldowns
+-- and then a ban (report_ff_kick).
+alter table public.moderation add column if not exists queue_cooldown_until timestamptz;
+create table if not exists public.ff_penalties (
+  id          bigint generated always as identity primary key,
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  reporter    uuid references public.profiles(id) on delete set null,
+  match_id    text not null,
+  team_kills  int not null default 0,
+  team_damage int not null default 0,
+  created_at  timestamptz not null default now(),
+  unique (user_id, match_id)
+);
+create index if not exists ff_penalties_user_idx on public.ff_penalties (user_id, created_at desc);
+alter table public.ff_penalties enable row level security;
+revoke all on public.ff_penalties from anon, authenticated;
+
 create table if not exists public.warnings (
   id         bigint generated always as identity primary key,
   user_id    uuid not null references public.profiles(id) on delete cascade,
@@ -343,6 +360,7 @@ begin
   return json_build_object(
     'banned_until', case when m.banned_until > now() then m.banned_until end, 'ban_reason', m.ban_reason,
     'ban_appealable', coalesce(m.ban_appealable, true),
+    'queue_cooldown_until', case when m.queue_cooldown_until > now() then m.queue_cooldown_until end,
     'appeal', case when m.banned_until > now() then (select json_build_object('status', a.status, 'note', a.admin_note) from ban_appeals a
       where a.user_id = uid and a.created_at >= coalesce(m.banned_at, m.updated_at) order by a.id desc limit 1) end,
     'muted_until', case when m.muted_until > now() then m.muted_until end, 'mute_reason', m.mute_reason,
@@ -399,6 +417,42 @@ begin
   insert into ban_appeals (user_id, message, ban_reason, banned_until) values (uid, left(trim(p_message), 1000), m.ban_reason, m.banned_until);
 end;
 $$;
+-- The host reports a player kicked for team killing (one record per player per match). Kicks in the
+-- last 30 days set the penalty: 1st 30 min queue cooldown, 2nd 2 h, 3rd 24 h, 4th 7 days, 5th or more a
+-- 14-day ban (appealable; never shortens or replaces a longer ban). Admins are never penalised.
+create or replace function public.report_ff_kick(p_match_id text, p_target uuid, p_team_kills int, p_team_damage int)
+returns json language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  n int;
+  until timestamptz;
+begin
+  if uid is null or p_target is null or p_match_id is null then return null; end if;
+  if not exists (select 1 from profiles where id = p_target) or exists (select 1 from admins where user_id = p_target) then return null; end if;
+  if (select count(*) from ff_penalties where reporter = uid and created_at > now() - interval '1 hour') >= 10 then return null; end if;
+  insert into ff_penalties (user_id, reporter, match_id, team_kills, team_damage)
+  values (p_target, uid, left(p_match_id, 80), least(greatest(coalesce(p_team_kills, 0), 0), 50), least(greatest(coalesce(p_team_damage, 0), 0), 5000))
+  on conflict (user_id, match_id) do nothing;
+  if not found then return null; end if;
+  select count(*) into n from ff_penalties where user_id = p_target and created_at > now() - interval '30 days';
+  if n >= 5 then
+    until := now() + interval '14 days';
+    insert into moderation (user_id, banned_until, banned_at, ban_reason, ban_appealable, kick_at, kick_reason, updated_at)
+    values (p_target, until, now(), 'Repeated team killing', true, now(), 'Banned', now())
+    on conflict (user_id) do update set banned_until = excluded.banned_until, banned_at = now(), ban_reason = excluded.ban_reason,
+      ban_appealable = true, kick_at = now(), kick_reason = 'Banned', updated_at = now()
+    where moderation.banned_until is null or moderation.banned_until < excluded.banned_until;
+    return json_build_object('offenses', n, 'banned_until', until);
+  end if;
+  until := now() + case n when 1 then interval '30 minutes' when 2 then interval '2 hours' when 3 then interval '24 hours' else interval '7 days' end;
+  insert into moderation (user_id, queue_cooldown_until, updated_at) values (p_target, until, now())
+  on conflict (user_id) do update set queue_cooldown_until = greatest(coalesce(moderation.queue_cooldown_until, now()), excluded.queue_cooldown_until), updated_at = now();
+  return json_build_object('offenses', n, 'cooldown_until', until);
+end;
+$$;
+revoke all on function public.report_ff_kick(text, uuid, int, int) from public, anon;
+grant execute on function public.report_ff_kick(text, uuid, int, int) to authenticated;
+
 revoke all on function public.register_device(text) from public, anon;
 grant execute on function public.register_device(text) to authenticated;
 revoke all on function public.submit_appeal(text) from public, anon;
@@ -938,7 +992,8 @@ begin
     'shared_accounts', (select coalesce(json_agg(distinct jsonb_build_object('id', o.user_id, 'username', pr.username)), '[]')
       from player_devices d join player_devices o on o.device_id = d.device_id and o.user_id <> p_id
       join profiles pr on pr.id = o.user_id where d.user_id = p_id),
-    'appeals', (select coalesce(json_agg(a order by a.id desc), '[]') from ban_appeals a where a.user_id = p_id)
+    'appeals', (select coalesce(json_agg(a order by a.id desc), '[]') from ban_appeals a where a.user_id = p_id),
+    'ff_penalties', (select coalesce(json_agg(f order by f.id desc), '[]') from ff_penalties f where f.user_id = p_id)
   );
 end;
 $$;
