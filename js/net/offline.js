@@ -10,7 +10,7 @@ const LAZY = ['../net/api.js', '../game/replay.js', '../game/replaystore.js', '.
 async function gameFiles() {
   await Promise.all(LAZY.map((m) => import(m).catch(() => null)));
   const base = new URL('./', location.href);
-  const urls = new Set(['./', 'index.html', 'favicon.svg', '404.html'].map((u) => new URL(u, base).href));
+  const urls = new Set(['./', 'index.html', 'favicon.svg', '404.html', 'CHANGELOG.md'].map((u) => new URL(u, base).href));
   for (const e of performance.getEntriesByType('resource')) {
     const u = new URL(e.name);
     if ((u.origin === location.origin && u.search === '') || u.href.startsWith('https://cdn.jsdelivr.net/')) urls.add(u.href);

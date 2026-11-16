@@ -26,6 +26,7 @@ import { censor } from '../data/profanity.js';
 import { PALETTES, applyAccess } from './access.js';
 import { ACHIEVEMENTS, TIERS, MAX_POINTS, normalizeAchievements, progressOf, points } from '../data/achievements.js';
 import { masteryInfo, masteryLevel, MAX_LEVEL } from '../data/mastery.js';
+import { versionHTML, bindVersion } from './changelog.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const kd = (k, d) => (d ? (k / d).toFixed(2) : k ? k.toFixed(2) : '0.00');
@@ -369,11 +370,12 @@ export class UI {
       <div class="m-banners" id="banners">${bannerHTML(app)}</div>
       <div class="m-stage" id="stage" title="Drag to turn your operator, click to wave"></div>
       <section class="m-panel" id="tab"></section>
-      <footer class="m-foot"><span id="foot-hint">Drag the stage to turn your operator · click it to wave</span><span class="spacer"></span><span id="foot-map"></span></footer>
+      <footer class="m-foot"><span id="foot-hint">${versionHTML()}</span><span class="spacer"></span><span id="foot-map"></span></footer>
     </div>`;
     this.root.querySelectorAll('.m-nav button').forEach((b) => { b.onclick = () => this.showMenu(b.dataset.t); });
     this.root.querySelector('#me-chip').onclick = () => (app.profile ? this.showMenu('stats') : this.showAuth());
     this.bindStage();
+    bindVersion(this.root.querySelector('.m-foot'), this);
     this.stage(tab === 'play' && this.source === 'offline' ? this.offline.map : null, FOCUS[tab]);
     this.footMap();
     this.renderParty();

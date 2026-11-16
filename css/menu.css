@@ -83,6 +83,16 @@
 .m-panel:has(.m-sticky) { scroll-padding-bottom: 90px; }
 .m-panel .op-list { overflow: visible; max-height: none; }
 .m-foot { grid-area: foot; display: flex; align-items: center; padding: 0 26px; font-size: 12px; color: var(--m-dim); }
+.foot-link { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+.foot-link:hover, .foot-link:focus-visible { color: var(--m-amber); }
+.changelog-modal { width: min(680px, 94vw); }
+.changelog .cl-ver { margin: 16px 0 4px; font-size: 15px; color: var(--m-amber); }
+.changelog .cl-major { margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--m-faint); font-size: 22px; }
+.changelog .cl-major:first-child { border-top: 0; margin-top: 0; }
+.changelog .cl-patch { font-size: 13px; color: var(--m-bone); }
+.changelog .cl-ver a { color: var(--m-dim); font-family: var(--mono); font-size: 12px; }
+.changelog ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
+.changelog code { font-family: var(--mono); font-size: 12px; }
 
 /* type */
 .m-h1 { font-family: var(--m-stencil); font-weight: 800; font-size: 40px; line-height: 1; margin: 0; letter-spacing: 0.5px; text-transform: none; }
