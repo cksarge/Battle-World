@@ -1,6 +1,10 @@
 # Changelog
 
-### 3.7.0 · 2026-11-16
+#### 3.7.1 · 2026-11-16
+
+- Versus bots: picking a mode switches to a map of the right size, and picking a map switches to a mode that fits it
+
+### 3.7.0 · 2026-11-16 · [355755d](https://github.com/cksarge/John-Paul-Simulator/commit/355755d)
 
 - Sign in with your email or your username
 - New accounts are offered the tutorial, even on a device that has seen it before

@@ -57,6 +57,9 @@ const WIDE = new Set(['season', 'stats', 'replays', 'workshop', 'leaderboard', '
 const ADMIN_NAV = ['admin', 'Admin', 'Reports, players and game switches'];
 const ARMORY_KINDS = [['finish', 'Finishes'], ['outfit', 'Outfits'], ['card', 'Calling cards'], ['effect', 'Kill effects'], ['emote', 'Emotes']];
 const WHEEL = ['Up', 'Right', 'Down', 'Left'];
+// The map size a mode is played on ('small' or 'large'), or null when it works on any map.
+const modeSize = (m) => { const sizes = new Set(m.maps.map((id) => MAPS[id]?.size).filter(Boolean)); return sizes.size === 1 ? [...sizes][0] : null; };
+const fits = (m, map) => (!modeSize(m) || map.size === modeSize(m)) && (!needsSites(m) || !!map.sites);
 const SIZE_LABEL = (m) => (m.coop ? `1–${m.maxPlayers} co-op` : POOL_KINDS.has(m.kind) ? `${m.maxPlayers} players` : `${m.teamSize}v${m.teamSize}`);
 
 function emailCooldownLeft() {
@@ -658,7 +661,7 @@ export class UI {
         <button class="m-train" id="train"><b>Training Range</b><span>Aim drills, moving targets, spray practice and grenade line-ups</span></button>
         <div class="mrows">${OFFLINE_MODES.map((id) => row(id, id === o.mode, 'data-omode')).join('')}</div>
         <div class="m-label">Map</div>
-        <div class="map-strip">${playMaps().map((m) => `<button class="map-tile ${o.map === m.id ? 'sel' : ''} ${needsSites(MODES[o.mode]) && !m.sites ? 'off' : ''}" data-map="${m.id}" title="${esc(m.custom ? `${m.name} by ${m.author}. ${m.desc}` : m.desc)}"><img src="${mapPreview(m.id)}" alt=""><span>${esc(m.name)}${m.featured ? ' <i class="map-tag">Featured</i>' : m.custom ? ' <i class="map-tag">Community</i>' : ''}</span></button>`).join('')}</div>
+        <div class="map-strip">${playMaps().map((m) => `<button class="map-tile ${o.map === m.id ? 'sel' : ''}" data-map="${m.id}" title="${esc(m.custom ? `${m.name} by ${m.author}. ${m.desc}` : m.desc)}"><img src="${mapPreview(m.id)}" alt=""><span>${esc(m.name)}${m.featured ? ' <i class="map-tag">Featured</i>' : m.custom ? ' <i class="map-tag">Community</i>' : ''}</span></button>`).join('')}</div>
         <div class="m-label">Conditions</div>
         <div class="seg" id="off-var">${Object.keys(VARIANTS).map((k) => `<button data-v="${k}" class="${o.variant === k ? 'sel' : ''}">${esc(variantName(MAPS[o.map], k))}</button>`).join('')}</div>
         <div class="m-label">Bots</div>
@@ -703,10 +706,30 @@ export class UI {
     } else {
       $('#train').onclick = () => app.startOffline({ mode: 'training', map: 'range', botLevel: 'easy' });
       $('#tutorial').onclick = () => app.startOffline({ mode: 'tutorial', map: 'course', botLevel: 'easy', noBots: true });
-      el.querySelectorAll('[data-omode]').forEach((b) => { b.onclick = () => { o.mode = b.dataset.omode; if (!MAPS[o.map].sites && needsSites(MODES[o.mode])) { o.map = 'dustline'; this.scene?.show(o.map); this.footMap(); } this.renderPlay(el); }; });
+      // Mode and map stay compatible: a mode for small (or large) maps switches the map to one of that
+      // size, and picking a map the mode can't use switches to a mode that can. The last pick for each
+      // size is reused when it fits.
+      o.lastMap ||= {}; o.lastMode ||= {};
+      const showMap = (id) => { o.map = id; o.lastMap[MAPS[id].size] = id; this.scene?.show(id); this.footMap(); };
+      el.querySelectorAll('[data-omode]').forEach((b) => { b.onclick = () => {
+        const m = MODES[b.dataset.omode];
+        o.mode = m.id;
+        if (modeSize(m)) o.lastMode[modeSize(m)] = m.id;
+        if (!fits(m, MAPS[o.map])) {
+          const pick = [o.lastMap[modeSize(m)], ...m.maps, ...playMaps().map((x) => x.id)].find((id) => MAPS[id] && fits(m, MAPS[id]));
+          if (pick) { showMap(pick); this.toast(`Switched to ${MAPS[pick].name}: ${m.name} is played on the ${modeSize(m) || 'site'} maps.`); }
+        }
+        this.renderPlay(el);
+      }; });
       el.querySelectorAll('[data-map]').forEach((b) => { b.onclick = () => {
-        if (needsSites(MODES[o.mode]) && !MAPS[b.dataset.map].sites) { this.toast(`${MODES[o.mode].name} needs one of the large maps with sites.`, 'bad'); return; }
-        o.map = b.dataset.map; this.scene?.show(o.map); this.footMap(); this.renderPlay(el);
+        const map = MAPS[b.dataset.map];
+        showMap(map.id);
+        if (!fits(MODES[o.mode], map)) {
+          const pick = [o.lastMode[map.size], ...OFFLINE_MODES].find((id) => MODES[id] && fits(MODES[id], map) && modeSize(MODES[id]) === map.size)
+            || OFFLINE_MODES.find((id) => fits(MODES[id], map));
+          if (pick) { o.mode = pick; this.toast(`Switched to ${MODES[pick].name} for ${map.name}.`); }
+        }
+        this.renderPlay(el);
       }; });
       el.querySelectorAll('#off-diff button').forEach((b) => { b.onclick = () => { o.botLevel = b.dataset.d; this.renderPlay(el); }; });
       el.querySelectorAll('#off-var button').forEach((b) => { b.onclick = () => { o.variant = b.dataset.v; this.renderPlay(el); }; });
