@@ -41,8 +41,10 @@ class App {
     // Read email-link results before the auth client consumes the URL.
     const hash = new URLSearchParams(location.hash.slice(1));
     const query = new URLSearchParams(location.search);
-    const confirmed = query.has('confirmed') || hash.get('type') === 'signup';
-    const recovery = query.has('reset') || hash.get('type') === 'recovery';
+    let confirmed = query.has('confirmed') || hash.get('type') === 'signup';
+    let recovery = query.has('reset') || hash.get('type') === 'recovery';
+    // Email links point at this site with a one-time token hash (see supabase/email-templates).
+    const tokenHash = query.get('token_hash'), linkType = query.get('type');
     let linkError = null;
     try {
       const { Api, authErrorFromUrl } = await import('./net/api.js');
@@ -74,6 +76,13 @@ class App {
     import('./net/offline.js').then((m) => m.syncOffline(this.settings.offlineMode)).catch(() => null);
     this.refreshFeatured();
     setInterval(() => this.refreshFeatured(), 10 * 60 * 1000);
+    if (tokenHash && this.api) {
+      try {
+        await this.api.verifyLink(tokenHash, linkType);
+        confirmed ||= linkType === 'signup';
+        recovery ||= linkType === 'recovery';
+      } catch (e) { linkError = e.message; recovery = linkType === 'recovery'; }
+    }
     let session = null;
     try { session = this.api ? await this.api.session() : null; } catch { session = null; }
     if (location.hash || location.search) history.replaceState(null, '', location.pathname);

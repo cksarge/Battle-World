@@ -1,6 +1,10 @@
 # Changelog
 
-#### 3.6.1 · 2026-11-16
+#### 3.6.2 · 2026-11-16
+
+- Links in sign-up and password reset emails go straight to the game's own site, so the emails are less likely to land in spam
+
+#### 3.6.1 · 2026-11-16 · [c7aba61](https://github.com/cksarge/John-Paul-Simulator/commit/c7aba61)
 
 - Pressing Enter again while searching for a match no longer shows a connection error
 - Cancelling a search and starting another straight away works reliably

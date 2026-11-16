@@ -49,6 +49,13 @@ export class Api {
 
   onAuth(cb) { return this.sb.auth.onAuthStateChange((_e, session) => cb(session)); }
 
+  // Confirms an email link (sign-up or password reset); on success the player is signed in.
+  async verifyLink(tokenHash, type) {
+    if (type !== 'signup' && type !== 'recovery') throw new Error('That email link isn’t valid. Request a new one.');
+    const { error } = await this.sb.auth.verifyOtp({ token_hash: tokenHash, type });
+    if (error) throw new Error(/expired|invalid|not found/i.test(error.message) ? 'That email link has expired or was already used. Request a new one.' : friendly(error).message);
+  }
+
   async signUp(email, password, username, captchaToken) {
     if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) throw new Error('Username must be 3-16 letters, numbers or _.');
     assertPassword(password);
