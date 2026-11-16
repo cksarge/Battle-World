@@ -21,17 +21,17 @@ const SOUND_CUES = {
 const CUE_RANK = Object.fromEntries(Object.keys(SOUND_CUES).map((k, i) => [k, i]));
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// Kill feed tags, in the order they're shown (HS goes just before WIN). There's no limit: every tag
-// that applies is shown. The shooter's game works most of them out (Game.shotTags); BURN is added by
-// the host.
+// Kill feed tags, in the order they're shown (HS goes just after WIN). There's no limit: every tag
+// that applies is shown. The shooter's game works most of them out (Game.shotTags); BURN and TK are
+// added by the host, and WIN once the round or match is decided.
 export const KILL_TAGS = {
-  tk: 'TK', spin: '360', noscope: 'NOSCOPE', last: 'LASTBLT', air: 'AIR', flash: 'FLASH',
-  smoke: 'SMOKE', wallbang: 'WALLBANG', long: 'LONG', burn: 'BURN', win: 'WIN',
+  win: 'WIN', spin: '360', noscope: 'NOSCOPE', air: 'AIR', last: 'LASTBLT', long: 'LONG',
+  wallbang: 'WALLBANG', flash: 'FLASH', smoke: 'SMOKE', burn: 'BURN', tk: 'TK',
 };
 const HS_HTML = '<span class="hs">◉ HS</span>';
 export function killTagsHTML(hs, tags) {
   const t = Object.keys(KILL_TAGS).filter((k) => tags?.includes(k)).map((k) => `<span class="kt kt-${k}">${KILL_TAGS[k]}</span>`);
-  if (hs) t.splice(tags?.includes('win') ? t.length - 1 : t.length, 0, HS_HTML);
+  if (hs) t.splice(tags?.includes('win') ? 1 : 0, 0, HS_HTML);
   return t.join('');
 }
 const fmtTime = (t) => { t = Math.max(0, Math.ceil(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
@@ -441,11 +441,12 @@ export class Hud {
     setTimeout(() => e.remove(), 7000);
   }
 
-  // Adds a tag to the newest kill feed line for this victim (WIN arrives just after the kill).
+  // Adds WIN to the newest kill feed line for this victim (it arrives just after the kill). WIN comes
+  // first, straight after the weapon name.
   addKillTag(victimId, tag) {
     const e = [...this.el.kf.children].find((x) => x.dataset.v === victimId);
     if (!e || e.querySelector('.kt-' + tag)) return;
-    e.lastElementChild.insertAdjacentHTML('beforebegin', `<span class="kt kt-${tag}">${KILL_TAGS[tag]}</span>`);
+    e.querySelector('.w').insertAdjacentHTML('afterend', `<span class="kt kt-${tag}">${KILL_TAGS[tag]}</span>`);
   }
 
   // Zombies: floating "+60" next to the crosshair. Hits get small ones from the local shot (see

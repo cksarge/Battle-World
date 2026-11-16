@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.2.3 · 2026-11-16
+#### 4.2.4 · 2026-11-16
+
+- New kill feed tag order: WIN, HS, 360, NOSCOPE, AIR, LASTBLT, LONG, WALLBANG, FLASH, SMOKE, BURN, TK
+
+#### 4.2.3 · 2026-11-16 · [20571c9](https://github.com/cksarge/John-Paul-Simulator/commit/20571c9)
 
 - No more limit on kill feed tags: every one that applies shows up, so a 360 NOSCOPE LASTBLT AIR FLASH SMOKE WALLBANG LONG BURN HS WIN is possible. HS now sits just before WIN, and long kill feed lines wrap instead of running off the screen
 
