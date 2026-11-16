@@ -166,7 +166,7 @@ export class UI {
     const rules = `<ul class="pw-rules" id="a-rules">${PASSWORD_RULES.map((r) => `<li data-r="${r.id}">${r.label}</li>`).join('')}</ul>`;
     const views = {
       login: `
-          ${emailField}
+          <label class="field"><span>Email or username</span><input type="text" id="a-email" autocomplete="username" autocapitalize="off" spellcheck="false" value="${email}"></label>
           <label class="field"><span>Password</span><input type="password" id="a-pass" autocomplete="current-password"></label>
           <a href="#" class="small muted" id="a-forgot" style="align-self:flex-end;margin-top:-6px">Forgot password?</a>
           <div class="cf-ts" id="a-ts"></div>
@@ -247,7 +247,8 @@ export class UI {
     };
     const on = (sel, fn) => { const e = $(sel); if (e) e.onclick = (ev) => { ev.preventDefault(); fn(); }; };
     this.root.querySelectorAll('.m-switch button').forEach((b) => { b.onclick = () => this.showAuth(b.dataset.m); });
-    $('#a-email')?.addEventListener('input', (e) => { this.lastEmail = e.target.value.trim(); });
+    // Only real emails are remembered for the reset and verify screens (sign-in also takes a username).
+    $('#a-email')?.addEventListener('input', (e) => { const v = e.target.value.trim(); if (v.includes('@')) this.lastEmail = v; });
     on('#a-guest', () => this.app.loginGuest());
     on('#a-forgot', () => this.showAuth('forgot'));
     on('#a-back', () => this.showAuth('login'));
@@ -291,10 +292,15 @@ export class UI {
     };
     const actions = {
       login: async () => {
-        const em = $('#a-email').value.trim();
-        if (!em || !pass.value) throw new Error('Enter your email and password.');
-        try { await withCaptcha((t) => api.signIn(em, pass.value, t)); }
-        catch (e) { if (/not confirmed/i.test(e.message)) $('#a-unconfirmed').classList.remove('hidden'); throw e; }
+        const login = $('#a-email').value.trim();
+        if (!login || !pass.value) throw new Error('Enter your email or username, and your password.');
+        let resolved = login.includes('@') ? login : null;
+        try { resolved = (await withCaptcha((t) => api.signIn(login, pass.value, t))).email; }
+        catch (e) {
+          // A username sign-in that reaches "not confirmed" has already found the email.
+          if (/not confirmed/i.test(e.message)) { if (e.email || resolved) this.lastEmail = e.email || resolved; $('#a-unconfirmed').classList.remove('hidden'); }
+          throw e;
+        }
         await this.app.onSignedIn();
       },
       signup: async () => {
@@ -401,13 +407,22 @@ export class UI {
 
   // First launch: offer the tutorial once to players who haven't played a match yet. Waits for a
   // signed-in player's profile so returning players on a new device aren't asked.
+  // A brand new account (its first day, no matches yet) is always offered it once, even on a device
+  // that has already seen it.
   maybeOfferTutorial() {
-    const app = this.app;
-    try { if (localStorage.getItem('jps_tutorial_seen')) return; } catch { return; }
-    if (this.tutorialOffered || app.game || (app.user && !app.profile) || app.activeMatch?.()) return;
-    if ((app.profile?.matches || 0) > 0 || app.localStats().matches.length) return;
-    this.tutorialOffered = true;
-    const seen = () => { try { localStorage.setItem('jps_tutorial_seen', '1'); } catch { /* ignore */ } };
+    const app = this.app, p = app.profile, who = p?.id || 'guest';
+    if (this.tutorialOffered === who || app.game || (app.user && !p) || app.activeMatch?.()) return;
+    let seenHere = false, seenFor = [];
+    try { seenHere = !!localStorage.getItem('jps_tutorial_seen'); seenFor = JSON.parse(localStorage.getItem('jps_tutorial_seen_for') || '[]'); } catch { return; }
+    const newAccount = !!p && !p.matches && Date.now() - Date.parse(p.created_at) < 864e5 && !seenFor.includes(p.id);
+    if (!newAccount && (seenHere || (p?.matches || 0) > 0 || app.localStats().matches.length)) return;
+    this.tutorialOffered = who;
+    const seen = () => {
+      try {
+        localStorage.setItem('jps_tutorial_seen', '1');
+        if (p) localStorage.setItem('jps_tutorial_seen_for', JSON.stringify([...seenFor, p.id].slice(-20)));
+      } catch { /* ignore */ }
+    };
     const m = this.modal(`<h2 class="m-h2">New here?</h2>
       <p class="m-sub">Play the tutorial (about 6 min). It walks you through moving, shooting, grenades, buying and the charge, then a 1v1 against a bot.</p>
       <div class="row"><button class="btn primary" data-go>Play</button><button class="btn ghost" data-x>Skip</button></div>

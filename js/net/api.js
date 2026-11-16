@@ -8,10 +8,18 @@ const SCHEMA_HINT = 'Database tables are missing. Run supabase/schema.sql in the
 
 function friendly(error) {
   const msg = error?.message || String(error);
+  // The auth library reports a server error it couldn't read (a timeout, or a failure sending the
+  // email) as "{}". Keep the real error in the console for debugging.
+  if (!msg.trim() || /^\{\s*\}$/.test(msg.trim())) {
+    console.warn('Unreadable server error', error);
+    return new Error('Something went wrong on our end. Wait a minute and try again.');
+  }
   if (/schema cache|does not exist|PGRST205|PGRST202/i.test(msg)) return new Error(SCHEMA_HINT);
+  if (/Invalid login credentials/i.test(msg)) return new Error('Wrong email, username or password.');
   if (/Email not confirmed/i.test(msg)) return new Error('Email not confirmed yet. Click the link in your confirmation email.');
   if (/Database error saving new user/i.test(msg)) return new Error('That username is taken or invalid.');
   if (/captcha/i.test(msg)) return new Error('Security check failed or expired. Complete it again and retry.');
+  if (/error sending .*email|could not send email/i.test(msg)) return new Error('We couldn’t send the email right now. Try again in a few minutes.');
   if (/rate limit|only request this after/i.test(msg)) return new Error('Too many emails requested. Wait a minute and try again.');
   if (/Token has expired or is invalid|otp_expired|invalid.*otp/i.test(msg)) return new Error('That code is wrong or has expired. Request a new one.');
   if (/Password should|weak_password|Password is known/i.test(msg)) return new Error('Password must be at least 8 characters and include a lowercase letter, an uppercase letter and a number.');
@@ -97,10 +105,19 @@ export class Api {
     if (error) throw friendly(error);
   }
 
-  async signIn(email, password, captchaToken) {
+  // `login` is an email or a username. A username is turned into the account's email by the database,
+  // which only answers when the password is right (see email_for_login in schema.sql).
+  async signIn(login, password, captchaToken) {
+    let email = login;
+    if (!login.includes('@')) {
+      const { data, error } = await this.sb.rpc('email_for_login', { p_username: login, p_password: password });
+      if (error) throw /too many/i.test(error.message) ? new Error('Too many sign-in attempts for that username. Wait 15 minutes and try again.') : friendly(error);
+      if (!data) throw new Error('Wrong username or password.');
+      email = data;
+    }
     const { data, error } = await this.sb.auth.signInWithPassword({ email, password, options: { captchaToken } });
-    if (error) throw friendly(error);
-    return data;
+    if (error) { const e = friendly(error); e.email = email; throw e; }
+    return { ...data, email };
   }
 
   async signOut() { await this.sb.auth.signOut(); }

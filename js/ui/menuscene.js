@@ -66,11 +66,12 @@ export class MenuScene {
     this.setSquad(this.squad);
   }
 
-  // A spot with open space in front (for the camera) and a long view behind the squad.
+  // A spot with open space in front (for the camera) and a long view behind the squad. Candidates are
+  // ranked by a quick raycast score, then the best are checked from where the camera will actually sit.
   pickStage() {
     const W = this.world;
     const cells = [...(W.spawnCells[0] || []), ...(W.spawnCells[1] || []), ...W.allFloor.filter((_, i) => i % 7 === 0)];
-    let best = null;
+    const cands = [];
     for (const c of cells) {
       const base = new THREE.Vector3((c.x + 0.5) * CELL, 1.5, (c.y + 0.5) * CELL);
       for (let k = 0; k < 8; k++) {
@@ -78,11 +79,55 @@ export class MenuScene {
         const front = W.raycast(base, f, 9)?.dist ?? 9, back = W.raycast(base, f.clone().negate(), 30)?.dist ?? 30;
         const side = Math.min(W.raycast(base, new THREE.Vector3(f.z, 0, -f.x), 4)?.dist ?? 4, W.raycast(base, new THREE.Vector3(-f.z, 0, f.x), 4)?.dist ?? 4);
         const score = Math.min(front, 7.5) * 2 + Math.min(back, 26) + Math.min(side, 3.5) * 5;
-        if (!best || score > best.score) best = { score, pos: base.setY(W.heightAt(base.x, base.z)), front: f };
+        cands.push({ score, pos: base.clone().setY(W.heightAt(base.x, base.z)), front: f });
       }
     }
+    cands.sort((a, b) => b.score - a.score);
+    const best = cands.slice(0, 400).find((c) => this.framesClear(c)) || cands[0];
     this.stage = best || { pos: new THREE.Vector3(W.size.x / 2, 0, W.size.z / 2), front: new THREE.Vector3(0, 0, 1) };
     this.right = new THREE.Vector3(this.stage.front.z, 0, -this.stage.front.x);
+  }
+
+  // True if a straight line stays above everything it crosses. Unlike raycast, glass counts as solid.
+  lineClear(a, b) {
+    const W = this.world, n = Math.max(2, Math.ceil(a.distanceTo(b) / 0.25));
+    for (let i = 1; i < n; i++) {
+      const p = a.clone().lerp(b, i / n);
+      if (W.heightAt(p.x, p.z) > p.y - 0.15) return false;
+    }
+    return true;
+  }
+
+  // Would the camera see the squad cleanly from this spot in the main framings? The camera has room
+  // around it, nothing hides your operator (head, chest, knees) or the party slots either side, and no
+  // wall fills the edges of the view close to the lens.
+  framesClear(c) {
+    const W = this.world, right = new THREE.Vector3(c.front.z, 0, -c.front.x);
+    const floor = c.pos.y;
+    for (const key of ['play', 'auth', 'operator']) {
+      const f = FRAMES[key];
+      for (const drift of [-0.25, 0.25]) {
+        const cam = c.pos.clone().addScaledVector(c.front, f.d).addScaledVector(right, f.side * 0.55 + drift).setY(floor + f.h);
+        if (W.heightAt(cam.x, cam.z) > cam.y - 0.6) return false;
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * Math.PI * 2;
+          const p = cam.clone().add(new THREE.Vector3(Math.cos(a) * 0.7, 0, Math.sin(a) * 0.7));
+          if (W.heightAt(p.x, p.z) > cam.y - 0.4) return false;
+        }
+        for (const y of [0.4, 1.1, 1.6]) if (!this.lineClear(cam, c.pos.clone().setY(floor + y))) return false;
+        if (key === 'play') {
+          for (const s of [-1.25, 1.25]) {
+            if (!this.lineClear(cam, c.pos.clone().addScaledVector(right, s).addScaledVector(c.front, -0.45).setY(floor + 1.1))) return false;
+          }
+          const look = c.pos.clone().addScaledVector(right, f.side).setY(floor + f.look).sub(cam).setY(0).normalize();
+          for (const ang of [-0.5, -0.3, 0.3, 0.5]) {
+            const dir = look.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), ang);
+            if (!this.lineClear(cam, cam.clone().addScaledVector(dir, 3))) return false;
+          }
+        }
+      }
+    }
+    return true;
   }
 
   // squad: [{char, weapon}] with you first. Party members stand either side.

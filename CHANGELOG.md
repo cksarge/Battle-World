@@ -1,6 +1,13 @@
 # Changelog
 
-#### 3.6.2 · 2026-11-16
+### 3.7.0 · 2026-11-16
+
+- Sign in with your email or your username
+- New accounts are offered the tutorial, even on a device that has seen it before
+- The main menu camera always shows your operator clearly, never from behind glass or a wall
+- Clearer messages when an email can't be sent or the server has a problem
+
+#### 3.6.2 · 2026-11-16 · [ad87986](https://github.com/cksarge/John-Paul-Simulator/commit/ad87986)
 
 - Links in sign-up and password reset emails go straight to the game's own site, so the emails are less likely to land in spam
 

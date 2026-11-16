@@ -596,6 +596,45 @@ end;
 $$;
 
 -- ───────────── ranked and match results: season tracking + bans ─────────────
+-- Sign in with a username: returns the account's email only when the password is right, so emails
+-- can't be looked up without it. Five wrong passwords per username lock it for 15 minutes. The game
+-- then signs in with the email through Supabase Auth as usual (captcha and all).
+create table if not exists public.login_attempts (
+  username text not null,
+  at       timestamptz not null default now()
+);
+create index if not exists login_attempts_idx on public.login_attempts (username, at);
+alter table public.login_attempts enable row level security;
+revoke all on public.login_attempts from anon, authenticated;
+
+create or replace function public.email_for_login(p_username text, p_password text)
+returns text language plpgsql security definer set search_path = public, extensions as $$
+declare
+  name text := lower(trim(p_username));
+  addr text;
+  ok boolean;
+begin
+  if name is null or name = '' or p_password is null or length(p_password) > 72 then return null; end if;
+  delete from login_attempts where at < now() - interval '1 day';
+  if (select count(*) from login_attempts where username = name and at > now() - interval '15 minutes') >= 5 then
+    raise exception 'too many sign-in attempts';
+  end if;
+  select u.email, u.encrypted_password = crypt(p_password, u.encrypted_password)
+    into addr, ok
+    from profiles p join auth.users u on u.id = p.id
+    where lower(p.username) = name
+    limit 1;
+  if ok then
+    delete from login_attempts where username = name;
+    return addr;
+  end if;
+  insert into login_attempts (username) values (name);
+  return null;
+end;
+$$;
+revoke all on function public.email_for_login(text, text) from public;
+grant execute on function public.email_for_login(text, text) to anon, authenticated;
+
 create or replace function public.report_ranked(p_match_id text, p_winner uuid, p_loser uuid)
 returns json language plpgsql security definer set search_path = public as $$
 declare
