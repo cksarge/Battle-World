@@ -1,6 +1,10 @@
 # Changelog
 
-### 4.2.0 · 2026-11-16
+#### 4.2.1 · 2026-11-16
+
+- Kill feed tags each have their own color instead of all being yellow
+
+### 4.2.0 · 2026-11-16 · [eb16907](https://github.com/cksarge/John-Paul-Simulator/commit/eb16907)
 
 - **Friendly fire** in every team mode (not Zombies, Infection or training): bullets, knives, grenades, fire and barrels all hurt teammates
 - Team kills earn no kill and cost $300, and show a red TK tag in the kill feed

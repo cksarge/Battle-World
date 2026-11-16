@@ -328,8 +328,15 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .kf .t { color: var(--t); } .kf .ct { color: var(--ct); } .kf .ffa { color: #ddd; }
 .kf .w { color: rgba(255,255,255,.65); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
 .kf .hs { color: #ff6b6b; font-size: 11px; }
-.kf .kt { font-size: 10px; letter-spacing: .5px; padding: 1px 5px; border-radius: 2px; background: rgba(255,255,255,.1); color: #f2c14e; }
-.kf .kt-flash, .kf .kt-smoke { color: #c9d6e3; }
+.kf .kt { font-size: 10px; letter-spacing: .5px; padding: 1px 5px; border-radius: 2px; color: #f2c14e; background: color-mix(in srgb, currentColor 16%, transparent); }
+.kf .kt-noscope { color: #c792ff; }
+.kf .kt-spin { color: #4fd8e8; }
+.kf .kt-last { color: #f2c14e; }
+.kf .kt-air { color: #7fb4ff; }
+.kf .kt-flash { color: #f6f6f0; }
+.kf .kt-smoke { color: #a9b4be; }
+.kf .kt-wallbang { color: #d9a066; }
+.kf .kt-long { color: #7bd389; }
 .kf .kt-burn { color: #ff8a3d; }
 .kf .kt-win { color: #10140c; background: #f2c14e; }
 .kf .kt-tk { color: #fff; background: #c0392b; }
