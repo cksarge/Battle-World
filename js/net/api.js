@@ -174,6 +174,24 @@ export class Api {
     return { rows: data, total: count ?? data.length };
   }
 
+  // Links this browser to the account; true if it was banned for another account (device ban).
+  async registerDevice(id) {
+    const { data, error } = await this.sb.rpc('register_device', { p_device: id });
+    if (error) throw friendly(error);
+    return data === true;
+  }
+
+  async submitAppeal(message) {
+    const { error } = await this.sb.rpc('submit_appeal', { p_message: message });
+    if (error) throw friendly(error);
+  }
+
+  // Something impossible another player did in an online match (see js/game/anticheat.js).
+  async flagPlayer(matchId, target, kind, mode, details) {
+    const { error } = await this.sb.rpc('flag_player', { p_match_id: matchId, p_target: target, p_kind: kind, p_mode: mode, p_details: details });
+    if (error) throw friendly(error);
+  }
+
   async reportRanked(matchId, winner, loser) {
     const { data, error } = await this.sb.rpc('report_ranked', { p_match_id: matchId, p_winner: winner, p_loser: loser });
     if (error) throw friendly(error);

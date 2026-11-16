@@ -17,6 +17,7 @@ import { applyAccess } from './ui/access.js';
 import { loadLocalMaps, setFeatured, registerRow, isCustom } from './data/custommaps.js';
 import { normalizeAchievements, mergeAchievements, applyMatchAchievements, checkUnlocks } from './data/achievements.js';
 import { addMastery } from './data/mastery.js';
+import { deviceId } from './net/device.js';
 
 const boot = document.getElementById('boot');
 const bootBar = boot.querySelector('.boot-bar div');
@@ -217,7 +218,8 @@ class App {
     this.achievements = mergeAchievements(profile.achievements, this.loadLocalAchievements());
     try { localStorage.removeItem('jps_achievements'); } catch { /* ignore */ }
     this.checkAchievements();
-    // Check for a ban before appearing in the online list.
+    // Link this browser to the account (device bans), then check for a ban before appearing online.
+    await deviceId().then((id) => this.api.registerDevice(id)).catch((e) => console.warn('Device check failed', e));
     await this.pollStatus();
     if (this.banned) return;
     this.joinPresence();
@@ -301,7 +303,7 @@ class App {
     this.isAdmin = st.admin === true;
     if (st.friend_requests !== undefined && (st.friend_requests !== this.friendRequestCount || !this.friendsLoaded)) this.loadFriends();
     this.muted = st.muted_until ? { until: st.muted_until, reason: st.mute_reason } : null;
-    const banned = st.banned_until ? { until: st.banned_until, reason: st.ban_reason } : null;
+    const banned = st.banned_until ? { until: st.banned_until, reason: st.ban_reason, appealable: st.ban_appealable !== false, appeal: st.appeal || null } : null;
     const kickKey = 'jps_kick_' + this.user.id, lastKick = Number(localStorage.getItem(kickKey) || 0), kickAt = st.kick_at ? Date.parse(st.kick_at) : 0;
     if (kickAt > lastKick) {
       try { localStorage.setItem(kickKey, String(kickAt)); } catch { /* ignore */ }

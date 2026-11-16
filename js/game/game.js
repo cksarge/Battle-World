@@ -25,6 +25,7 @@ import { BotBrain } from './bot.js';
 import { Hud } from './hud.js';
 import { EMOTES, KILL_FX, WEAPON_SKINS } from '../data/skins.js';
 import { Recorder, WORLD_EVENTS, unpack } from './recorder.js';
+import { AntiCheat } from './anticheat.js';
 import { SpectatorCam } from './spectatorcam.js';
 import {
   switchSlot, cycleSlot, startReload, tickWeapon, ready, spreadFor, applySpread, traceBullet, tracePierce, bulletDamage, bestSlot, hasSlot,
@@ -75,6 +76,7 @@ export class Game {
     this.decoys = [];
     this.nadeSeq = 0;
     this.drops = new Map();
+    this.anticheat = new AntiCheat(this);
     this.dropSeq = 0;
     // Detailed personal stats for the stats page (weapons, accuracy, head-to-head, where you died).
     // multi: most kills within 5 s · streak: most kills without dying · long: longest kill (m).
@@ -1561,6 +1563,7 @@ export class Game {
       const v = this.players.get(data.v);
       // Forged guns (zombies) hit twice as hard, so they get a higher ceiling.
       if (!v || !p.alive || data.d <= 0 || data.d > (this.zombies ? 1500 : 700)) return;
+      if (this.anticheat.rejectHit(p, data)) return;
       this.hostDamage(p, v, data.d, data.part, data.w);
     } else if (type === 'buy') this.hostBuy(p, data.item);
     else if (type === 'sell') this.hostSell(p, data.item);
@@ -1677,6 +1680,7 @@ export class Game {
         break;
       case 'round': this.applyRound(d); break;
       case 'roundEnd': {
+        this.anticheat.onRoundEnd(d);
         s.scores = d.scores; s.phase = 'post'; s.time = 5;
         for (const [id, m] of Object.entries(d.money || {})) { const p = this.players.get(id); if (p) p.money = m; }
         const reasonText = { elim: 'All enemies eliminated', bomb: 'The charge detonated', defuse: 'The charge was defused', time: 'Time ran out', draw: 'Draw', infected: 'Everyone was infected', survived: 'The survivors held out (+3 each)' }[d.reason] || '';
@@ -1727,6 +1731,7 @@ export class Game {
       case 'kill': {
         const v = this.players.get(d.victim), k = d.killer ? this.players.get(d.killer) : null;
         if (!v) break;
+        this.anticheat.onKill(k, v, d.w);
         v.alive = false; v.hp = 0;
         v.deaths++;
         const dir = k ? (new THREE.Vector3().subVectors(v.pos, k.pos).dot(v.forward()) > 0 ? -1 : 1) : 1;
@@ -1813,7 +1818,7 @@ export class Game {
         break;
       }
       case 'points': for (const [id, v] of Object.entries(d.list || {})) { const p = this.players.get(id); if (p) p.score = v; } break;
-      case 'give': this.applyGive(d); break;
+      case 'give': this.anticheat.onGive(d); this.applyGive(d); break;
       case 'sold': this.applySold(d); break;
       case 'drop': this.addDrop(d); break;
       case 'grab': this.applyGrab(d); break;
@@ -2191,6 +2196,7 @@ export class Game {
     for (const s of d.list) {
       const p = this.players.get(s.id);
       if (!p || p.owner === this.localId) continue;
+      this.anticheat.onState(p, s, now);
       if (s.sh) this.playShots(p, s.sh);
       if (s.p) p.pushState(s, now);
     }

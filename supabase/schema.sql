@@ -139,6 +139,9 @@ grant update (achievements) on public.profiles to authenticated;
 
 -- Ranked results an admin has voided are kept, flagged, so the match can't be reported again.
 alter table public.ranked_matches add column if not exists voided boolean not null default false;
+-- Who sent the result that counted, and whether the other player's game later reported the opposite.
+alter table public.ranked_matches add column if not exists reporter uuid;
+alter table public.ranked_matches add column if not exists disputed boolean not null default false;
 
 create table if not exists public.season_history (
   user_id     uuid not null references public.profiles(id) on delete cascade,
@@ -210,6 +213,48 @@ revoke all on public.moderation from anon, authenticated;
 grant select on public.moderation to authenticated;
 drop policy if exists "own moderation" on public.moderation;
 create policy "own moderation" on public.moderation for select using ((select auth.uid()) = user_id);
+
+-- Ban appeals and device bans (4.0.0). banned_at marks when the current ban started (one appeal per ban).
+alter table public.moderation add column if not exists banned_at timestamptz;
+alter table public.moderation add column if not exists ban_appealable boolean not null default true;
+alter table public.moderation add column if not exists device_ban boolean not null default false;
+
+-- Each browser keeps a random device id (js/net/device.js); signing in links it to the account.
+create table if not exists public.player_devices (
+  device_id  text not null check (char_length(device_id) between 8 and 64),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  first_seen timestamptz not null default now(),
+  last_seen  timestamptz not null default now(),
+  primary key (device_id, user_id)
+);
+create index if not exists player_devices_user_idx on public.player_devices (user_id);
+alter table public.player_devices enable row level security;
+revoke all on public.player_devices from anon, authenticated;
+
+-- Devices of accounts given a device ban. Signing in on one bans that account too (ban evasion).
+create table if not exists public.banned_devices (
+  device_id  text primary key,
+  user_id    uuid references public.profiles(id) on delete set null,
+  reason     text,
+  created_at timestamptz not null default now()
+);
+alter table public.banned_devices enable row level security;
+revoke all on public.banned_devices from anon, authenticated;
+
+create table if not exists public.ban_appeals (
+  id           bigint generated always as identity primary key,
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  message      text not null check (char_length(message) between 1 and 1000),
+  ban_reason   text,
+  banned_until timestamptz,
+  status       text not null default 'open' check (status in ('open', 'accepted', 'denied')),
+  admin_note   text,
+  resolved_at  timestamptz
+);
+create index if not exists ban_appeals_status_idx on public.ban_appeals (status, created_at desc);
+alter table public.ban_appeals enable row level security;
+revoke all on public.ban_appeals from anon, authenticated;
 
 create table if not exists public.warnings (
   id         bigint generated always as identity primary key,
@@ -297,6 +342,9 @@ begin
   select * into m from moderation where user_id = uid;
   return json_build_object(
     'banned_until', case when m.banned_until > now() then m.banned_until end, 'ban_reason', m.ban_reason,
+    'ban_appealable', coalesce(m.ban_appealable, true),
+    'appeal', case when m.banned_until > now() then (select json_build_object('status', a.status, 'note', a.admin_note) from ban_appeals a
+      where a.user_id = uid and a.created_at >= coalesce(m.banned_at, m.updated_at) order by a.id desc limit 1) end,
     'muted_until', case when m.muted_until > now() then m.muted_until end, 'mute_reason', m.mute_reason,
     'kick_at', m.kick_at, 'kick_reason', m.kick_reason,
     'warnings', (select coalesce(json_agg(json_build_object('id', w.id, 'message', w.message, 'at', w.created_at) order by w.id), '[]') from warnings w where w.user_id = uid and not w.seen),
@@ -307,6 +355,54 @@ begin
   );
 end;
 $$;
+
+-- Links this browser to the signed-in account. A device banned for another account bans this one too
+-- (permanently, no appeal) along with every device it has used. Admin accounts are never caught by it.
+create or replace function public.register_device(p_device text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null or p_device is null or char_length(p_device) not between 8 and 64 then return false; end if;
+  insert into player_devices (device_id, user_id) values (p_device, uid)
+  on conflict (device_id, user_id) do update set last_seen = now();
+  if exists (select 1 from admins where user_id = uid) or not exists (select 1 from banned_devices where device_id = p_device) then return false; end if;
+  if not is_banned(uid) then
+    insert into moderation (user_id, banned_until, banned_at, ban_reason, ban_appealable, device_ban, kick_at, kick_reason, updated_at)
+    values (uid, 'infinity', now(), 'Ban evasion: this device belongs to a banned account', false, true, now(), 'Banned', now())
+    on conflict (user_id) do update set banned_until = 'infinity', banned_at = now(), ban_reason = excluded.ban_reason,
+      ban_appealable = false, device_ban = true, kick_at = now(), kick_reason = 'Banned', updated_at = now();
+  end if;
+  insert into banned_devices (device_id, user_id, reason)
+  select d.device_id, uid, 'Ban evasion' from player_devices d
+  where d.user_id = uid and not exists (select 1 from player_devices a join admins ad on ad.user_id = a.user_id where a.device_id = d.device_id)
+  on conflict (device_id) do nothing;
+  return true;
+end;
+$$;
+
+-- A banned player asks for their ban to be lifted: once per ban, and only if the ban allows it.
+create or replace function public.submit_appeal(p_message text)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  m moderation%rowtype;
+begin
+  if uid is null then raise exception 'not signed in'; end if;
+  select * into m from moderation where user_id = uid;
+  if not found or m.banned_until is null or m.banned_until <= now() then raise exception 'You are not banned.'; end if;
+  if not m.ban_appealable then raise exception 'This ban can''t be appealed.'; end if;
+  if coalesce(trim(p_message), '') = '' then raise exception 'Write your appeal first.'; end if;
+  if exists (select 1 from ban_appeals where user_id = uid and created_at >= coalesce(m.banned_at, m.updated_at)) then
+    raise exception 'You have already appealed this ban.';
+  end if;
+  insert into ban_appeals (user_id, message, ban_reason, banned_until) values (uid, left(trim(p_message), 1000), m.ban_reason, m.banned_until);
+end;
+$$;
+revoke all on function public.register_device(text) from public, anon;
+grant execute on function public.register_device(text) to authenticated;
+revoke all on function public.submit_appeal(text) from public, anon;
+grant execute on function public.submit_appeal(text) to authenticated;
 
 create or replace function public.ack_status(p_warnings bigint[], p_grants bigint[])
 returns void language sql security definer set search_path = public as $$
@@ -596,6 +692,42 @@ end;
 $$;
 
 -- ───────────── ranked and match results: season tracking + bans ─────────────
+-- Cheat flags: players' games report impossible things they see another player (or the host) do,
+-- such as moving too fast, shooting through walls, firing too fast, impossible purchases or round results.
+-- Players can't read them; they're listed in Admin → Cheat flags. Ranked disputes are added by report_ranked.
+create table if not exists public.cheat_flags (
+  id         bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  reporter   uuid not null references public.profiles(id) on delete cascade,
+  target     uuid references public.profiles(id) on delete cascade,
+  match_id   text not null,
+  mode       text,
+  kind       text not null check (kind in ('speed', 'wall_shot', 'fire_rate', 'money', 'round', 'forged_hit', 'ranked_dispute')),
+  details    jsonb,
+  unique (reporter, match_id, target, kind)
+);
+create index if not exists cheat_flags_target_idx on public.cheat_flags (target, created_at desc);
+alter table public.cheat_flags enable row level security;
+revoke all on public.cheat_flags from anon, authenticated;
+
+create or replace function public.flag_player(p_match_id text, p_target uuid, p_kind text, p_mode text, p_details jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null or p_target is null or p_target = uid or p_match_id is null then return; end if;
+  if p_kind not in ('speed', 'wall_shot', 'fire_rate', 'money', 'round', 'forged_hit') then return; end if;
+  if not exists (select 1 from profiles where id = p_target) then return; end if;
+  if (select count(*) from cheat_flags where reporter = uid and created_at > now() - interval '1 hour') >= 30 then return; end if;
+  insert into cheat_flags (reporter, target, match_id, mode, kind, details)
+  values (uid, p_target, left(p_match_id, 80), left(p_mode, 30), p_kind,
+          case when p_details is not null and pg_column_size(p_details) <= 4000 then p_details end)
+  on conflict do nothing;
+end;
+$$;
+revoke all on function public.flag_player(text, uuid, text, text, jsonb) from public, anon;
+grant execute on function public.flag_player(text, uuid, text, text, jsonb) to authenticated;
+
 -- Sign in with a username: returns the account's email only when the password is right, so emails
 -- can't be looked up without it. Five wrong passwords per username lock it for 15 minutes. The game
 -- then signs in with the email through Supabase Auth as usual (captcha and all).
@@ -651,6 +783,15 @@ begin
   if found then
     -- Voided results stay recorded (so they can't be reported again) and count for nothing.
     if r.voided then return json_build_object('winner', r.winner, 'winner_delta', 0, 'loser_delta', 0); end if;
+    -- The other player's game says the opposite: keep the result, but mark it disputed and flag it for
+    -- the admin (who can void it). Leaving still counts as a loss, since a leaver never reports.
+    if r.winner <> p_winner and r.reporter is not null and r.reporter <> auth.uid() and not r.disputed then
+      update ranked_matches set disputed = true where match_id = p_match_id;
+      insert into cheat_flags (reporter, target, match_id, mode, kind, details)
+      values (auth.uid(), r.reporter, p_match_id, 'ranked', 'ranked_dispute',
+              json_build_object('counted_winner', r.winner, 'reported_winner', p_winner)::jsonb)
+      on conflict do nothing;
+    end if;
     return json_build_object('winner', r.winner, 'winner_delta', r.winner_delta, 'loser_delta', r.loser_delta);
   end if;
 
@@ -667,8 +808,8 @@ begin
     update profiles set elo = greatest(0, elo - d),
            ranked_losses = ranked_losses + 1, season_losses = season_losses + 1 where id = p_loser;
     -- Store what the loser actually lost (rating never goes below 0) so a void can reverse it exactly.
-    insert into ranked_matches (match_id, winner, loser, winner_delta, loser_delta, created_at)
-    values (p_match_id, p_winner, p_loser, d, -least(d, le), now());
+    insert into ranked_matches (match_id, winner, loser, winner_delta, loser_delta, created_at, reporter)
+    values (p_match_id, p_winner, p_loser, d, -least(d, le), now(), auth.uid());
   exception when unique_violation then
     select * into r from ranked_matches where match_id = p_match_id;
     return json_build_object('winner', r.winner, 'winner_delta', r.winner_delta, 'loser_delta', r.loser_delta);
@@ -792,7 +933,12 @@ begin
     'reports_filed', (select count(*) from reports where reporter = p_id),
     'commends', player_commends(p_id),
     'matches', (select coalesce(json_agg(row_to_json(t)), '[]') from (select id, match_id, mode, map, ranked, online, result, kills, deaths, headshots, score, elo_change, created_at from match_history where user_id = p_id order by created_at desc limit 30) t),
-    'seasons', (select coalesce(json_agg(s), '[]') from season_history s where s.user_id = p_id)
+    'seasons', (select coalesce(json_agg(s), '[]') from season_history s where s.user_id = p_id),
+    'devices', (select count(*) from player_devices where user_id = p_id),
+    'shared_accounts', (select coalesce(json_agg(distinct jsonb_build_object('id', o.user_id, 'username', pr.username)), '[]')
+      from player_devices d join player_devices o on o.device_id = d.device_id and o.user_id <> p_id
+      join profiles pr on pr.id = o.user_id where d.user_id = p_id),
+    'appeals', (select coalesce(json_agg(a order by a.id desc), '[]') from ban_appeals a where a.user_id = p_id)
   );
 end;
 $$;
@@ -806,14 +952,28 @@ begin
 end;
 $$;
 
-create or replace function public.admin_ban(p_user uuid, p_minutes int, p_reason text)
+-- p_appealable: the player may send one appeal. p_device: permanent, no appeal, and every device the
+-- account has used is banned (devices an admin account also uses are skipped). The old three-argument
+-- version is dropped so calls aren't ambiguous.
+drop function if exists public.admin_ban(uuid, int, text);
+create or replace function public.admin_ban(p_user uuid, p_minutes int, p_reason text, p_appealable boolean default true, p_device boolean default false)
 returns void language plpgsql security definer set search_path = public as $$
-declare until timestamptz := case when p_minutes is null or p_minutes <= 0 then 'infinity'::timestamptz else now() + make_interval(mins => p_minutes) end;
+declare
+  until timestamptz := case when p_device or p_minutes is null or p_minutes <= 0 then 'infinity'::timestamptz else now() + make_interval(mins => p_minutes) end;
+  appealable boolean := coalesce(p_appealable, true) and not coalesce(p_device, false);
 begin
   perform admin_guard(); perform admin_target(p_user);
-  insert into moderation (user_id, banned_until, ban_reason, kick_at, kick_reason, updated_at) values (p_user, until, left(p_reason, 300), now(), 'Banned', now())
-  on conflict (user_id) do update set banned_until = until, ban_reason = left(p_reason, 300), kick_at = now(), kick_reason = 'Banned', updated_at = now();
-  perform admin_log('ban', p_user::text, json_build_object('minutes', p_minutes, 'reason', p_reason)::jsonb);
+  insert into moderation (user_id, banned_until, banned_at, ban_reason, ban_appealable, device_ban, kick_at, kick_reason, updated_at)
+  values (p_user, until, now(), left(p_reason, 300), appealable, coalesce(p_device, false), now(), 'Banned', now())
+  on conflict (user_id) do update set banned_until = until, banned_at = now(), ban_reason = left(p_reason, 300),
+    ban_appealable = appealable, device_ban = coalesce(p_device, false), kick_at = now(), kick_reason = 'Banned', updated_at = now();
+  if p_device then
+    insert into banned_devices (device_id, user_id, reason)
+    select d.device_id, p_user, left(p_reason, 300) from player_devices d
+    where d.user_id = p_user and not exists (select 1 from player_devices a join admins ad on ad.user_id = a.user_id where a.device_id = d.device_id)
+    on conflict (device_id) do nothing;
+  end if;
+  perform admin_log('ban', p_user::text, json_build_object('minutes', p_minutes, 'reason', p_reason, 'appealable', appealable, 'device', coalesce(p_device, false))::jsonb);
 end;
 $$;
 
@@ -821,7 +981,8 @@ create or replace function public.admin_unban(p_user uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform admin_guard();
-  update moderation set banned_until = null, ban_reason = null, updated_at = now() where user_id = p_user;
+  update moderation set banned_until = null, ban_reason = null, banned_at = null, ban_appealable = true, device_ban = false, updated_at = now() where user_id = p_user;
+  delete from banned_devices where user_id = p_user;
   perform admin_log('unban', p_user::text, null);
 end;
 $$;
@@ -932,6 +1093,54 @@ begin
   update ranked_matches set voided = true where match_id = p_match_id;
   update match_history set elo_change = 0, score = coalesce(score, '') || ' (voided)' where match_id = p_match_id and ranked;
   perform admin_log('void_ranked', p_match_id, row_to_json(r)::jsonb);
+end;
+$$;
+
+-- Ban appeals, newest first, with the player's current ban.
+create or replace function public.admin_appeals(p_status text default 'open')
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  return (select coalesce(json_agg(row_to_json(t)), '[]') from (
+    select a.*, p.username, m.banned_until as current_until, m.device_ban
+    from ban_appeals a join profiles p on p.id = a.user_id left join moderation m on m.user_id = a.user_id
+    where p_status = 'all' or a.status = p_status
+    order by a.id desc limit 200) t);
+end;
+$$;
+
+-- Accepting an appeal lifts the ban (devices included); denying it keeps the ban. Either way the
+-- player sees the note on their ban screen.
+create or replace function public.admin_resolve_appeal(p_id bigint, p_accept boolean, p_note text)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid;
+begin
+  perform admin_guard();
+  update ban_appeals set status = case when p_accept then 'accepted' else 'denied' end, admin_note = left(p_note, 500), resolved_at = now()
+  where id = p_id and status = 'open' returning user_id into uid;
+  if uid is null then raise exception 'That appeal was already handled.'; end if;
+  if p_accept then
+    update moderation set banned_until = null, ban_reason = null, banned_at = null, ban_appealable = true, device_ban = false, updated_at = now() where user_id = uid;
+    delete from banned_devices where user_id = uid;
+  end if;
+  perform admin_log(case when p_accept then 'appeal_accepted' else 'appeal_denied' end, uid::text, json_build_object('appeal', p_id, 'note', p_note)::jsonb);
+end;
+$$;
+
+-- Cheat flags, newest first, with how many flags and separate reporters each player has.
+create or replace function public.admin_flags(p_limit int default 200)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  return (select coalesce(json_agg(row_to_json(t)), '[]') from (
+    select f.*, rp.username as reporter_name, tp.username as target_name,
+      (select count(*) from cheat_flags x where x.target = f.target) as target_flags,
+      (select count(distinct x.reporter) from cheat_flags x where x.target = f.target) as target_reporters
+    from cheat_flags f
+    left join profiles rp on rp.id = f.reporter
+    left join profiles tp on tp.id = f.target
+    order by f.id desc limit least(p_limit, 500)) t);
 end;
 $$;
 
@@ -1076,11 +1285,11 @@ begin
     'admin_feature_map(bigint, int)', 'admin_delete_map(bigint)',
     'submit_feedback(text, text, jsonb)', 'admin_feedback(text, int)', 'admin_resolve_feedback(bigint, text, text)',
     'admin_overview()', 'admin_reports(text, int)', 'admin_resolve_report(bigint, text, text)', 'admin_player(uuid)',
-    'admin_ban(uuid, int, text)', 'admin_unban(uuid)', 'admin_mute(uuid, int, text)', 'admin_unmute(uuid)',
+    'admin_ban(uuid, int, text, boolean, boolean)', 'admin_unban(uuid)', 'admin_appeals(text)', 'admin_resolve_appeal(bigint, boolean, text)', 'admin_mute(uuid, int, text)', 'admin_unmute(uuid)',
     'admin_kick(uuid, text)', 'admin_warn(uuid, text)', 'admin_rename(uuid, text)', 'admin_set_stats(uuid, jsonb)',
     'admin_reset_stats(uuid)', 'admin_grant_item(uuid, text, text, boolean)', 'admin_void_ranked(text)',
     'admin_moderated(int)', 'admin_announce(text, numeric, text, timestamptz)', 'admin_end_announcement(bigint)',
-    'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int)'
+    'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int)', 'admin_flags(int)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

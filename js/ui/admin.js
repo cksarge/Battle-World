@@ -21,21 +21,21 @@ const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const REASON = Object.fromEntries(REPORT_REASONS.map(([k, l]) => [k, l.split(' (')[0]]));
 // Announcement styles as stored in the database, named the way the menu banner shows them.
 const ANNOUNCE_KINDS = { info: 'News', warn: 'Notice', event: 'Event' };
-const DURATIONS = [[60, '1 hour'], [1440, '1 day'], [10080, '7 days'], [43200, '30 days'], [0, 'Permanent']];
-const SECTIONS = [['overview', 'Overview'], ['reports', 'Reports'], ['players', 'Players'], ['moderated', 'Bans & mutes'], ['live', 'Online now'], ['maps', 'Maps'], ['feedback', 'Feedback'], ['announce', 'Announcements'], ['settings', 'Game switches'], ['audit', 'Audit log']];
+const DURATIONS = [[60, '1 hour'], [360, '6 hours'], [1440, '1 day'], [4320, '3 days'], [10080, '7 days'], [20160, '14 days'], [43200, '30 days'], [129600, '90 days'], [525600, '1 year'], [0, 'Permanent']];
+const SECTIONS = [['overview', 'Overview'], ['reports', 'Reports'], ['flags', 'Cheat flags'], ['players', 'Players'], ['moderated', 'Bans & mutes'], ['appeals', 'Appeals'], ['live', 'Online now'], ['maps', 'Maps'], ['feedback', 'Feedback'], ['announce', 'Announcements'], ['settings', 'Game switches'], ['audit', 'Audit log']];
 
 // Small form dialog. fields: [{id, label, type: 'text'|'textarea'|'select'|'number', options, value}]. Resolves to values or null.
 function ask(ui, title, fields, { confirm = 'Confirm', danger = false, note = '' } = {}) {
   return new Promise((resolve) => {
     const m = ui.modal(`<h2 class="m-h2">${esc(title)}</h2>${note ? `<p class="m-sub">${esc(note)}</p>` : ''}
-      ${fields.map((f) => `<label class="field"><span>${esc(f.label)}</span>${f.type === 'select'
+      ${fields.map((f) => f.type === 'checkbox' ? `<label class="m-check"><input type="checkbox" data-f="${f.id}" ${f.value ? 'checked' : ''}><span>${esc(f.label)}</span></label>` : `<label class="field"><span>${esc(f.label)}</span>${f.type === 'select'
         ? `<select data-f="${f.id}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(f.value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
         : f.type === 'textarea' ? `<textarea data-f="${f.id}" rows="3" maxlength="${f.max || 300}">${esc(f.value || '')}</textarea>`
           : `<input data-f="${f.id}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" ${f.max ? `maxlength="${f.max}"` : ''}>`}</label>`).join('')}
       <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn small ghost" data-x>Cancel</button><button class="btn small ${danger ? 'danger' : 'primary'}" data-ok>${esc(confirm)}</button></div>`);
     const done = (v) => { m.remove(); resolve(v); };
     m.querySelector('[data-x]').onclick = () => done(null);
-    m.querySelector('[data-ok]').onclick = () => done(Object.fromEntries([...m.querySelectorAll('[data-f]')].map((e) => [e.dataset.f, e.value])));
+    m.querySelector('[data-ok]').onclick = () => done(Object.fromEntries([...m.querySelectorAll('[data-f]')].map((e) => [e.dataset.f, e.type === 'checkbox' ? e.checked : e.value])));
     m.querySelector('[data-f]')?.focus();
   });
 }
@@ -116,6 +116,44 @@ export class AdminPanel {
     }; });
   }
 
+  // ───────────── ban appeals ─────────────
+  async appeals() {
+    this.appealFilter ||= 'open';
+    const list = await this.call('appeals', { p_status: this.appealFilter });
+    this.body.innerHTML = `<div class="seg" id="apf">${[['open', 'Open'], ['accepted', 'Accepted'], ['denied', 'Denied'], ['all', 'All']].map(([k, l]) => `<button data-k="${k}" class="${k === this.appealFilter ? 'sel' : ''}">${l}</button>`).join('')}</div>
+      ${list.length ? list.map((a) => `<div class="adm-report ${a.status === 'open' ? 'open' : ''}">
+        <div class="ar-head"><b class="ar-reason"><a href="#" data-player="${esc(a.user_id)}">${esc(a.username)}</a></b><span class="m-sub">${a.current_until ? `banned ${esc(banUntil(a.current_until) || 'permanently')}` : 'no longer banned'}${a.device_ban ? ' · device ban' : ''}</span><span class="spacer"></span><span class="m-sub">${when(a.created_at)}</span></div>
+        ${a.ban_reason ? `<div class="m-sub">Ban reason: ${esc(a.ban_reason)}</div>` : ''}
+        <p class="ar-note">“${esc(a.message)}”</p>
+        ${a.status !== 'open' ? `<div class="m-sub">${esc(a.status)}${a.admin_note ? ': ' + esc(a.admin_note) : ''} · ${when(a.resolved_at)}</div>` : `<div class="row ar-actions">
+          <button class="btn tiny primary" data-appeal="${a.id}" data-ok="1">Accept and unban</button><button class="btn tiny danger" data-appeal="${a.id}" data-ok="0">Deny</button></div>`}
+      </div>`).join('') : '<p class="m-empty">No appeals here.</p>'}`;
+    this.body.querySelectorAll('#apf button').forEach((b) => { b.onclick = () => { this.appealFilter = b.dataset.k; this.refresh(); }; });
+    this.bindPlayerLinks(this.body);
+    this.body.querySelectorAll('[data-appeal]').forEach((b) => { b.onclick = async () => {
+      const accept = b.dataset.ok === '1';
+      const v = await ask(this.ui, accept ? 'Accept appeal and unban' : 'Deny appeal', [{ id: 'note', label: 'Note (shown to them)', type: 'textarea', max: 500 }], { confirm: accept ? 'Unban' : 'Deny', danger: !accept });
+      if (!v) return;
+      await this.call('resolve_appeal', { p_id: +b.dataset.appeal, p_accept: accept, p_note: v.note }, accept ? 'Appeal accepted, ban lifted' : 'Appeal denied');
+      this.refresh();
+    }; });
+  }
+
+  // ───────────── cheat flags ─────────────
+  // Impossible things players' games saw someone do (js/game/anticheat.js), plus disputed ranked results.
+  async flags() {
+    const list = await this.call('flags', { p_limit: 200 });
+    const KIND = { speed: 'Moving too fast', wall_shot: 'Kills through walls', fire_rate: 'Firing too fast', money: 'Impossible purchase', round: 'Impossible round result', forged_hit: 'Impossible hit (rejected by host)', ranked_dispute: 'Disputed ranked result' };
+    const detail = (d) => (d ? Object.entries(d).filter(([k]) => k !== 'name').map(([k, v]) => `${esc(k.replace(/_/g, ' '))}: ${esc(typeof v === 'object' ? JSON.stringify(v) : v)}`).join(' · ') : '');
+    this.body.innerHTML = `<p class="m-sub">Flags come from other players' games when they see something impossible. One flag can be a glitch; several from different players is worth a look. Nothing here bans anyone automatically.</p>
+      ${list.length ? list.map((f) => `<div class="adm-report">
+        <div class="ar-head"><b class="ar-reason">${esc(KIND[f.kind] || f.kind)}</b><span>${f.target ? `<a href="#" data-player="${esc(f.target)}">${esc(f.target_name || '?')}</a>` : 'unknown'}${f.target_reporters > 1 ? ` <em class="hot">${f.target_flags} flags from ${f.target_reporters} players</em>` : ` <span class="m-sub">${f.target_flags} flag${f.target_flags === 1 ? '' : 's'} total</span>`}</span><span class="spacer"></span><span class="m-sub">${when(f.created_at)}</span></div>
+        <div class="m-sub">Seen by ${esc(f.reporter_name || '?')} · ${esc(MODES[f.mode]?.name || f.mode || '')} · match ${esc(f.match_id)}</div>
+        ${f.details ? `<div class="m-sub small">${detail(f.details)}</div>` : ''}
+      </div>`).join('') : '<p class="m-empty">No cheat flags yet.</p>'}`;
+    this.bindPlayerLinks(this.body);
+  }
+
   // ───────────── players ─────────────
   async players() {
     this.body.innerHTML = `<div class="row" style="gap:8px"><input type="text" id="adm-q" placeholder="Search by username" aria-label="Search players" value="${esc(this.query || '')}"><button class="btn small" id="adm-search">Search</button><button class="btn small" id="adm-all">See all players</button></div>
@@ -172,7 +210,7 @@ export class AdminPanel {
     const live = this.app.onlinePlayers().find((o) => o.id === p.id);
     const liveText = !live ? 'Offline' : live.match ? `In a match: ${MODES[live.match.mode]?.name || live.match.mode} on ${MAPS[live.match.map]?.name || live.match.map}` : `Online (${live.status || 'menu'})`;
     box.innerHTML = `<div class="adm-player">
-      <div class="row"><h3 class="m-h2">${esc(p.username)}</h3>${rankBadge(p.elo)}${d.is_admin ? '<span class="admin-badge">Admin</span>' : ''}${banned ? `<span class="tag bad">Banned ${esc(banUntil(m.banned_until))}</span>` : ''}${muted ? `<span class="tag warn">Muted ${esc(banUntil(m.muted_until))}</span>` : ''}</div>
+      <div class="row"><h3 class="m-h2">${esc(p.username)}</h3>${rankBadge(p.elo)}${d.is_admin ? '<span class="admin-badge">Admin</span>' : ''}${banned ? `<span class="tag bad">Banned ${esc(banUntil(m.banned_until))}</span>${m.device_ban ? '<span class="tag bad">Device ban</span>' : m.ban_appealable === false ? '<span class="tag bad">No appeal</span>' : ''}` : ''}${muted ? `<span class="tag warn">Muted ${esc(banUntil(m.muted_until))}</span>` : ''}</div>
       <div class="m-sub">Joined ${when(p.created_at)} · last seen ${when(p.last_seen)} · id ${esc(p.id)}</div>
       ${banned && m.ban_reason ? `<div class="m-sub">Ban reason: ${esc(m.ban_reason)}</div>` : ''}${muted && m.mute_reason ? `<div class="m-sub">Mute reason: ${esc(m.mute_reason)}</div>` : ''}
       <div class="st-nums small">
@@ -180,6 +218,7 @@ export class AdminPanel {
         <div><b>${p.wins}–${p.losses}</b><span>Online W–L</span></div><div><b>${p.kills}/${p.deaths}</b><span>Kills / deaths</span></div>
         <div><b>${p.headshots}</b><span>Headshots</span></div><div><b>${(p.xp || 0).toLocaleString()}</b><span>XP (season ${(p.pass_xp || 0).toLocaleString()})</span></div></div>
       <div class="m-sub">Commends: ${commends} · Reports against: ${d.reports_against.length} · Reports filed: ${d.reports_filed}</div>
+      <div class="m-sub">Devices: ${d.devices ?? 0}${d.shared_accounts?.length ? ` · Shares a device with ${d.shared_accounts.map((o) => `<a href="#" data-player="${esc(o.id)}">${esc(o.username)}</a>`).join(', ')}` : ''}</div>
       <div class="row" style="gap:8px;align-items:center"><span class="tag ${live ? 'ok' : ''}">${esc(liveText)}</span>${live?.match?.id && p.id !== this.app.user?.id ? '<button class="btn tiny primary" data-watch>Spectate match</button>' : ''}</div>
       ${d.is_admin ? '<p class="m-sub">Admins can’t be banned, muted, kicked or warned.</p>' : ''}
       <div class="row ar-actions">
@@ -192,6 +231,7 @@ export class AdminPanel {
         <button class="btn tiny" data-act="revoke" data-u="${p.id}">Remove item</button>
         <button class="btn tiny danger" data-act="reset" data-u="${p.id}">Reset stats</button>
       </div>
+      ${d.appeals?.length ? `<h4 class="m-h3">Ban appeals</h4>${d.appeals.map((a) => `<div class="m-sub">${when(a.created_at)} · ${esc(a.status)}: “${esc(a.message)}”${a.admin_note ? ` · your note: ${esc(a.admin_note)}` : ''}</div>`).join('')}` : ''}
       ${d.warnings.length ? `<h4 class="m-h3">Warnings</h4>${d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join('')}` : ''}
       ${d.reports_against.length ? `<h4 class="m-h3">Reports against them</h4>${d.reports_against.map((r) => `<div class="m-sub">${when(r.created_at)} · ${esc(REASON[r.reason])} from ${esc(r.reporter_name)} · ${esc(r.status)}${r.note ? ` · “${esc(r.note)}”` : ''}</div>`).join('')}` : ''}
       <h4 class="m-h3">Recent matches</h4>
@@ -199,6 +239,7 @@ export class AdminPanel {
       ${d.seasons.length ? `<h4 class="m-h3">Past seasons</h4>${d.seasons.map((s) => `<div class="m-sub">${esc(s.season_id.toUpperCase())}: ${s.final_elo} final, ${s.peak_elo} peak, ${s.wins}–${s.losses}, ${s.pass_xp.toLocaleString()} season XP</div>`).join('')}` : ''}
     </div>`;
     this.bindActions(box, () => this.showPlayer(id));
+    this.bindPlayerLinks(box);
     box.querySelector('[data-watch]')?.addEventListener('click', () => this.app.spectate(live.match));
     box.querySelectorAll('[data-void]').forEach((b) => { b.onclick = async () => {
       const v = await ask(this.ui, 'Void ranked result', [], { confirm: 'Void it', danger: true, note: `Reverses both players' rating change and win/loss for match ${b.dataset.void}.` });
@@ -215,11 +256,22 @@ export class AdminPanel {
       const u = b.dataset.u, act = b.dataset.act, rid = b.dataset.r;
       let v;
       try {
-        if (act === 'ban' || act === 'mute') {
-          v = await ask(this.ui, act === 'ban' ? 'Ban player' : 'Mute player', [{ id: 'mins', label: 'Length', type: 'select', options: DURATIONS, value: act === 'ban' ? 1440 : 60 }, { id: 'reason', label: 'Reason (shown to them)', type: 'textarea' }],
-            { confirm: act === 'ban' ? 'Ban' : 'Mute', danger: act === 'ban', note: act === 'ban' ? 'They are removed from any match and blocked from online play, ranked and XP.' : 'Their chat is blocked and hidden from other players.' });
+        if (act === 'ban') {
+          v = await ask(this.ui, 'Ban player', [
+            { id: 'mins', label: 'Length', type: 'select', options: DURATIONS, value: 1440 },
+            { id: 'days', label: 'Or a custom length in days (overrides the list)', type: 'number', value: '' },
+            { id: 'reason', label: 'Reason (shown to them)', type: 'textarea' },
+            { id: 'appeal', label: 'Allow them to appeal', type: 'checkbox', value: true },
+            { id: 'device', label: 'Device ban: permanent, no appeal, and new accounts on their devices are banned too', type: 'checkbox', value: false },
+          ], { confirm: 'Ban', danger: true, note: 'They are removed from any match and blocked from online play, ranked and XP. A device ban never touches devices your admin account also uses.' });
           if (!v) return;
-          await this.call(act, { p_user: u, p_minutes: +v.mins, p_reason: v.reason }, act === 'ban' ? 'Player banned' : 'Player muted');
+          const days = +v.days, mins = days > 0 ? Math.round(days * 1440) : +v.mins;
+          await this.call('ban', { p_user: u, p_minutes: v.device ? 0 : mins, p_reason: v.reason, p_appealable: !!v.appeal && !v.device, p_device: !!v.device }, v.device ? 'Player and their devices banned' : 'Player banned');
+        } else if (act === 'mute') {
+          v = await ask(this.ui, 'Mute player', [{ id: 'mins', label: 'Length', type: 'select', options: DURATIONS, value: 60 }, { id: 'reason', label: 'Reason (shown to them)', type: 'textarea' }],
+            { confirm: 'Mute', note: 'Their chat is blocked and hidden from other players.' });
+          if (!v) return;
+          await this.call('mute', { p_user: u, p_minutes: +v.mins, p_reason: v.reason }, 'Player muted');
         } else if (act === 'unban' || act === 'unmute') {
           await this.call(act, { p_user: u }, act === 'unban' ? 'Ban lifted' : 'Mute lifted');
         } else if (act === 'kick') {

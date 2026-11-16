@@ -61,16 +61,40 @@ export function reportDialog(ui, player, ctx, onDone) {
 
 // Full-screen notice for a banned account. The only way out is signing out.
 export function showBanned(ui, ban) {
+  // The status check re-runs every half minute; only redraw when the ban itself changes, so a
+  // half-written appeal isn't wiped.
+  const key = [ban.until, ban.reason, ban.appealable, ban.appeal?.status, ban.appeal?.note].join('|');
+  if (ui.banKey === key && ui.root.querySelector('.ban-screen')) return;
+  ui.banKey = key;
   ui.hide?.();
+  const a = ban.appeal;
+  const appeal = !ban.appealable ? '<p class="m-sub">This ban is final and can\'t be appealed.</p>'
+    : a?.status === 'open' ? '<p class="ban-appeal">Your appeal has been sent. You\'ll see the answer here.</p>'
+      : a?.status === 'denied' ? `<p class="ban-appeal">Your appeal was denied.${a.note ? ` ${esc(a.note)}` : ''}</p>`
+        : `<div class="ban-appeal-form"><label class="field"><span>Think this ban is a mistake? Appeal it (you can appeal once).</span>
+            <textarea id="ban-msg" rows="4" maxlength="1000" placeholder="Explain what happened"></textarea></label>
+            <div class="err" id="ban-err"></div><button class="btn" id="ban-appeal">Send appeal</button></div>`;
   ui.root.innerHTML = `<div class="ban-screen"><div class="ban-card">
     <div class="ban-icon" aria-hidden="true">⛔</div>
     <h1 class="m-h1">Account suspended</h1>
     <p>This account is banned ${esc(banUntil(ban.until) || 'permanently')}.</p>
     ${ban.reason ? `<p class="ban-reason">Reason: ${esc(ban.reason)}</p>` : ''}
     <p class="m-sub">You can't play online, earn XP or take part in ranked while suspended.</p>
+    ${appeal}
     <div class="row" style="justify-content:center;gap:8px"><button class="btn primary" id="ban-out">Sign out</button></div>
   </div></div>`;
   ui.root.querySelector('#ban-out').onclick = () => ui.app.signOut();
+  const send = ui.root.querySelector('#ban-appeal');
+  if (send) send.onclick = async () => {
+    const msg = ui.root.querySelector('#ban-msg').value.trim(), err = ui.root.querySelector('#ban-err');
+    if (!msg) { err.textContent = 'Write your appeal first.'; return; }
+    send.disabled = true;
+    try {
+      await ui.app.api.submitAppeal(msg);
+      ui.banKey = null;
+      showBanned(ui, { ...ban, appeal: { status: 'open' } });
+    } catch (e) { err.textContent = e.message; send.disabled = false; }
+  };
 }
 
 export const FEEDBACK_KINDS = [['bug', 'Bug report', '🐞'], ['feedback', 'Feedback', '💬'], ['idea', 'Idea', '💡']];

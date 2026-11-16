@@ -523,6 +523,59 @@ test('bot paths are walkable: following one never gets stuck on a prop', () => {
   return bad;
 });
 
+// ───────────── anti-cheat ─────────────
+const { maxHit, minInterval, badHit, wallBetween } = await import('../js/game/anticheat.js');
+const { bulletDamage } = await import('../js/game/combat.js');
+
+test('anti-cheat: the best honest hit with every weapon is allowed, double damage is not', () => {
+  const bad = [];
+  for (const w of Object.values(WEAPONS).filter((x) => x.damage)) {
+    for (const part of ['head', 'body', 'legs']) {
+      const honest = w.type === 'knife' ? Math.max(w.damage, w.altDamage || 0) * (w.backstab || 1) : bulletDamage(w, part, 0) * (w.pellets || 1);
+      if (badHit({ w: w.id, d: Math.round(honest), part }, [w.id], 1)) bad.push(`${w.id} ${part}: honest ${Math.round(honest)} rejected`);
+      if (!badHit({ w: w.id, d: maxHit(w, part) * 2 + 5, part }, [w.id], 1)) bad.push(`${w.id} ${part}: double damage allowed`);
+    }
+  }
+  return bad;
+});
+
+test('anti-cheat: claiming a gun you do not hold is judged by the guns you do', () => {
+  const bad = [];
+  const awpHead = bulletDamage(WEAPONS.longshot, 'head', 0);
+  if (!badHit({ w: 'longshot', d: Math.round(awpHead), part: 'head' }, ['p9', null, 'knife'], 1)) bad.push('AWP damage allowed while holding a P9');
+  if (!badHit({ w: 'thumper', d: 50, part: 'body' }, ['thumper', 'p9', 'knife'], 1)) bad.push('a bullet hit from the launcher was allowed');
+  // A quick knife attack reports the basic knife even when another knife is equipped.
+  if (badHit({ w: 'knife', d: WEAPONS.knife.altDamage, part: 'body' }, [null, 'p9', 'karambit'], 1)) bad.push('basic knife swing rejected for a karambit holder');
+  return bad;
+});
+
+test('anti-cheat: honest fire rates pass, impossible ones do not', () => {
+  const bad = [];
+  for (const w of Object.values(WEAPONS)) {
+    const honest = Math.ceil(2 / minInterval(w));
+    if (badHit({ w: w.id, d: 1, part: 'body' }, [w.id], honest)) bad.push(`${w.id}: ${honest} hits in 2 s rejected`);
+    if (!badHit({ w: w.id, d: 1, part: 'body' }, [w.id], 1000)) bad.push(`${w.id}: 1000 hits in 2 s allowed`);
+  }
+  return bad;
+});
+
+test('anti-cheat: walls stop the line, glass and wooden cover do not', () => {
+  const bad = [], seen = { '#': 0, G: 0, W: 0 };
+  for (const def of maps) {
+    const w = new World(def);
+    for (let y = 1; y < w.h - 1; y++) for (let x = 1; x < w.w - 1; x++) {
+      const ch = w.chars[y][x];
+      if (!(ch in seen) || seen[ch] > 6 || w.chars[y][x - 1] !== '.' || w.chars[y][x + 1] !== '.') continue;
+      seen[ch]++;
+      const a = V((x - 0.5) * CELL, 1.1, (y + 0.5) * CELL), b = V((x + 1.5) * CELL, 1.1, (y + 0.5) * CELL);
+      const got = wallBetween(w, a, b), want = ch === '#';
+      if (got !== want) bad.push(`${def.id} ${ch} at ${x},${y}: wallBetween ${got}, expected ${want}`);
+    }
+  }
+  for (const [ch, n] of Object.entries(seen)) if (!n) bad.push(`no ${ch} cell between two floor cells found to test`);
+  return bad;
+});
+
 console.log(failures.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1,6 +1,14 @@
 # Changelog
 
-### 3.8.0 · 2026-11-16
+## 4.0.0 · 2026-11-16
+
+- **Anti-cheat** in online matches: the host throws out impossible hits (more damage than the gun does, a gun the player doesn't have, or shots faster than it fires), and every player's game reports impossible things it sees others do, the host included: moving too fast, firing too fast, kills through solid walls, buying outside buy time and round results that don't add up
+- Ranked results the two players' games disagree on are marked as disputed and flagged for review
+- Bans can be set from 1 hour to 1 year, a custom number of days, or permanent
+- Banned players can appeal once per ban from the ban screen and see the answer there; bans can also be made final with no appeal
+- Device bans for cheaters: permanent with no appeal, and new accounts made on a banned device are banned too
+
+### 3.8.0 · 2026-11-16 · [26cc94d](https://github.com/cksarge/John-Paul-Simulator/commit/26cc94d)
 
 - Sell back guns you bought this round during buy time, for the full price, as long as you're still holding them; you get back the gun it replaced
 - Defuse Kit ($400, defenders only): defusing takes 5 seconds instead of 10 in Bomb Defusal (Retakes: 3 instead of 6)
