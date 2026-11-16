@@ -116,6 +116,8 @@ export class UI {
     const m = document.createElement('div');
     m.className = 'modal-backdrop';
     m.innerHTML = `<div class="modal m-card ${cls}">${html}</div>`;
+    // Take keyboard focus off whatever opened it, so Enter can't press that button again underneath.
+    document.activeElement?.blur?.();
     m.addEventListener('click', (e) => { if (e.target === m && !m.dataset.locked) m.remove(); });
     this.root.appendChild(m);
     return m;
@@ -756,6 +758,7 @@ export class UI {
   // ───────────────────────── queue ─────────────────────────
   async startQueue(mode) {
     if (this.blockedByMaintenance()) return;
+    if (this.queue) return; // already searching
     const m = MODES[mode], party = this.app.party;
     if (party?.inParty) {
       if (!party.isLeader) return this.toast('Only your party leader can start a search', 'bad');
@@ -778,7 +781,11 @@ export class UI {
     modal.querySelector('#q-cancel').onclick = () => { mm.cancel(); this.queue = null; modal.remove(); party?.announceCancel(); this.app.setStatus('menu'); };
     modal.querySelector('#q-force').onclick = () => mm.forceStart();
     try { await mm.start(); this.app.setStatus('queue'); party?.announceQueue(mode); }
-    catch (e) { modal.remove(); this.toast(e.message, 'bad'); }
+    catch (e) {
+      console.warn('Queue failed', e);
+      mm.cancel(); this.queue = null; modal.remove();
+      this.toast('Couldn’t join the queue. Check your connection and try again.', 'bad');
+    }
   }
 
   // ───────────────────────── lobbies ─────────────────────────
@@ -804,7 +811,12 @@ export class UI {
       if (isHost && this.app.party?.inParty && this.app.party.isLeader) this.app.party.announceLobby(code);
       this.renderLobby(lobby);
       if (!isHost) setTimeout(() => { if (!lobby.cfg.hostId && !lobby.started) { lobby.leave(); this.lobby = null; this.toast('No lobby with that code', 'bad'); this.showMenu('play'); } }, 4000);
-    } catch (e) { this.toast(e.message, 'bad'); this.showMenu('play'); }
+    } catch (e) {
+      console.warn('Lobby failed', e);
+      lobby.leave?.();
+      this.toast('Couldn’t join the lobby. Check your connection and try again.', 'bad');
+      this.showMenu('play');
+    }
   }
 
   renderLobby(lobby) {

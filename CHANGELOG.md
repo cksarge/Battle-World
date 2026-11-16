@@ -1,6 +1,12 @@
 # Changelog
 
-### 3.6.0 · 2026-11-16
+#### 3.6.1 · 2026-11-16
+
+- Pressing Enter again while searching for a match no longer shows a connection error
+- Cancelling a search and starting another straight away works reliably
+- Clearer messages if joining a queue or lobby fails
+
+### 3.6.0 · 2026-11-16 · [a9c108a](https://github.com/cksarge/John-Paul-Simulator/commit/a9c108a)
 
 - The main menu shows the game version (opens this changelog) and the latest commit (opens it on GitHub)
 - Added this changelog, and every change from now on gets a new version number

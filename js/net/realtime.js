@@ -27,7 +27,12 @@ export class Room {
   onJoin(fn) { this.joinHandlers.push(fn); }
   onSync(fn) { this.syncHandlers.push(fn); }
 
-  connect() {
+  async connect() {
+    // Supabase hands back an existing channel with the same name, and one left a moment ago may still be
+    // closing (cancel a search and start another quickly). Finish removing it so this one starts fresh.
+    // Live channels are left alone: they belong to something still using them.
+    const old = this.sb.getChannels().find((c) => c.topic === 'realtime:' + this.name && c.state !== 'joined' && c.state !== 'joining');
+    if (old) await this.sb.removeChannel(old);
     return new Promise((resolve, reject) => {
       const ch = this.sb.channel(this.name, { config: { broadcast: { self: false, ack: false }, presence: { key: this.me.id } } });
       this.channel = ch;
