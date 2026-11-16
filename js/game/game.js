@@ -1646,7 +1646,7 @@ export class Game {
       this.hostDropWeapon(victim);
       // Kill feed tags: what the shooter's game reported (known tags only), plus BURN when the victim
       // was standing in fire (but the fire isn't what killed them).
-      const t = (Array.isArray(tags) ? tags : []).filter((x) => KILL_TAGS[x]).slice(0, 8);
+      const t = [...new Set(Array.isArray(tags) ? tags : [])].filter((x) => KILL_TAGS[x] && x !== 'tk' && x !== 'win');
       if (weapon !== 'fire' && this.fires.some((f) => Math.hypot(victim.pos.x - f.pos.x, victim.pos.z - f.pos.z) < f.radius && Math.abs(victim.pos.y - f.pos.y) < 1.2)) t.push('burn');
       if (teamHit) t.unshift('tk');
       this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', t: t.length ? t : undefined, money: attacker ? attacker.money : 0 });

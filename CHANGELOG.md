@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.2.2 · 2026-11-16
+#### 4.2.3 · 2026-11-16
+
+- No more limit on kill feed tags: every one that applies shows up, so a 360 NOSCOPE LASTBLT AIR FLASH SMOKE WALLBANG LONG BURN HS WIN is possible. HS now sits just before WIN, and long kill feed lines wrap instead of running off the screen
+
+#### 4.2.2 · 2026-11-16 · [b5c96ce](https://github.com/cksarge/John-Paul-Simulator/commit/b5c96ce)
 
 - Banned players no longer show on the leaderboards, including the season leaderboard. They come back if the ban ends or is lifted
 

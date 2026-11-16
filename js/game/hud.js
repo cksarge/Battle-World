@@ -21,15 +21,18 @@ const SOUND_CUES = {
 const CUE_RANK = Object.fromEntries(Object.keys(SOUND_CUES).map((k, i) => [k, i]));
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-// Kill feed tags, in the order they're shown after HS. The shooter's game works most of them out
-// (Game.shotTags); BURN is added by the host.
+// Kill feed tags, in the order they're shown (HS goes just before WIN). There's no limit: every tag
+// that applies is shown. The shooter's game works most of them out (Game.shotTags); BURN is added by
+// the host.
 export const KILL_TAGS = {
-  tk: 'TK', noscope: 'NOSCOPE', spin: '360', last: 'LASTBLT', air: 'AIR', flash: 'FLASH',
+  tk: 'TK', spin: '360', noscope: 'NOSCOPE', last: 'LASTBLT', air: 'AIR', flash: 'FLASH',
   smoke: 'SMOKE', wallbang: 'WALLBANG', long: 'LONG', burn: 'BURN', win: 'WIN',
 };
+const HS_HTML = '<span class="hs">◉ HS</span>';
 export function killTagsHTML(hs, tags) {
-  const t = Object.keys(KILL_TAGS).filter((k) => tags?.includes(k));
-  return (hs ? '<span class="hs">◉ HS</span>' : '') + t.map((k) => `<span class="kt kt-${k}">${KILL_TAGS[k]}</span>`).join('');
+  const t = Object.keys(KILL_TAGS).filter((k) => tags?.includes(k)).map((k) => `<span class="kt kt-${k}">${KILL_TAGS[k]}</span>`);
+  if (hs) t.splice(tags?.includes('win') ? t.length - 1 : t.length, 0, HS_HTML);
+  return t.join('');
 }
 const fmtTime = (t) => { t = Math.max(0, Math.ceil(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 

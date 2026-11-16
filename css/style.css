@@ -323,7 +323,7 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .zperk { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 3px; border-radius: 50%; background: var(--pc); color: #0b0d10; font-size: 13px; font-style: normal; font-weight: 800; box-shadow: 0 0 8px var(--pc); }
 
 .killfeed { position: absolute; top: 14px; right: 18px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
-.kf { background: rgba(10,12,16,.7); padding: 5px 10px; border-radius: 3px; font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: center; animation: toastIn .15s; }
+.kf { background: rgba(10,12,16,.7); padding: 5px 10px; border-radius: 3px; font-size: 13px; font-weight: 600; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 8px; align-items: center; max-width: 52vw; animation: toastIn .15s; }
 .kf.mine { box-shadow: inset 0 0 0 1px #d33; }
 .kf .t { color: var(--t); } .kf .ct { color: var(--ct); } .kf .ffa { color: #ddd; }
 .kf .w { color: rgba(255,255,255,.65); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
