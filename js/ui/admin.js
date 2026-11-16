@@ -12,6 +12,8 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
 // Report evidence is written by the reporting player, so numbers are forced to numbers.
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const REASON = Object.fromEntries(REPORT_REASONS.map(([k, l]) => [k, l.split(' (')[0]]));
+// Announcement styles as stored in the database, named the way the menu banner shows them.
+const ANNOUNCE_KINDS = { info: 'News', warn: 'Notice', event: 'Event' };
 const DURATIONS = [[60, '1 hour'], [1440, '1 day'], [10080, '7 days'], [43200, '30 days'], [0, 'Permanent']];
 const SECTIONS = [['overview', 'Overview'], ['reports', 'Reports'], ['players', 'Players'], ['moderated', 'Bans & mutes'], ['live', 'Online now'], ['maps', 'Maps'], ['feedback', 'Feedback'], ['announce', 'Announcements'], ['settings', 'Game switches'], ['audit', 'Audit log']];
 
@@ -341,7 +343,7 @@ export class AdminPanel {
       <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field"><span>Style</span><select id="an-kind"><option value="info">News</option><option value="warn">Notice</option><option value="event">Event</option></select></label>
       <label class="field"><span>Show for</span><select id="an-h"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24" selected>1 day</option><option value="72">3 days</option><option value="168">1 week</option></select></label>
       <button class="btn small primary" id="an-post" style="align-self:flex-end">Post</button></div></div>
-      <h3 class="m-h3">Recent</h3>${list.length ? list.map((a) => `<div class="adm-ann ${live(a) ? 'live' : ''}"><span class="tag">${esc(a.kind)}</span><span>${esc(a.message)}</span><span class="spacer"></span><span class="m-sub">${live(a) ? 'until ' + when(a.ends_at) : 'ended'}</span>${live(a) ? `<button class="btn tiny ghost" data-end="${a.id}">End now</button>` : ''}</div>`).join('') : '<p class="m-empty">None yet.</p>'}`;
+      <h3 class="m-h3">Recent</h3>${list.length ? list.map((a) => `<div class="adm-ann ${live(a) ? 'live' : ''}"><span class="tag">${esc(ANNOUNCE_KINDS[a.kind] || a.kind)}</span><span>${esc(a.message)}</span><span class="spacer"></span><span class="m-sub">${live(a) ? 'until ' + when(a.ends_at) : 'ended'}</span>${live(a) ? `<button class="btn tiny ghost" data-end="${a.id}">End now</button>` : ''}</div>`).join('') : '<p class="m-empty">None yet.</p>'}`;
     this.body.querySelector('#an-post').onclick = async () => {
       const msg = this.body.querySelector('#an-msg').value.trim();
       if (!msg) return this.ui.toast('Write a message first', 'bad');
