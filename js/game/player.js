@@ -55,6 +55,7 @@ export class Player {
   resetKit() {
     this.inv = { primary: null, secondary: 'p9', melee: this.knifePref || 'knife', nades: [] };
     this.ammo = {};
+    this.defuseKit = false;
     this.giveAmmo('p9');
     this.slot = 'secondary';
     this.lastSlot = 'melee';

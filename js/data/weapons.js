@@ -240,6 +240,8 @@ export const nadeDef = (kind) => GRENADES[kind] || PROJECTILES[kind] || null;
 export const GEAR = {
   kevlar: { id: 'kevlar', name: 'Kevlar Vest', price: 650 },
   helmet: { id: 'helmet', name: 'Kevlar + Helmet', price: 1000 },
+  // Defenders only (Bomb Defusal, Retakes): halves the time to defuse. Lost on death.
+  defusekit: { id: 'defusekit', name: 'Defuse Kit', price: 400 },
 };
 
 // Buy menu sections, derived from each weapon's class so new weapons can't be left out.
@@ -247,7 +249,7 @@ const CLASSES = [['pistol', 'Pistols'], ['smg', 'SMGs'], ['shotgun', 'Shotguns']
 export const CLASS_NAMES = Object.fromEntries(CLASSES);
 export const BUY_MENU = [
   ...CLASSES.map(([type, title]) => ({ title, items: Object.values(WEAPONS).filter((w) => w.type === type).map((w) => w.id) })),
-  { title: 'Gear', items: ['kevlar', 'helmet'] },
+  { title: 'Gear', items: ['kevlar', 'helmet', 'defusekit'] },
   { title: 'Grenades', items: Object.keys(GRENADES) },
 ];
 

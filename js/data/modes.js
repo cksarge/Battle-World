@@ -36,7 +36,7 @@ export const MODES = {
   bomb: {
     id: 'bomb', name: '5v5 Bomb Defusal', short: '5V5', teamSize: 5, kind: 'bomb',
     desc: 'Attackers plant the charge at site A or B, defenders stop them. Full economy. First to 9.',
-    roundsToWin: 9, halftime: 8, roundTime: 115, buyTime: 15, bombTime: 40, plantTime: 3.2, defuseTime: 7,
+    roundsToWin: 9, halftime: 8, roundTime: 115, buyTime: 15, bombTime: 40, plantTime: 3.2, defuseTime: 10,
     maps: LARGE,
   },
   hostage: {

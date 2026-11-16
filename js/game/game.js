@@ -518,8 +518,38 @@ export class Game {
 
   actionTime(type, p) {
     if (type === 'revive') return this.zombies?.reviveTime(p) || 3;
-    const t = type === 'plant' ? this.mode.plantTime : this.mode.defuseTime;
+    const t = type === 'plant' ? this.mode.plantTime : this.mode.defuseTime * (p?.defuseKit ? 0.5 : 1);
     return t * (p?.char?.perk === 'quickhands' ? 0.7 : 1);
+  }
+
+  // Defuse kits are for the defending side in the modes with a charge to defuse.
+  kitAllowed(p) { return (this.mode.kind === 'bomb' || this.mode.kind === 'retake') && p?.team === 1; }
+
+  // Guns bought this round can be sold back for what they cost during buy time, as long as they're
+  // still in hand: dropping, swapping or picking up a gun ends that. p.bought[id] = { price, replaced, prev }.
+  canSell(item, p = this.local) {
+    const w = WEAPONS[item];
+    return !!(w && p?.bought?.[item] && p.inv[w.slot] === item && this.econ && this.canBuy(p));
+  }
+
+  sell(item) { if (this.canSell(item)) this.request('sell', { item }); }
+
+  hostSell(p, item) {
+    if (!this.canSell(item, p)) return;
+    this.broadcast('sold', { id: p.id, item, money: p.money + p.bought[item].price });
+  }
+
+  applySold(d) {
+    const p = this.players.get(d.id), w = WEAPONS[d.item], rec = p?.bought?.[d.item];
+    if (!p || !w || !rec) return;
+    p.money = d.money;
+    delete p.bought[d.item];
+    delete p.ammo[d.item];
+    // The gun it replaced comes back (your starting pistol, or one you'd bought before it).
+    p.inv[w.slot] = rec.replaced || null;
+    if (rec.replaced) { p.giveAmmo(rec.replaced); if (rec.prev) p.bought[rec.replaced] = rec.prev; }
+    if (p.slot === w.slot && !p.inv[w.slot]) switchSlot(p, bestSlot(p));
+    if (p.isLocal) { sfx.buy(); this.viewmodel.setWeapon(p.weaponId, p.char); this.hud.refreshBuy(); if (!this.zombies) this.saveLastLoadout(); }
   }
 
   // ───────────────────────── saved loadouts ─────────────────────────
@@ -539,6 +569,7 @@ export class Game {
     const items = [];
     if (p.inv.primary) items.push(p.inv.primary);
     if (p.helmet && p.armor > 0) items.push('helmet'); else if (p.armor > 0) items.push('kevlar');
+    if (p.defuseKit) items.push('defusekit');
     if (p.inv.secondary && p.inv.secondary !== 'p9') items.push(p.inv.secondary);
     if (p.inv.melee && p.inv.melee !== 'knife') items.push(p.inv.melee);
     items.push(...p.inv.nades);
@@ -553,6 +584,7 @@ export class Game {
       if (w) return p.inv[w.slot] !== it;
       if (it === 'kevlar') return p.armor < 100;
       if (it === 'helmet') return !(p.helmet && p.armor >= 100);
+      if (it === 'defusekit') return !p.defuseKit && this.kitAllowed(p);
       const i = have.indexOf(it);
       if (i >= 0) { have.splice(i, 1); return false; }
       return true;
@@ -1278,6 +1310,8 @@ export class Game {
     const p = this.players.get(g.id), w = WEAPONS[g.item];
     if (!p || !w) return;
     if (g.swap) this.addDrop(g.swap);
+    // Neither the gun left on the floor nor the one picked up can be sold back.
+    if (p.bought) { delete p.bought[p.inv[w.slot]]; delete p.bought[g.item]; }
     p.inv[w.slot] = g.item;
     p.ammo[g.item] = { mag: g.mag, reserve: g.reserve };
     switchSlot(p, w.slot);
@@ -1529,6 +1563,7 @@ export class Game {
       if (!v || !p.alive || data.d <= 0 || data.d > (this.zombies ? 1500 : 700)) return;
       this.hostDamage(p, v, data.d, data.part, data.w);
     } else if (type === 'buy') this.hostBuy(p, data.item);
+    else if (type === 'sell') this.hostSell(p, data.item);
     else if (type === 'fall') { if (p.alive && data.d > 0 && data.d < 250) this.hostDamage(p, p, data.d, 'legs', 'fall'); }
     else if (type === 'door') this.hostToggleDoor(p, data.cell);
     else if (type === 'gate') this.hostSwitch(p, data.cell);
@@ -1584,6 +1619,7 @@ export class Game {
     }
     else if (item === 'kevlar') { if (p.armor >= 100) return; }
     else if (item === 'helmet') { if (p.armor >= 100 && p.helmet) return; }
+    else if (item === 'defusekit') { if (p.defuseKit || !this.kitAllowed(p)) return; }
     p.money -= price;
     this.broadcast('give', { id: p.id, item, money: p.money });
   }
@@ -1606,6 +1642,7 @@ export class Game {
         else if (p.money >= 2200) this.hostBuy(p, pick(BOT_SMGS));
       }
       if (p.money >= 1000 && (p.armor < 100 || !p.helmet)) this.hostBuy(p, p.money >= 1600 ? 'helmet' : 'kevlar');
+      if (this.kitAllowed(p) && p.money >= 400 && Math.random() < 0.65) this.hostBuy(p, 'defusekit');
       if (p.money >= 400 && Math.random() < 0.6) this.hostBuy(p, pick(BOT_NADES));
       if (p.money >= 300 && Math.random() < 0.3) this.hostBuy(p, pick(BOT_NADES));
       if (!p.inv.primary && p.money >= 700 && Math.random() < 0.4) this.hostBuy(p, 'magnum');
@@ -1777,6 +1814,7 @@ export class Game {
       }
       case 'points': for (const [id, v] of Object.entries(d.list || {})) { const p = this.players.get(id); if (p) p.score = v; } break;
       case 'give': this.applyGive(d); break;
+      case 'sold': this.applySold(d); break;
       case 'drop': this.addDrop(d); break;
       case 'grab': this.applyGrab(d); break;
       case 'nade': this.spawnNade(d); break;
@@ -1905,6 +1943,7 @@ export class Game {
     for (const [id, m] of Object.entries(d.money || {})) { const p = this.players.get(id); if (p) p.money = m; }
     const reset = new Set(d.resetKit || []);
     for (const p of this.players.values()) {
+      p.bought = {}; // only guns bought this round can be sold
       const at = d.spawns[p.id];
       if (!at) { p.alive = false; continue; }
       this.spawnPlayer(p, at, reset.has(p.id), d.freeArmor);
@@ -1942,7 +1981,12 @@ export class Game {
     p.money = d.money;
     const it = d.item;
     if (WEAPONS[it]) {
-      const w = WEAPONS[it];
+      const w = WEAPONS[it], price = this.priceOf(it, p);
+      // Remember paid-for guns (and what they replaced) so they can be sold back this round.
+      p.bought ||= {};
+      const prev = p.inv[w.slot];
+      if (price > 0 && w.type !== 'knife') p.bought[it] = { price, replaced: prev, prev: p.bought[prev] || null };
+      if (prev && prev !== it) delete p.bought[prev];
       p.inv[w.slot] = it;
       if (w.type === 'knife') p.knifePref = it;
       p.giveAmmo(it);
@@ -1950,6 +1994,7 @@ export class Game {
     } else if (GRENADES[it]) p.inv.nades.push(it);
     else if (it === 'kevlar') p.armor = 100;
     else if (it === 'helmet') { p.armor = 100; p.helmet = true; }
+    else if (it === 'defusekit') p.defuseKit = true;
     if (p.isLocal) {
       sfx.buy(); this.viewmodel.setWeapon(p.weaponId, p.char); this.hud.refreshBuy();
       const queued = this.pendingEquip?.indexOf(it) ?? -1;
@@ -1961,7 +2006,7 @@ export class Game {
   // ───────────────────────── networking ─────────────────────────
   bindNet() {
     const n = this.net;
-    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'drop', 'grab', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
+    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'sold', 'drop', 'grab', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
     for (const e of evs) n.on(e, (d) => this.onEvent(e, d));
     n.on('S', (d) => this.onStates(d));
     n.on('req', (d) => { if (this.isHost) this.handleRequest(d.type, d.data, d.from); });

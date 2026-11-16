@@ -183,13 +183,18 @@ export class Hud {
   refreshBuy() {
     if (this.overlay !== 'buy') return;
     const g = this.g, p = g.local, free = !econFor(g.mode);
-    const owned = (id) => (WEAPONS[id] && p.inv[WEAPONS[id].slot] === id && !(free && id === 'knife')) || (GRENADES[id] && p.inv.nades.includes(id)) || (id === 'kevlar' && p.armor >= 100) || (id === 'helmet' && p.helmet && p.armor >= 100);
+    const owned = (id) => (WEAPONS[id] && p.inv[WEAPONS[id].slot] === id && !(free && id === 'knife')) || (GRENADES[id] && p.inv.nades.includes(id)) || (id === 'kevlar' && p.armor >= 100) || (id === 'helmet' && p.helmet && p.armor >= 100) || (id === 'defusekit' && p.defuseKit);
     const names = (items) => items.map((i) => esc(itemInfo(i)?.name || i)).join(' · ');
-    const cats = BUY_MENU.map((c) => `<div class="buy-cat"><h3>${c.title}</h3>${c.items.map((id) => {
+    // Guns bought this round can be sold back while you still hold them.
+    const item = (id) => {
       const info = itemInfo(id), price = g.priceOf(id);
+      if (g.canSell(id)) return `<div class="buy-item owned sell" data-sell="${id}" title="Sell it back for $${p.bought[id].price}"><span>${esc(info.name)}</span><b>Sell +$${p.bought[id].price}</b></div>`;
       const cls = owned(id) ? 'owned' : p.money < price ? 'no' : '';
       return `<div class="buy-item ${cls}" data-id="${id}"><span>${esc(info.name)}</span><b>${free || !price ? 'FREE' : '$' + price}</b></div>`;
-    }).join('')}</div>`).join('');
+    };
+    // Gear gets its own column on the left with bigger buttons; the defuse kit only shows for defenders.
+    const gear = BUY_MENU.find((c) => c.title === 'Gear').items.filter((id) => id !== 'defusekit' || g.kitAllowed(p));
+    const cats = BUY_MENU.filter((c) => c.title !== 'Gear').map((c) => `<div class="buy-cat"><h3>${c.title}</h3>${c.items.map(item).join('')}</div>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay" data-close><div class="buy-menu">
       <div class="row"><h2 style="margin:0">${free ? 'Choose loadout' : 'Buy menu'}</h2><span class="spacer"></span>
       ${free ? '' : `<span class="hud-num" style="font-size:28px;color:var(--good)">$${p.money}</span>`}
@@ -204,8 +209,9 @@ export class Hud {
         <div class="preset-items small">${items ? names(items) : '<span class="muted">Empty</span>'}</div>
         <div class="row"><button class="btn small primary" data-preset="${i}" ${items ? '' : 'disabled'}>Equip</button><button class="btn small" data-save="${i}">Save current</button></div>
       </div>`).join('')}</div>
-      <div class="buy-cats" style="margin-top:14px">${cats}</div></div></div>`;
-    this.el.ovl.querySelectorAll('.buy-item').forEach((e) => { e.onclick = () => g.buy(e.dataset.id); });
+      <div class="buy-body"><div class="buy-gear"><h3>Gear</h3>${gear.map(item).join('')}</div><div class="buy-cats">${cats}</div></div></div></div>`;
+    this.el.ovl.querySelectorAll('.buy-item[data-id]').forEach((e) => { e.onclick = () => g.buy(e.dataset.id); });
+    this.el.ovl.querySelectorAll('.buy-item[data-sell]').forEach((e) => { e.onclick = () => g.sell(e.dataset.sell); });
     this.el.ovl.querySelector('[data-a=close]').onclick = () => this.closeOverlay(true);
     this.el.ovl.querySelector('[data-a=rebuy]').onclick = () => g.rebuy(true);
     this.el.ovl.querySelector('[data-a=keep]').onclick = () => g.toggleKeepLoadout();
@@ -637,7 +643,7 @@ export class Hud {
     let hint = '';
     if (p.alive && s.phase === 'live') {
       if (bomb.state === 'carried' && bomb.carrier === p.id && g.world.siteAt(p.pos.x, p.pos.z)) hint = `Hold ${pad.label('use')} to plant the charge`;
-      else if (planted && p.team === 1 && Math.hypot(p.pos.x - bomb.pos[0], p.pos.z - bomb.pos[2]) < 2.2) hint = `Hold ${pad.label('use')} to defuse`;
+      else if (planted && p.team === 1 && Math.hypot(p.pos.x - bomb.pos[0], p.pos.z - bomb.pos[2]) < 2.2) hint = `Hold ${pad.label('use')} to defuse (${+g.actionTime('defuse', p).toFixed(1)}s${p.defuseKit ? ' with your kit' : ''})`;
       else if (g.hostageView?.usable(p)) hint = `Hold ${pad.label('use')} to pick up the hostage`;
       else if (s.hostages?.some((h) => h.carrier === p.id)) hint = 'Carry the hostage back to the green zone at your spawn';
       else hint = g.interactHint?.() || '';

@@ -382,6 +382,13 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .scoreboard tr.dead td { opacity: .45; }
 .buy-menu { width: min(980px, 95vw); background: rgba(12,15,20,.95); border: 1px solid var(--line2); border-radius: 6px; padding: 18px; }
 .buy-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.buy-body { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; margin-top: 14px; align-items: start; }
+.buy-gear { padding-right: 16px; border-right: 1px solid var(--line); }
+.buy-gear .buy-item { padding: 18px 14px; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
+.buy-gear .buy-item b { font-size: 14px; }
+@media (max-width: 640px) { .buy-body { grid-template-columns: 1fr; } .buy-gear { padding-right: 0; border-right: 0; } }
+.buy-item.sell { border-style: dashed; }
+.buy-item.sell b { color: var(--accent); }
 .buy-cat h3 { font-size: 13px; }
 .buy-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 10px; border: 1px solid var(--line); border-radius: 4px; margin-bottom: 6px; cursor: pointer; font-size: 13px; background: rgba(255,255,255,.02); }
 .buy-item:hover { border-color: var(--accent); }

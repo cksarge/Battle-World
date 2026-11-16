@@ -1,6 +1,14 @@
 # Changelog
 
-#### 3.7.1 · 2026-11-16
+### 3.8.0 · 2026-11-16
+
+- Sell back guns you bought this round during buy time, for the full price, as long as you're still holding them; you get back the gun it replaced
+- Defuse Kit ($400, defenders only): defusing takes 5 seconds instead of 10 in Bomb Defusal (Retakes: 3 instead of 6)
+- Bomb Defusal: defusing without a kit now takes 10 seconds (was 7)
+- The buy menu's gear (armor and the defuse kit) has its own column on the left with bigger buttons
+- The defuse prompt shows how long it will take
+
+#### 3.7.1 · 2026-11-16 · [a972033](https://github.com/cksarge/John-Paul-Simulator/commit/a972033)
 
 - Versus bots: picking a mode switches to a map of the right size, and picking a map switches to a mode that fits it
 
