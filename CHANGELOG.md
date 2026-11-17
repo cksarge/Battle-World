@@ -1,6 +1,22 @@
 # Changelog
 
-#### 4.2.4 · 2026-11-16
+### 4.3.0 · 2026-11-16
+
+- **Gun attachments**: one slot per gun and the same four choices on every gun, each with one upside and one downside
+  - Grip (less recoil, a little slower), Laser (tighter hip-fire, slower draw), Extended Mag (half again as many rounds, slower reload) and Suppressor (quiet, no tracers and firing doesn't show you on radar, but damage drops off sooner)
+  - They unlock per gun at mastery levels 2, 3, 4 and 5, and are picked in Armory → Weapons. Until a gun reaches level 2 there's nothing new to learn
+  - Other players see and hear your attachment, and the buy menu shows which one each gun has
+- **Party modes**, in their own list under the other modes (online, versus bots and custom lobbies):
+  - One in the Chamber: a pistol with one bullet that kills in one hit. Every kill earns another bullet; three lives each, last one standing wins
+  - Sharpshooter: everyone has the same random gun, and it changes every 45 seconds. First to 20 kills
+  - Juggernaut: one heavily armored player with an LMG who is always on the radar. Kill the Juggernaut to become it; only the Juggernaut scores
+  - Prop Hunt: hiders turn into crates, barrels, boxes, tyre stacks and cabinets and get 30 seconds to hide while the seekers are blindfolded. Missed shots cost seekers health, and found hiders join the seekers
+- **Clans**: create one with a name and a 2 to 4 character tag, or join with an invite code. Up to 20 members
+  - Your clan tag shows next to your name in the kill feed, scoreboards and leaderboards
+  - The Clan tab shows your members and invite code; the leader can remove members, hand over leadership or make a new code
+  - New Clans view on the leaderboard, ranked by members' wins (banned players don't count)
+
+#### 4.2.4 · 2026-11-16 · [0b28b5f](https://github.com/cksarge/John-Paul-Simulator/commit/0b28b5f)
 
 - New kill feed tag order: WIN, HS, 360, NOSCOPE, AIR, LASTBLT, LONG, WALLBANG, FLASH, SMOKE, BURN, TK
 

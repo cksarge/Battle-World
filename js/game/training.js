@@ -154,7 +154,7 @@ export class Training {
     const g = this.g, lp = g.local;
     this.t += dt;
     // Infinite ammo: keep the reserve topped up.
-    if (lp) for (const [id, a] of Object.entries(lp.ammo)) { const w = WEAPONS[id]; if (w?.reserve) a.reserve = w.reserve; }
+    if (lp) for (const [id, a] of Object.entries(lp.ammo)) { const w = lp.gun(id); if (w?.reserve) a.reserve = w.reserve; }
     if (lp && this.drill === 'nades' && lp.inv.nades.length < Object.keys(GRENADES).length) lp.inv.nades = Object.keys(GRENADES);
     for (const [id, t] of this.respawns) {
       if ((t - dt) > 0) { this.respawns.set(id, t - dt); continue; }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CELL } from '../engine/world.js';
 import { GUN_GAME_ORDER, isKnife } from '../data/weapons.js';
-import { RESPAWN_KINDS, BOMB_KINDS, SOLO_KINDS, OBJECTIVE_KINDS, econFor } from '../data/modes.js';
+import { RESPAWN_KINDS, BOMB_KINDS, SOLO_KINDS, OBJECTIVE_KINDS, SPLIT_KINDS, econFor } from '../data/modes.js';
 
 // Host-only match logic. Everything it decides is broadcast as events that every client applies.
 export class Rules {
@@ -40,12 +40,14 @@ export class Rules {
       if (s.time <= 0) {
         if (this.mode.kind === 'zombies') g.zombies.start();
         else if (this.mode.kind === 'infect') this.startInfectRound();
+        else if (this.mode.kind === 'prophunt') this.g.party.startRound();
         else RESPAWN_KINDS.has(this.mode.kind) ? this.startFFA() : this.startRound();
       }
       return;
     }
     if (this.mode.kind === 'zombies') return g.zombies.hostUpdate(dt);
     if (this.mode.kind === 'infect') return this.updateInfect(dt);
+    if (this.mode.kind === 'prophunt') return this.g.party.hostUpdatePH(dt);
     if (RESPAWN_KINDS.has(this.mode.kind)) return this.updateFFA(dt);
     if (s.phase === 'buy' && s.time <= 0) {
       s.phase = 'live'; s.time = this.mode.roundTime;
@@ -306,6 +308,7 @@ export class Rules {
     }
     this.faceAwayFromEnemies(spawns, teamOf);
     if (g.objectives) s.obj = g.objectives.initialState();
+    g.party?.onStart();
     g.broadcast('round', {
       round: 1, time: s.time, scores: [0, 0], spawns, resetKit: [...g.players.keys()], money: {}, bomb: s.bomb, obj: s.obj,
       teams: Object.fromEntries([...g.players.values()].map((p) => [p.id, p.team])), freeArmor: true, phase: 'live',
@@ -321,7 +324,7 @@ export class Rules {
     if (!enemies) enemies = [...g.players.values()].filter((o) => o !== p && o.alive && g.isEnemy(p, o)).map((o) => [o.pos.x, o.pos.y, o.pos.z]);
     const center = [w.size.x / 2, w.size.z / 2];
     let cells;
-    if (!SOLO_KINDS.has(this.mode.kind) && this.mode.kind !== 'infect') {
+    if (!SOLO_KINDS.has(this.mode.kind) && !SPLIT_KINDS.has(this.mode.kind)) {
       const zone = w.spawnCells[p.team] || w.allFloor;
       const zc = zone.reduce((a, c) => [a[0] + c.x / zone.length, a[1] + c.y / zone.length], [0, 0]);
       const shuffled = [...zone].sort(() => Math.random() - 0.5);
@@ -352,13 +355,16 @@ export class Rules {
     const kind = this.mode.kind, s = this.s;
     if (kind === 'zombies') return this.g.zombies.onKill(killer, victim, weapon, part);
     if (kind === 'infect') return this.onInfectKill(killer, victim);
+    if (kind === 'prophunt') return this.g.party.onPropKill(killer, victim);
     if (RESPAWN_KINDS.has(kind)) {
       this.g.objectives?.onKill(victim);
       if (s.phase !== 'live') return;
+      // Party modes: One in the Chamber players out of lives stay down.
+      if (this.g.party?.onKill(killer, victim) || s.phase !== 'live') return;
       // Humans wait long enough to watch the kill cam; bots come straight back.
       this.respawnQueue.set(victim.id, victim.isBot ? (kind === 'gungame' ? 1.5 : 2.5) : (kind === 'gungame' ? 3.6 : 4.2));
       const valid = killer && killer !== victim;
-      if (kind === 'ffa' && valid && killer.kills >= this.mode.killsToWin) this.finish(killer.id, 'kills');
+      if ((kind === 'ffa' || kind === 'sharp') && valid && killer.kills >= this.mode.killsToWin) this.finish(killer.id, 'kills');
       if (kind === 'tdm' && valid && killer.team !== victim.team) {
         s.scores[killer.team]++;
         this.g.broadcast('score', { scores: s.scores });
@@ -410,12 +416,13 @@ export class Rules {
     this.tickRespawns(dt);
     if (s.phase === 'over') return;
     g.objectives?.hostUpdate(dt);
+    g.party?.hostUpdate(dt);
     if (s.phase === 'over') return;
     if (s.time <= 0) {
       const kind = this.mode.kind;
       if (kind === 'tdm' || OBJECTIVE_KINDS.has(kind)) return this.finish(s.scores[0] === s.scores[1] ? -1 : s.scores[0] > s.scores[1] ? 0 : 1, 'time');
       let best = null;
-      const rank = (p) => (kind === 'gungame' ? (p.gg || 0) * 1000 + p.kills : p.kills);
+      const rank = (p) => (g.party ? g.party.rank(p) : kind === 'gungame' ? (p.gg || 0) * 1000 + p.kills : p.kills);
       for (const p of g.players.values()) if (!best || rank(p) > rank(best)) best = p;
       this.finish(best ? best.id : -1, 'time');
     }

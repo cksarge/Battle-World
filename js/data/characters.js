@@ -1,4 +1,5 @@
 import { WEAPONS } from './weapons.js';
+import { sanitizeMods } from './attachments.js';
 import { WEAPON_SKINS, OUTFITS, CALLING_CARDS, KILL_FX, EMOTES, seasonLocked } from './skins.js';
 
 // One perk per operator. The custom operator may pick any of them.
@@ -30,7 +31,7 @@ export const DEFAULT_CHAR = {
   name: 'John-Paul', skin: '#d19a6b', hair: 'short', hairColor: '#3b2416', headgear: 'none', face: 'stubble',
   build: 'normal', height: 1.0, top: '#3a4658', pants: '#2b2f33', vest: 'plate', vestColor: '#59614d',
   gloves: '#1d1d1f', boots: '#2a221b', accent: '#f2a33a',
-  perk: 'speedloader', outfit: 'standard', skins: {},
+  perk: 'speedloader', outfit: 'standard', skins: {}, mods: {},
   card: 'standard', killfx: 'none', emotes: ['wave', 'salute', 'point', 'shrug'],
 };
 
@@ -96,5 +97,8 @@ export function sanitizeChar(c) {
   if (c.skins && typeof c.skins === 'object') {
     for (const [w, f] of Object.entries(c.skins)) if (WEAPONS[w] && WEAPON_SKINS[f] && !seasonLocked(WEAPON_SKINS[f])) out.skins[w] = f;
   }
+  out.mods = sanitizeMods(c.mods);
+  // Clan tag (added by App.me() for matches, never saved with the operator).
+  if (typeof c.clan === 'string' && /^[A-Z0-9]{2,4}$/.test(c.clan)) out.clan = c.clan;
   return out;
 }

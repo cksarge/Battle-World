@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { WEAPONS, GRENADES, BUY_MENU, itemInfo, GUN_GAME_ORDER } from '../data/weapons.js';
 import { TEAM_CLASS, SOLO_KINDS, POOL_KINDS, RESPAWN_KINDS, SIDED_KINDS, BOMB_KINDS, goalText, econFor } from '../data/modes.js';
 import { POINTS } from '../data/zombies.js';
+import { ATTACHMENTS } from '../data/attachments.js';
+import { DISGUISES } from './party.js';
 import { RARITIES, KINDS } from '../data/skins.js';
 import { itemSwatch, emoteName, cardImage } from '../ui/cards.js';
 import { spreadFor } from './combat.js';
@@ -34,6 +36,8 @@ export function killTagsHTML(hs, tags) {
   if (hs) t.splice(tags?.includes('win') ? 1 : 0, 0, HS_HTML);
   return t.join('');
 }
+// A player's name with their clan tag in front, if they're in one.
+const named = (p) => (p?.char?.clan ? `<i class="clan-tag">[${esc(p.char.clan)}]</i>` : '') + esc(p?.name);
 const fmtTime = (t) => { t = Math.max(0, Math.ceil(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 
 // In-match DOM overlay: vitals, scores, killfeed, radar and the interactive panels.
@@ -200,10 +204,11 @@ export class Hud {
     const names = (items) => items.map((i) => esc(itemInfo(i)?.name || i)).join(' · ');
     // Guns bought this round can be sold back while you still hold them.
     const item = (id) => {
-      const info = itemInfo(id), price = g.priceOf(id);
-      if (g.canSell(id)) return `<div class="buy-item owned sell" data-sell="${id}" title="Sell it back for $${p.bought[id].price}"><span>${esc(info.name)}</span><b>Sell +$${p.bought[id].price}</b></div>`;
+      const info = itemInfo(id), price = g.priceOf(id), att = ATTACHMENTS[p.char?.mods?.[id]];
+      const label = esc(info.name) + (att ? ` <i class="buy-att">${esc(att.name)}</i>` : '');
+      if (g.canSell(id)) return `<div class="buy-item owned sell" data-sell="${id}" title="Sell it back for $${p.bought[id].price}"><span>${label}</span><b>Sell +$${p.bought[id].price}</b></div>`;
       const cls = owned(id) ? 'owned' : p.money < price ? 'no' : '';
-      return `<div class="buy-item ${cls}" data-id="${id}"><span>${esc(info.name)}</span><b>${free || !price ? 'FREE' : '$' + price}</b></div>`;
+      return `<div class="buy-item ${cls}" data-id="${id}"><span>${label}</span><b>${free || !price ? 'FREE' : '$' + price}</b></div>`;
     };
     // Gear gets its own column on the left and grenades one on the right, both with bigger buttons;
     // the defuse kit only shows for defenders.
@@ -257,11 +262,11 @@ export class Hud {
   scoreTable(players, showMoney) {
     const lp = this.g.local, kind = this.g.mode.kind;
     // Zombies shows points (everyone's), infection shows match points.
-    const pts = kind === 'zombies' ? (p) => p.money : kind === 'infect' ? (p) => p.score || 0 : null;
+    const pts = kind === 'zombies' ? (p) => p.money : kind === 'infect' || this.g.party?.points ? (p) => p.score || 0 : null;
     if (pts) players.sort((a, b) => pts(b) - pts(a));
     return `<table class="tbl"><tr><th>Player</th>${pts ? '<th class="num">PTS</th>' : ''}${showMoney ? '<th class="num">$</th>' : ''}<th class="num">K</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${this.g.online ? '<th class="num">ELO</th>' : ''}</tr>
       ${(pts ? players : players.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)).map((p) => `<tr class="${p === lp ? 'me' : ''} ${p.alive ? '' : 'dead'}">
-        <td>${esc(p.name)}${this.g.state.bomb?.carrier === p.id && lp && p.team === lp.team ? ' <span style="color:var(--bad)">◆</span>' : ''}</td>
+        <td>${named(p)}${this.g.state.bomb?.carrier === p.id && lp && p.team === lp.team ? ' <span style="color:var(--bad)">◆</span>' : ''}</td>
         ${pts ? `<td class="num">${pts(p).toLocaleString()}</td>` : ''}
         ${showMoney ? `<td class="num">${lp && p.team === lp.team ? '$' + p.money : ''}</td>` : ''}
         <td class="num">${p.kills}</td><td class="num">${p.deaths}</td><td class="num">${p.hs}</td><td class="num">${Math.round(p.damage)}</td>
@@ -435,7 +440,7 @@ export class Hud {
     e.className = 'kf' + ((k && k === lp) || v === lp ? ' mine' : '');
     e.dataset.v = v.id;
     const wname = itemInfo(w)?.name || { bomb: 'Charge', barrel: 'Exploding barrel', fire: 'Incendiary', fall: 'Fall', claws: 'Claws', bloat: 'Bloater' }[w] || w;
-    e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${esc(k.name)}</span>` : ''}<span class="w">${esc(wname)}</span>${killTagsHTML(hs, tags)}<span class="${cls(v)}">${esc(v.name)}</span>`;
+    e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${named(k)}</span>` : ''}<span class="w">${esc(wname)}</span>${killTagsHTML(hs, tags)}<span class="${cls(v)}">${named(v)}</span>`;
     this.el.kf.prepend(e);
     while (this.el.kf.children.length > 6) this.el.kf.lastChild.remove();
     setTimeout(() => e.remove(), 7000);
@@ -472,13 +477,13 @@ export class Hud {
     this.overlay = 'results';
     const g = this.g, title = g.zombies && !g.spectator ? (result === 'win' ? 'SURVIVED' : 'OVERRUN') : { win: 'VICTORY', loss: 'DEFEAT', draw: 'DRAW', over: 'MATCH OVER' }[result];
     const color = result === 'win' ? 'var(--good)' : result === 'loss' ? 'var(--bad)' : 'var(--muted)';
-    const reasonText = { forfeit: 'Opponent forfeited', 'host-left': 'The host left the match', kills: 'Kill limit reached', time: 'Time limit reached', gungame: 'Got a kill with every weapon', score: '', overrun: `Overrun on wave ${g.state.z?.wave || 0}` }[reason] || '';
+    const reasonText = { forfeit: 'Opponent forfeited', 'host-left': 'The host left the match', kills: 'Kill limit reached', time: 'Time limit reached', gungame: 'Got a kill with every weapon', score: '', last: 'Last player standing', overrun: `Overrun on wave ${g.state.z?.wave || 0}` }[reason] || '';
     // Commend or report other real players (signed-in online matches only).
     const social = g.online && !!g.app.user && !g.spectator;
     const canRate = (s) => social && !s.bot && s.id !== g.localId && /^[0-9a-f-]{36}$/.test(s.id);
     const rateCell = (s) => (social ? `<td class="rate">${canRate(s) ? `<button class="btn tiny" data-commend="${esc(s.id)}" title="Commend ${esc(s.name)}">👍</button><button class="btn tiny ghost" data-report="${esc(s.id)}" title="Report ${esc(s.name)}">⚑</button>` : ''}</td>` : '');
-    const pts = g.mode.kind === 'infect', teamCol = !POOL_KINDS.has(g.mode.kind);
-    const rows = [...stats].sort((a, b) => (pts ? b.pts - a.pts : 0) || b.k - a.k).map((s) => `<tr class="${s.id === g.localId ? 'me' : ''}"><td>${esc(s.name)}</td>${teamCol ? `<td style="color:var(--${TEAM_CLASS[s.team]})">${SIDED_KINDS.has(g.mode.kind) ? (s.team === 0 ? 'ATK' : 'DEF') : 'T' + (s.team + 1)}</td>` : ''}${pts ? `<td class="num">${s.pts}</td>` : ''}<td class="num">${s.k}</td><td class="num">${s.d}</td><td class="num">${s.hs}</td><td class="num">${s.dmg}</td>${rateCell(s)}</tr>`).join('');
+    const pts = g.mode.kind === 'infect' || !!g.party?.points, teamCol = !POOL_KINDS.has(g.mode.kind);
+    const rows = [...stats].sort((a, b) => (pts ? b.pts - a.pts : 0) || b.k - a.k).map((s) => `<tr class="${s.id === g.localId ? 'me' : ''}"><td>${named({ name: s.name, char: g.players.get(s.id)?.char })}</td>${teamCol ? `<td style="color:var(--${TEAM_CLASS[s.team]})">${SIDED_KINDS.has(g.mode.kind) ? (s.team === 0 ? 'ATK' : 'DEF') : 'T' + (s.team + 1)}</td>` : ''}${pts ? `<td class="num">${s.pts}</td>` : ''}<td class="num">${s.k}</td><td class="num">${s.d}</td><td class="num">${s.hs}</td><td class="num">${s.dmg}</td>${rateCell(s)}</tr>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay"><div class="panel" style="width:min(720px,94vw)">
       <div style="text-align:center"><div class="hud-num" style="font-size:64px;color:${color}">${title}</div>
       <div class="muted">${esc(g.mode.name)} · ${esc(g.mapDef.name)} · ${esc(score)}</div>
@@ -608,6 +613,11 @@ export class Hud {
       goal = s.phase === 'live' ? g.zombies.goalText() : goal;
       const pills = [...g.players.values()].filter((q) => !q.zombie).map((q) => `<i class="${q.alive ? '' : 'dead'}"></i>`).join('');
       el.alive.innerHTML = `<div class="ct">${pills}</div>`;
+    } else if (g.party) {
+      const h = g.party.topHtml(p, timer, fmtTime);
+      el.top.innerHTML = h.top;
+      goal = h.goal;
+      if (kind === 'prophunt') el.alive.innerHTML = '';
     } else if (kind === 'infect') {
       const n = (t) => [...g.players.values()].filter((q) => q.team === t).length;
       el.top.innerHTML = `<div class="ts ct" title="Survivors">${n(0)}</div><div class="timer">${fmtTime(timer)}<small>${s.phase === 'live' ? `ROUND ${s.round}/${g.mode.rounds}` : phaseLabel}</small></div><div class="ts t inf" title="Infected">${n(1)}</div>`;
@@ -651,6 +661,7 @@ export class Hud {
       if (p.ws.reloadT >= 0) el.ammo.innerHTML = `<span>Reloading…</span>`;
     } else if (p.slot === 'nade') { el.wname.textContent = GRENADES[p.weaponId]?.name || ''; el.ammo.innerHTML = ''; }
     else if (p.slot === 'bomb') { el.wname.textContent = 'Demolition Charge'; el.ammo.innerHTML = ''; }
+    else { el.wname.textContent = p.prop ? DISGUISES[p.prop.type]?.name || '' : ''; el.ammo.innerHTML = ''; }
     const slotNames = [['primary', '1'], ['secondary', '2'], ['melee', '3'], ['nade', '4'], ['bomb', '5']];
     el.slots.innerHTML = slotNames.map(([sl, key]) => {
       let label = sl === 'nade' ? p.inv.nades.map((n) => GRENADES[n]?.short || n).join(' · ') : sl === 'bomb' ? (p.hasBomb ? 'Charge' : '') : WEAPONS[p.inv[sl]]?.name;
@@ -705,10 +716,12 @@ export class Hud {
     for (const o of g.players.values()) {
       if (!o.alive || o === center) continue;
       const friendly = !SOLO_KINDS.has(g.mode.kind) && o.team === p.team;
-      let visible = friendly || (p.alive && p.char?.perk === 'sixth' && o.pos.distanceTo(p.pos) < 14);
+      if (!friendly && g.party?.radarHidden(o)) continue;
+      let visible = friendly || (p.alive && p.char?.perk === 'sixth' && o.pos.distanceTo(p.pos) < 14) || !!g.party?.radarShown(o);
       if (!visible && p.alive) {
         o._radarT = (o._radarT || 0) - 1 / 30;
-        if (o.firingT > 0 && o.pos.distanceTo(p.pos) < 30) o._radarT = 1.5;
+        // Suppressed guns don't give the shooter away.
+        if (o.firingT > 0 && o.pos.distanceTo(p.pos) < 30 && !o.gun(o.remoteWeapon || o.weaponId)?.suppressed) o._radarT = 1.5;
         if (Math.random() < 0.2 && g.world.lineOfSight(eye, o.eye())) o._radarT = 1;
         visible = o._radarT > 0;
       }

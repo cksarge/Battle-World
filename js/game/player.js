@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CharacterModel } from '../engine/models.js';
 import { WEAPONS } from '../data/weapons.js';
+import { withAttachment } from '../data/attachments.js';
 
 const PRONE = [
   ['head', -0.12, 0.24, -1.8, 0.12, 0.7, -1.46],
@@ -62,8 +63,11 @@ export class Player {
     this.ws = { cooldown: 0, reloadT: -1, drawT: 0, spray: 0, scope: 0, nadeIdx: 0 };
   }
 
+  // A weapon's stats as this player carries it: with their attachment for it, if any.
+  gun(id) { return withAttachment(WEAPONS[id], this.char?.mods?.[id]) || null; }
+
   giveAmmo(id) {
-    const w = WEAPONS[id];
+    const w = this.gun(id);
     if (w && w.mag) this.ammo[id] = { mag: w.mag, reserve: w.reserve };
   }
 
@@ -72,10 +76,11 @@ export class Player {
     if (this.slot === 'bomb') return 'bomb';
     return this.inv[this.slot];
   }
-  get weapon() { return WEAPONS[this.weaponId] || null; }
+  get weapon() { return this.gun(this.weaponId); }
 
-  height() { return (1.8 - this.crouch * 0.55) * this.scale; }
-  eyeY() { return this.pos.y + (1.64 - this.crouch * 0.5) * this.scale; }
+  // Prop Hunt hiders (`prop`: {type, r, h}) are the size of their disguise and look out from its top.
+  height() { return this.prop ? this.prop.h : (1.8 - this.crouch * 0.55) * this.scale; }
+  eyeY() { return this.pos.y + (this.prop ? this.prop.h * 0.85 : (1.64 - this.crouch * 0.5) * this.scale); }
   eye(out = new THREE.Vector3()) { return out.set(this.pos.x, this.eyeY(), this.pos.z); }
   forward(out = new THREE.Vector3()) {
     const cp = Math.cos(this.pitch);
@@ -89,6 +94,7 @@ export class Player {
   //   front-to-back while running (stride).
   // Every operator has the same boxes regardless of height, build or headgear.
   hitboxes() {
+    if (this.prop) { const { r, h } = this.prop; return [['body', -r, 0, -r, r, h, r]]; }
     // Push-ups lay the model flat in front of the player (measured from the emote's whole cycle).
     const em = this.model?.emote;
     if (em?.id === 'pushups' && em.t > 0.3 && em.t < em.dur - 0.3) return PRONE;

@@ -1310,12 +1310,185 @@ begin
 end;
 $$;
 
--- Leaderboards (4.2.2). Players with an active ban are left out, and come back if it ends or is lifted.
+-- Clans (4.3.0): a name and a 2-4 character tag, up to 20 members, joined with an invite code. One
+-- clan per player. Everything goes through the functions below; nobody writes the tables directly.
+create table if not exists public.clans (
+  id         bigint generated always as identity primary key,
+  name       text not null check (char_length(name) between 3 and 24),
+  tag        text not null check (tag ~ '^[A-Z0-9]{2,4}$'),
+  owner      uuid not null references public.profiles(id) on delete cascade,
+  code       text not null,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists clans_name_key on public.clans (lower(name));
+create unique index if not exists clans_tag_key on public.clans (tag);
+create unique index if not exists clans_code_key on public.clans (code);
+
+create table if not exists public.clan_members (
+  user_id   uuid primary key references public.profiles(id) on delete cascade,
+  clan_id   bigint not null references public.clans(id) on delete cascade,
+  joined_at timestamptz not null default now()
+);
+create index if not exists clan_members_clan_idx on public.clan_members (clan_id);
+
+alter table public.clans enable row level security;
+alter table public.clan_members enable row level security;
+revoke all on public.clans from anon, authenticated;
+revoke all on public.clan_members from anon, authenticated;
+
+-- A fresh 6-character invite code (no 0/O or 1/I).
+create or replace function public.clan_code()
+returns text language plpgsql volatile set search_path = public as $$
+declare c text;
+begin
+  loop
+    select string_agg(substr('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 1 + floor(random() * 32)::int, 1), '') into c from generate_series(1, 6);
+    exit when not exists (select 1 from clans where code = c);
+  end loop;
+  return c;
+end;
+$$;
+
+-- The caller's clan with its members (and the invite code, which only members see), or null.
+create or replace function public.my_clan()
+returns json language plpgsql stable security definer set search_path = public as $$
+declare uid uuid := auth.uid(); cid bigint;
+begin
+  select clan_id into cid from clan_members where user_id = uid;
+  if cid is null then return null; end if;
+  return (select json_build_object('id', c.id, 'name', c.name, 'tag', c.tag, 'owner', c.owner, 'code', c.code, 'created_at', c.created_at,
+    'members', (select coalesce(json_agg(json_build_object('id', p.id, 'username', p.username, 'elo', p.elo, 'wins', p.wins, 'matches', p.matches, 'joined_at', m.joined_at) order by (p.id = c.owner) desc, m.joined_at), '[]')
+      from clan_members m join profiles p on p.id = m.user_id where m.clan_id = c.id))
+    from clans c where c.id = cid);
+end;
+$$;
+
+-- A clan's public page: name, tag and members (no invite code).
+create or replace function public.clan_info(p_id bigint)
+returns json language sql stable security definer set search_path = public as $$
+  select json_build_object('id', c.id, 'name', c.name, 'tag', c.tag, 'owner', c.owner, 'created_at', c.created_at,
+    'members', (select coalesce(json_agg(json_build_object('id', p.id, 'username', p.username, 'elo', p.elo, 'wins', p.wins) order by (p.id = c.owner) desc, m.joined_at), '[]')
+      from clan_members m join profiles p on p.id = m.user_id
+      where m.clan_id = c.id and not exists (select 1 from moderation x where x.user_id = p.id and x.banned_until > now())))
+  from clans c where c.id = p_id;
+$$;
+
+create or replace function public.clan_create(p_name text, p_tag text)
+returns json language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); n text := btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g')); t text := upper(btrim(coalesce(p_tag, ''))); cid bigint;
+begin
+  if uid is null then raise exception 'Sign in to create a clan'; end if;
+  if is_banned(uid) then raise exception 'Banned players can''t create clans'; end if;
+  if exists (select 1 from clan_members where user_id = uid) then raise exception 'Leave your clan first'; end if;
+  if n !~ '^[A-Za-z0-9 _.-]{3,24}$' then raise exception 'Clan names are 3 to 24 letters, numbers, spaces, dots, dashes or underscores'; end if;
+  if t !~ '^[A-Z0-9]{2,4}$' then raise exception 'Clan tags are 2 to 4 letters or numbers'; end if;
+  if exists (select 1 from clans where lower(name) = lower(n)) then raise exception 'That clan name is taken'; end if;
+  if exists (select 1 from clans where tag = t) then raise exception 'That clan tag is taken'; end if;
+  insert into clans (name, tag, owner, code) values (n, t, uid, clan_code()) returning id into cid;
+  insert into clan_members (user_id, clan_id) values (uid, cid);
+  return my_clan();
+end;
+$$;
+
+create or replace function public.clan_join(p_code text)
+returns json language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); cid bigint;
+begin
+  if uid is null then raise exception 'Sign in to join a clan'; end if;
+  if exists (select 1 from clan_members where user_id = uid) then raise exception 'Leave your clan first'; end if;
+  select id into cid from clans where code = upper(btrim(coalesce(p_code, '')));
+  if cid is null then raise exception 'No clan has that invite code'; end if;
+  if (select count(*) from clan_members where clan_id = cid) >= 20 then raise exception 'That clan is full (20 members)'; end if;
+  insert into clan_members (user_id, clan_id) values (uid, cid);
+  return my_clan();
+end;
+$$;
+
+-- Leaving: the leader hands over to the longest-standing member, and the last one out disbands it.
+create or replace function public.clan_leave()
+returns void language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); cid bigint; nxt uuid;
+begin
+  select clan_id into cid from clan_members where user_id = uid;
+  if cid is null then return; end if;
+  delete from clan_members where user_id = uid;
+  select user_id into nxt from clan_members where clan_id = cid order by joined_at limit 1;
+  if nxt is null then delete from clans where id = cid;
+  elsif (select owner from clans where id = cid) = uid then update clans set owner = nxt where id = cid;
+  end if;
+end;
+$$;
+
+-- Leader only: remove a member, hand over leadership, or replace the invite code.
+create or replace function public.clan_kick(p_user uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); cid bigint;
+begin
+  select id into cid from clans where owner = uid;
+  if cid is null then raise exception 'Only the clan leader can do that'; end if;
+  if p_user = uid then raise exception 'Leave the clan instead'; end if;
+  delete from clan_members where user_id = p_user and clan_id = cid;
+  return my_clan();
+end;
+$$;
+
+create or replace function public.clan_promote(p_user uuid)
+returns json language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); cid bigint;
+begin
+  select id into cid from clans where owner = uid;
+  if cid is null then raise exception 'Only the clan leader can do that'; end if;
+  if not exists (select 1 from clan_members where user_id = p_user and clan_id = cid) then raise exception 'They aren''t in your clan'; end if;
+  update clans set owner = p_user where id = cid;
+  return my_clan();
+end;
+$$;
+
+create or replace function public.clan_new_code()
+returns json language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); cid bigint;
+begin
+  select id into cid from clans where owner = uid;
+  if cid is null then raise exception 'Only the clan leader can do that'; end if;
+  update clans set code = clan_code() where id = cid;
+  return my_clan();
+end;
+$$;
+
+-- Clan leaderboard: total wins and average rating of members who aren't banned.
+create or replace function public.clan_leaderboard(p_limit int default 50)
+returns json language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(t order by t.pos), '[]') from (
+    select row_number() over (order by sum(p.wins) desc, avg(p.elo) desc) as pos,
+      c.id, c.name, c.tag, count(*) as members, sum(p.wins)::int as wins, round(avg(p.elo))::int as elo, sum(p.kills)::int as kills
+    from clans c join clan_members m on m.clan_id = c.id join profiles p on p.id = m.user_id
+    where not exists (select 1 from moderation x where x.user_id = p.id and x.banned_until > now())
+    group by c.id
+    order by sum(p.wins) desc, avg(p.elo) desc
+    limit least(greatest(coalesce(p_limit, 50), 1), 100)
+  ) t;
+$$;
+
+-- Admin: disband a clan (an offensive name or tag).
+create or replace function public.admin_delete_clan(p_id bigint)
+returns void language plpgsql security definer set search_path = public as $$
+declare c clans%rowtype;
+begin
+  perform admin_guard();
+  select * into c from clans where id = p_id;
+  if c.id is null then return; end if;
+  delete from clans where id = p_id;
+  perform admin_log('delete_clan', p_id::text, json_build_object('name', c.name, 'tag', c.tag)::jsonb);
+end;
+$$;
+
+-- Leaderboards (4.2.2, now with each player's clan tag). Players with an active ban are left out.
 create or replace function public.leaderboard(p_kind text default 'elo', p_limit int default 100)
 returns json language sql stable security definer set search_path = public as $$
   select coalesce(json_agg(t order by t.pos), '[]') from (
     select row_number() over (order by case p_kind when 'kills' then p.kills when 'wins' then p.wins when 'xp' then p.xp else p.elo end desc) as pos,
-      p.id, p.username, p.elo, p.peak_elo, p.ranked_wins, p.ranked_losses, p.wins, p.losses, p.matches, p.kills, p.deaths, p.headshots, p.xp
+      p.id, p.username, p.elo, p.peak_elo, p.ranked_wins, p.ranked_losses, p.wins, p.losses, p.matches, p.kills, p.deaths, p.headshots, p.xp,
+      (select c.tag from clan_members cm join clans c on c.id = cm.clan_id where cm.user_id = p.id) as clan
     from profiles p
     where not exists (select 1 from moderation m where m.user_id = p.id and m.banned_until > now())
     order by case p_kind when 'kills' then p.kills when 'wins' then p.wins when 'xp' then p.xp else p.elo end desc
@@ -1327,7 +1500,8 @@ create or replace function public.season_leaderboard(p_season text, p_limit int 
 returns json language sql stable security definer set search_path = public as $$
   select coalesce(json_agg(t order by t.pos), '[]') from (
     select row_number() over (order by p.elo desc) as pos,
-      p.id, p.username, p.elo, p.season_peak, p.season_wins, p.season_losses, p.pass_xp
+      p.id, p.username, p.elo, p.season_peak, p.season_wins, p.season_losses, p.pass_xp,
+      (select c.tag from clan_members cm join clans c on c.id = cm.clan_id where cm.user_id = p.id) as clan
     from profiles p
     where p.season_id = p_season
       and not exists (select 1 from moderation m where m.user_id = p.id and m.banned_until > now())
@@ -1358,6 +1532,19 @@ revoke all on function public.leaderboard(text, int) from public;
 grant execute on function public.leaderboard(text, int) to anon, authenticated;
 revoke all on function public.season_leaderboard(text, int) from public;
 grant execute on function public.season_leaderboard(text, int) to anon, authenticated;
+revoke all on function public.clan_code() from public, anon, authenticated;
+revoke all on function public.clan_info(bigint) from public;
+grant execute on function public.clan_info(bigint) to anon, authenticated;
+revoke all on function public.clan_leaderboard(int) from public;
+grant execute on function public.clan_leaderboard(int) to anon, authenticated;
+do $$
+declare f text;
+begin
+  foreach f in array array['my_clan()', 'clan_create(text, text)', 'clan_join(text)', 'clan_leave()', 'clan_kick(uuid)', 'clan_promote(uuid)', 'clan_new_code()', 'admin_delete_clan(bigint)'] loop
+    execute format('revoke all on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+  end loop;
+end $$;
 
 do $$
 declare f text;

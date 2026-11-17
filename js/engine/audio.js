@@ -110,12 +110,18 @@ const GUN = {
 };
 
 export const sfx = {
-  shot(weapon, pos) {
+  // `suppressed`: a quiet, short crack that carries a third as far.
+  shot(weapon, pos, suppressed = false) {
     cue('shot', pos);
     if (!ctx) return;
     const s = GUN[weapon]; if (!s) return;
-    const dst = out(pos, s.gain, 140); if (!dst) return;
+    const dst = out(pos, s.gain * (suppressed ? 0.35 : 1), suppressed ? 45 : 140); if (!dst) return;
     const t = ctx.currentTime;
+    if (suppressed) {
+      noise(dst, t, 0.05, { type: 'bandpass', freq: 1800, freqEnd: 700, gain: 0.8, q: 1.2 });
+      tone(dst, t, 0.06, { type: 'triangle', freq: s.thump * 1.5, freqEnd: s.thump / 2, gain: 0.5 });
+      return;
+    }
     if (s.twang) {
       tone(dst, t, 0.25, { type: 'triangle', freq: 220, freqEnd: 150, gain: 0.8 });
       noise(dst, t, 0.08, { type: 'bandpass', freq: 3000, q: 2, gain: 0.6 });

@@ -99,7 +99,7 @@ export function buildMatch({ mode, map, variant, humans, hostId, fillBots = true
     for (let i = 0; i < ZOMBIE_POOL; i++) players.push({ id: 'z' + i, name: 'Zombie', team: 1, isBot: true, zombie: true, char: zombieChar('walker'), elo: 1000 });
   } else if (POOL_KINDS.has(m.kind)) {
     humans.forEach((h) => players.push({ ...h, team: 0, isBot: false }));
-    const target = fillBots ? Math.max(humans.length, m.kind === 'infect' ? m.maxPlayers : 6) : humans.length;
+    const target = fillBots ? Math.max(humans.length, m.kind === 'infect' || m.kind === 'prophunt' ? m.maxPlayers : 6) : humans.length;
     for (let i = players.length; i < target; i++) players.push({ id: 'bot-' + i, name: botName(i), team: 0, isBot: true, char: randomChar(), elo: 1000 });
   } else {
     const sorted = [...humans].sort((a, b) => (b.elo || 1000) - (a.elo || 1000));

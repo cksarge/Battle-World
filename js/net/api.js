@@ -17,6 +17,7 @@ function friendly(error) {
   if (/schema cache|does not exist|PGRST205|PGRST202/i.test(msg)) return new Error(SCHEMA_HINT);
   if (/Invalid login credentials/i.test(msg)) return new Error('Wrong email, username or password.');
   if (/Email not confirmed/i.test(msg)) return new Error('Email not confirmed yet. Click the link in your confirmation email.');
+  if (/clans_name_key|clans_tag_key/i.test(msg)) return new Error('That clan name or tag was just taken. Try another.');
   if (/Database error saving new user/i.test(msg)) return new Error('That username is taken or invalid.');
   if (/captcha/i.test(msg)) return new Error('Security check failed or expired. Complete it again and retry.');
   if (/error sending .*email|could not send email/i.test(msg)) return new Error('We couldn’t send the email right now. Try again in a few minutes.');
@@ -308,6 +309,17 @@ export class Api {
     const { data, error } = await this.sb.from('app_settings').select('key,value');
     return error ? {} : Object.fromEntries(data.map((r) => [r.key, r.value]));
   }
+
+  // Clans: one per player, joined with an invite code (supabase/schema.sql, clan_*).
+  myClan() { return this.rpc('my_clan'); }
+  clanInfo(id) { return this.rpc('clan_info', { p_id: id }); }
+  createClan(name, tag) { return this.rpc('clan_create', { p_name: name, p_tag: tag }); }
+  joinClan(code) { return this.rpc('clan_join', { p_code: code }); }
+  leaveClan() { return this.rpc('clan_leave'); }
+  kickFromClan(id) { return this.rpc('clan_kick', { p_user: id }); }
+  makeClanLeader(id) { return this.rpc('clan_promote', { p_user: id }); }
+  newClanCode() { return this.rpc('clan_new_code'); }
+  async clanLeaderboard(limit = 50) { return (await this.rpc('clan_leaderboard', { p_limit: limit })) || []; }
 
   async seasonLeaderboard(seasonId, limit = 100) {
     return (await this.rpc('season_leaderboard', { p_season: seasonId, p_limit: limit })) || [];

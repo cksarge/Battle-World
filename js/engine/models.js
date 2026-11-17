@@ -393,9 +393,27 @@ function buildNade(g, id) {
 }
 
 // Weapon model pointing down -Z, grip roughly at the origin. `skin` is a WEAPON_SKINS id.
-export function buildGun(id, skin = null) {
+// `attachment` (js/data/attachments.js) adds its part to the gun: a can on the muzzle, a laser under
+// the barrel or a foregrip. The extended mag doesn't change the model.
+export function buildGun(id, skin = null, attachment = null) {
   activeSkin = skin && skin !== 'factory' && WEAPON_SKINS[skin] ? skin : null;
-  try { return buildGunInner(id); } finally { activeSkin = null; }
+  try { const g = buildGunInner(id); if (attachment) addAttachment(g, id, attachment); return g; } finally { activeSkin = null; }
+}
+
+function addAttachment(g, id, att) {
+  const m = g.userData.muzzle;
+  if (!m || g.userData.generic) return;
+  const pistol = WEAPONS[id]?.type === 'pistol';
+  if (att === 'suppressor') {
+    const len = pistol ? 0.11 : 0.16;
+    cyl(g, pistol ? 0.019 : 0.024, len, m.x, m.y, m.z - len / 2 + 0.005, 'polymer', 14);
+    g.userData.muzzle = m.clone().setZ(m.z - len);
+  } else if (att === 'laser') {
+    part(g, 0.022, 0.022, 0.06, 0, m.y - (pistol ? 0.045 : 0.05), m.z + (pistol ? 0.06 : 0.14), 'polymer');
+    part(g, 0.008, 0.008, 0.004, 0, m.y - (pistol ? 0.045 : 0.05), m.z + (pistol ? 0.03 : 0.11), 'red');
+  } else if (att === 'grip' && !pistol) {
+    part(g, 0.028, 0.08, 0.03, 0, m.y - 0.09, m.z + 0.2, 'polymer');
+  }
 }
 
 function buildGunInner(id) {
@@ -994,13 +1012,14 @@ export class CharacterModel {
   }
 
   setWeapon(id) {
-    const skin = this.c.skins?.[id] || null;
-    if (id === this.weaponId && skin === this.weaponSkin) return;
+    const skin = this.c.skins?.[id] || null, att = this.c.mods?.[id] || null;
+    if (id === this.weaponId && skin === this.weaponSkin && att === this.weaponAtt) return;
     this.weaponId = id;
     this.weaponSkin = skin;
+    this.weaponAtt = att;
     this.gunHolder.clear();
     if (!id) return;
-    const g = buildGun(id, skin);
+    const g = buildGun(id, skin, att);
     g.scale.setScalar(1.05);
     this.gunHolder.add(g);
     const type = WEAPONS[id]?.type;

@@ -16,6 +16,7 @@ import { mountTurnstile } from './turnstile.js';
 import { cardImage, itemSwatch } from './cards.js';
 import { applyPadSettings, padHelp } from '../engine/gamepad.js';
 import { renderSeason } from './season.js';
+import { renderClan, clanLeaderboardHTML, clanModal } from './clans.js';
 import { buildCrosshair, layoutCrosshair } from './crosshair.js';
 import { offlineSupported, enableOffline, disableOffline } from '../net/offline.js';
 import { AdminPanel } from './admin.js';
@@ -26,6 +27,7 @@ import { censor } from '../data/profanity.js';
 import { PALETTES, applyAccess } from './access.js';
 import { ACHIEVEMENTS, TIERS, MAX_POINTS, normalizeAchievements, progressOf, points } from '../data/achievements.js';
 import { masteryInfo, masteryLevel, MAX_LEVEL } from '../data/mastery.js';
+import { ATTACHMENTS, attachmentsFor, FIRST_ATTACHMENT_LEVEL } from '../data/attachments.js';
 import { versionHTML, bindVersion } from './changelog.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -35,8 +37,10 @@ const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s <
 const QUAD_MODES = ['ranked', 'duo', 'bomb', 'tdm'];
 const MORE_MODES = ['dom', 'koth', 'ctf', 'hostage', 'retake', 'duel', 'infection', 'gungame', 'ffa'];
 const OFFLINE_MODES = ['duel', 'duo', 'bomb', 'hostage', 'retake', 'tdm', 'dom', 'koth', 'ctf', 'infection', 'gungame', 'ffa'];
+// Party modes get their own list under the others (online, versus bots and custom lobbies).
+const PARTY_MODES = ['chamber', 'sharpshooter', 'juggernaut', 'prophunt'];
 // Custom lobbies can also run co-op zombies.
-const LOBBY_MODES = [...OFFLINE_MODES, 'zombies'];
+const LOBBY_MODES = [...OFFLINE_MODES, ...PARTY_MODES, 'zombies'];
 // Official maps, then featured community maps, then maps downloaded to this device (the test draft never).
 const playMaps = () => Object.values(MAPS).filter((m) => !m.training && m.id !== 'draft').sort((a, b) => (!!a.custom - !!b.custom) || (!!b.featured - !!a.featured));
 const RESEND_COOLDOWN = 60; // seconds between auth emails (matches Supabase's default per-user limit)
@@ -45,17 +49,18 @@ const NAV = [
   ['play', 'Play', 'Queue up or fight bots'],
   ['season', 'Season', 'Reward track and challenges'],
   ['operators', 'Operators', 'Pick and build your operator'],
-  ['armory', 'Armory', 'Finishes, outfits, cards, effects, emotes'],
+  ['armory', 'Armory', 'Finishes, attachments, outfits, cards, emotes'],
   ['stats', 'Stats', 'Your record, weapons and rivals'],
   ['replays', 'Replays', 'Rewatch your recent matches'],
   ['workshop', 'Workshop', 'Build, share and download maps'],
-  ['leaderboard', 'Leaderboard', 'Top players'],
+  ['clan', 'Clan', 'Create or join a clan'],
+  ['leaderboard', 'Leaderboard', 'Top players and clans'],
   ['settings', 'Settings', 'Graphics, controls and audio'],
 ];
-const FOCUS = { play: 'play', season: 'operator', operators: 'operator', armory: 'weapon', stats: 'stats', replays: 'stats', workshop: 'stats', leaderboard: 'play', settings: 'play', admin: 'stats' };
-const WIDE = new Set(['season', 'stats', 'replays', 'workshop', 'leaderboard', 'settings', 'admin']);
+const FOCUS = { play: 'play', season: 'operator', operators: 'operator', armory: 'weapon', stats: 'stats', replays: 'stats', workshop: 'stats', clan: 'stats', leaderboard: 'play', settings: 'play', admin: 'stats' };
+const WIDE = new Set(['season', 'stats', 'replays', 'workshop', 'clan', 'leaderboard', 'settings', 'admin']);
 const ADMIN_NAV = ['admin', 'Admin', 'Reports, players and game switches'];
-const ARMORY_KINDS = [['finish', 'Finishes'], ['outfit', 'Outfits'], ['card', 'Calling cards'], ['effect', 'Kill effects'], ['emote', 'Emotes']];
+const ARMORY_KINDS = [['finish', 'Weapons'], ['outfit', 'Outfits'], ['card', 'Calling cards'], ['effect', 'Kill effects'], ['emote', 'Emotes']];
 const WHEEL = ['Up', 'Right', 'Down', 'Left'];
 // The map size a mode is played on ('small' or 'large'), or null when it works on any map.
 const modeSize = (m) => { const sizes = new Set(m.maps.map((id) => MAPS[id]?.size).filter(Boolean)); return sizes.size === 1 ? [...sizes][0] : null; };
@@ -403,7 +408,7 @@ export class UI {
     const el = this.root.querySelector('#tab');
     ({
       play: () => this.renderPlay(el), season: () => renderSeason(this, el), admin: () => (this.adminPanel ||= new AdminPanel(this)).render(el), operators: () => this.renderOperators(el), armory: () => this.renderArmory(el),
-      stats: () => this.renderStats(el), replays: () => this.renderReplays(el), workshop: () => (this.workshop ||= new Workshop(this)).render(el), leaderboard: () => this.renderLeaderboard(el), settings: () => this.renderSettings(el),
+      stats: () => this.renderStats(el), replays: () => this.renderReplays(el), workshop: () => (this.workshop ||= new Workshop(this)).render(el), clan: () => renderClan(this, el), leaderboard: () => this.renderLeaderboard(el), settings: () => this.renderSettings(el),
     })[tab]();
     if (tab === 'play') this.maybeOfferTutorial();
   }
@@ -654,12 +659,15 @@ export class UI {
         <div class="mquads ${online ? '' : 'off'}">${QUAD_MODES.map((id) => quad(id)).join('')}</div>
         <button class="m-allmodes ${online ? '' : 'off'} ${moreSel ? 'has-sel' : ''}" id="all-modes" aria-expanded="${showMore}">All modes<span>${showMore ? '−' : '+'}</span></button>
         ${showMore ? `<div class="mrows ${online ? '' : 'off'}">${MORE_MODES.map((id) => row(id, id === this.onlineMode, 'data-mode')).join('')}
+          <div class="m-label">Party modes</div>${PARTY_MODES.map((id) => row(id, id === this.onlineMode, 'data-mode')).join('')}
           <button class="mrow ${this.onlineMode === 'custom' ? 'sel' : ''}" data-mode="custom"><span class="mrow-name">Custom lobby</span><span class="mrow-goal">Your rules, invite code, bots optional</span><span class="mrow-size">Any</span></button></div>` : ''}
         ${online ? `<div class="m-join"><input type="text" id="join-code" maxlength="5" placeholder="Lobby code" aria-label="Lobby code"><button class="btn small" id="join-btn">Join</button><button class="btn small ghost" id="browse-btn">Browse open lobbies</button></div><div id="lobby-list"></div>` : ''}
       ` : `
         <button class="m-train" id="tutorial"><b>Tutorial</b><span>Learn every control in about 6 minutes, then win a 1v1</span></button>
         <button class="m-train" id="train"><b>Training Range</b><span>Aim drills, moving targets, spray practice and grenade line-ups</span></button>
         <div class="mrows">${OFFLINE_MODES.map((id) => row(id, id === o.mode, 'data-omode')).join('')}</div>
+        <div class="m-label">Party modes</div>
+        <div class="mrows">${PARTY_MODES.map((id) => row(id, id === o.mode, 'data-omode')).join('')}</div>
         <div class="m-label">Map</div>
         <div class="map-strip">${playMaps().map((m) => `<button class="map-tile ${o.map === m.id ? 'sel' : ''}" data-map="${m.id}" title="${esc(m.custom ? `${m.name} by ${m.author}. ${m.desc}` : m.desc)}"><img src="${mapPreview(m.id)}" alt=""><span>${esc(m.name)}${m.featured ? ' <i class="map-tag">Featured</i>' : m.custom ? ' <i class="map-tag">Community</i>' : ''}</span></button>`).join('')}</div>
         <div class="m-label">Conditions</div>
@@ -725,7 +733,7 @@ export class UI {
         const map = MAPS[b.dataset.map];
         showMap(map.id);
         if (!fits(MODES[o.mode], map)) {
-          const pick = [o.lastMode[map.size], ...OFFLINE_MODES].find((id) => MODES[id] && fits(MODES[id], map) && modeSize(MODES[id]) === map.size)
+          const pick = [o.lastMode[map.size], ...OFFLINE_MODES, ...PARTY_MODES].find((id) => MODES[id] && fits(MODES[id], map) && modeSize(MODES[id]) === map.size)
             || OFFLINE_MODES.find((id) => fits(MODES[id], map));
           if (pick) { o.mode = pick; this.toast(`Switched to ${MODES[pick].name} for ${map.name}.`); }
         }
@@ -734,7 +742,7 @@ export class UI {
       el.querySelectorAll('#off-diff button').forEach((b) => { b.onclick = () => { o.botLevel = b.dataset.d; this.renderPlay(el); }; });
       el.querySelectorAll('#off-var button').forEach((b) => { b.onclick = () => { o.variant = b.dataset.v; this.renderPlay(el); }; });
       const m = MODES[o.mode], map = MAPS[o.map];
-      const n = POOL_KINDS.has(m.kind) ? (m.kind === 'infect' ? m.maxPlayers - 1 : 5) : m.teamSize * 2 - 1;
+      const n = POOL_KINDS.has(m.kind) ? (m.kind === 'infect' || m.kind === 'prophunt' ? m.maxPlayers - 1 : 5) : m.teamSize * 2 - 1;
       info.innerHTML = `<b>${esc(m.name)} on ${esc(map.name)}${o.variant !== 'day' ? ' · ' + esc(variantName(map, o.variant)) : ''}</b><span>${n} ${o.botLevel} bot${n > 1 ? 's' : ''}. ${esc(map.desc)}</span>`;
       btn.textContent = 'Deploy';
       btn.onclick = () => app.startOffline({ ...o });
@@ -1011,7 +1019,7 @@ export class UI {
   // ───────────────────────── armory ─────────────────────────
   renderArmory(el) {
     const app = this.app, kind = this.armoryKind;
-    const c = { ...app.char, skins: { ...(app.char.skins || {}) }, emotes: [...(app.char.emotes || [])] };
+    const c = { ...app.char, skins: { ...(app.char.skins || {}) }, mods: { ...(app.char.mods || {}) }, emotes: [...(app.char.emotes || [])] };
     const defs = KINDS[kind].defs;
     const total = Object.values(KINDS).reduce((n, k) => n + Object.keys(k.defs).length, 0);
     const have = Object.entries(KINDS).reduce((n, [k, d]) => n + Object.keys(d.defs).filter((id) => this.owned(k, id)).length, 0);
@@ -1030,7 +1038,7 @@ export class UI {
     el.innerHTML = `<div class="m-switch scroll">${ARMORY_KINDS.map(([k, l]) => `<button data-kind="${k}" class="${k === kind ? 'on' : ''}">${l}</button>`).join('')}</div>
       <p class="m-sub">${have} of ${total} collected. Wins always drop an item; other matches drop one half the time. Milestone items unlock as you play.</p>
       ${kind === 'finish' ? `<label class="field"><span>Weapon</span><select id="ar-w">${classes.map((t) => `<optgroup label="${CLASS_NAMES[t]}">${Object.values(WEAPONS).filter((w) => w.type === t).map((w) => `<option value="${w.id}" ${w.id === wid ? 'selected' : ''}>${esc(w.name)} (mastery ${masteryLevel(app.achievements, w.id)}) — ${esc(defs[c.skins[w.id] || 'factory']?.name || 'Factory')}</option>`).join('')}</optgroup>`).join('')}</select></label>
-        ${this.masteryLine(wid)}` : ''}
+        ${this.masteryLine(wid)}${this.attachmentRow(wid, c)}` : ''}
       ${kind === 'emote' ? `<div class="emote-slots">${WHEEL.map((dir, i) => `<button class="eslot ${i === this.emoteSlot ? 'sel' : ''}" data-slot="${i}"><span>${dir}</span><b>${esc(defs[c.emotes[i]]?.name || '—')}</b></button>`).join('')}</div>
         <p class="m-sub">Pick a wheel slot, then an emote to put there. Hold G in a match to use the wheel. Click any emote to preview it.</p>` : ''}
       ${kind === 'effect' ? '<p class="m-sub">Click an effect to see it play beside your operator.</p>' : ''}
@@ -1044,6 +1052,12 @@ export class UI {
     const save = async (next) => { await app.saveChar({ ...next, preset: app.char.preset }); this.renderArmory(el); this.refreshMeChip(); };
     el.querySelectorAll('[data-kind]').forEach((b) => { b.onclick = () => { this.armoryKind = b.dataset.kind; this.renderArmory(el); }; });
     el.querySelector('#ar-w')?.addEventListener('change', (e) => { this.armoryWeapon = e.target.value; this.renderArmory(el); });
+    el.querySelectorAll('[data-att]').forEach((b) => { b.onclick = () => {
+      const id = b.dataset.att, a = ATTACHMENTS[id];
+      if (a && masteryLevel(app.achievements, wid) < a.mastery) { this.toast(`${a.name} unlocks at mastery level ${a.mastery} with the ${WEAPONS[wid].name}.`, 'bad'); return; }
+      if (a) c.mods[wid] = id; else delete c.mods[wid];
+      save(c);
+    }; });
     el.querySelectorAll('[data-slot]').forEach((b) => { b.onclick = () => { this.emoteSlot = +b.dataset.slot; this.renderArmory(el); }; });
     el.querySelectorAll('[data-item]').forEach((b) => { b.onclick = () => {
       const id = b.dataset.item, own = this.owned(kind, id, kind === 'finish' ? wid : null), d = defs[id];
@@ -1081,6 +1095,21 @@ export class UI {
   refreshMeChip() {
     const chip = this.root.querySelector('#me-chip');
     if (chip) chip.style.backgroundImage = `linear-gradient(90deg, rgba(14,18,13,.92), rgba(14,18,13,.5)), url(${cardImage(this.app.char.card || 'standard', 360, 90)})`;
+  }
+
+  // The attachment picker under a gun's finishes: one slot, a plain good and bad line for each choice.
+  // Until the gun reaches the first unlock level it's just one line saying when they arrive.
+  attachmentRow(wid, c) {
+    const list = attachmentsFor(wid);
+    if (!list.length) return '';
+    const lvl = masteryLevel(this.app.achievements, wid), cur = c.mods?.[wid] || null;
+    if (lvl < FIRST_ATTACHMENT_LEVEL && !cur) return `<p class="m-sub att-hint">Attachments for this gun unlock at mastery level ${FIRST_ATTACHMENT_LEVEL}.</p>`;
+    const btn = (id) => {
+      const a = ATTACHMENTS[id], locked = a && lvl < a.mastery;
+      return `<button class="att ${(id || null) === cur ? 'on' : ''} ${locked ? 'locked' : ''}" data-att="${id}">
+        <b>${a ? esc(a.name) : 'None'}</b>${a ? `<span class="good">+ ${esc(a.good)}</span><span class="bad">− ${esc(a.bad)}</span>${locked ? `<em>Mastery ${a.mastery}</em>` : ''}` : '<span>The gun as it comes</span>'}</button>`;
+    };
+    return `<div class="att-row"><h3 class="m-h3">Attachment <small>one per gun</small></h3><div class="att-grid">${btn('')}${list.map(btn).join('')}</div></div>`;
   }
 
   // One weapon's mastery level and progress bar (armory and the stats page).
@@ -1321,18 +1350,27 @@ export class UI {
   async renderLeaderboard(el, kind = 'elo') {
     const app = this.app;
     el.innerHTML = `<div class="row"><h2 class="m-h1">Leaderboard</h2><span class="spacer"></span>
-      <div class="seg" id="lb-kind">${[['season', 'Season'], ['elo', 'Rating'], ['kills', 'Kills'], ['wins', 'Wins'], ['xp', 'Level']].map(([k, l]) => `<button data-k="${k}" class="${k === kind ? 'sel' : ''}">${l}</button>`).join('')}</div></div>
+      <div class="seg" id="lb-kind">${[['season', 'Season'], ['elo', 'Rating'], ['kills', 'Kills'], ['wins', 'Wins'], ['xp', 'Level'], ['clans', 'Clans']].map(([k, l]) => `<button data-k="${k}" class="${k === kind ? 'sel' : ''}">${l}</button>`).join('')}</div></div>
       <div id="lb-body"><p class="m-sub">Loading…</p></div>`;
     el.querySelectorAll('#lb-kind button').forEach((b) => { b.onclick = () => this.renderLeaderboard(el, b.dataset.k); });
     const body = el.querySelector('#lb-body');
     if (!app.api) { body.innerHTML = '<p class="m-empty">The leaderboard needs an internet connection.</p>'; return; }
     try {
+      if (kind === 'clans') {
+        body.innerHTML = await clanLeaderboardHTML(app);
+        body.querySelectorAll('[data-clan]').forEach((r) => { r.onclick = (e) => { if (!e.target.closest('[data-disband]')) clanModal(this, +r.dataset.clan); }; });
+        body.querySelectorAll('[data-disband]').forEach((b) => { b.onclick = async () => {
+          if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Sure?'; return; }
+          try { await app.api.admin('delete_clan', { p_id: +b.dataset.disband }); this.toast('Clan disbanded', 'good'); this.renderLeaderboard(el, 'clans'); } catch (e) { this.toast(e.message, 'bad'); }
+        }; });
+        return;
+      }
       if (kind === 'season') {
         const { currentSeason } = await import('../data/seasons.js');
         const cur = currentSeason();
         const rows = cur ? await app.api.seasonLeaderboard(cur.id, 100) : [];
         body.innerHTML = rows.length ? `<p class="m-sub">Season ${cur.num}: ${esc(cur.name)}</p><table class="tbl lb"><tr><th>#</th><th>Player</th><th>Rank</th><th class="num">Rating</th><th class="num">Record</th><th class="num">Peak</th></tr>
-          ${rows.map((r, i) => `<tr class="clickable ${r.id === app.user?.id ? 'me' : ''}" data-id="${r.id}"><td class="pos">${i + 1}</td><td><b>${esc(r.username)}</b></td><td>${rankBadge(r.elo)}</td><td class="num">${r.elo}</td><td class="num">${r.season_wins}–${r.season_losses}</td><td class="num">${r.season_peak}</td></tr>`).join('')}</table>`
+          ${rows.map((r, i) => `<tr class="clickable ${r.id === app.user?.id ? 'me' : ''}" data-id="${r.id}"><td class="pos">${i + 1}</td><td>${r.clan ? `<i class="clan-tag">[${esc(r.clan)}]</i>` : ''}<b>${esc(r.username)}</b></td><td>${rankBadge(r.elo)}</td><td class="num">${r.elo}</td><td class="num">${r.season_wins}–${r.season_losses}</td><td class="num">${r.season_peak}</td></tr>`).join('')}</table>`
           : '<p class="m-empty">Nobody has played ranked this season yet.</p>';
         body.querySelectorAll('[data-id]').forEach((r) => { r.onclick = () => this.profileModal(r.dataset.id); });
         return;
@@ -1340,7 +1378,7 @@ export class UI {
       const rows = await app.api.leaderboard(kind);
       if (!rows.length) { body.innerHTML = '<p class="m-empty">No players yet. Play a ranked match to be first.</p>'; return; }
       body.innerHTML = `<table class="tbl lb"><tr><th>#</th><th>Player</th><th>Rank</th><th class="num">Rating</th><th class="num">Ranked</th><th class="num">Wins</th><th class="num">K/D</th><th class="num">Kills</th><th class="num">Level</th></tr>
-        ${rows.map((r, i) => `<tr class="clickable ${r.id === app.user?.id ? 'me' : ''}" data-id="${r.id}"><td class="pos">${i + 1}</td><td><b>${esc(r.username)}</b></td><td>${rankBadge(r.elo)}</td><td class="num">${r.elo}</td><td class="num">${r.ranked_wins}–${r.ranked_losses}</td><td class="num">${r.wins}</td><td class="num">${kd(r.kills, r.deaths)}</td><td class="num">${r.kills}</td><td class="num">${levelFor(r.xp).level}</td></tr>`).join('')}</table>`;
+        ${rows.map((r, i) => `<tr class="clickable ${r.id === app.user?.id ? 'me' : ''}" data-id="${r.id}"><td class="pos">${i + 1}</td><td>${r.clan ? `<i class="clan-tag">[${esc(r.clan)}]</i>` : ''}<b>${esc(r.username)}</b></td><td>${rankBadge(r.elo)}</td><td class="num">${r.elo}</td><td class="num">${r.ranked_wins}–${r.ranked_losses}</td><td class="num">${r.wins}</td><td class="num">${kd(r.kills, r.deaths)}</td><td class="num">${r.kills}</td><td class="num">${levelFor(r.xp).level}</td></tr>`).join('')}</table>`;
       body.querySelectorAll('[data-id]').forEach((r) => { r.onclick = () => this.profileModal(r.dataset.id); });
     } catch (e) { body.innerHTML = `<p class="err">${esc(e.message)}</p>`; }
   }

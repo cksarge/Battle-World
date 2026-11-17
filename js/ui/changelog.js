@@ -55,7 +55,7 @@ function render(md) {
   const close = () => { if (list) { out.push('</ul>'); list = false; } };
   for (const line of md.split('\n')) {
     const t = line.trim();
-    if (t.startsWith('- ')) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${inline(t.slice(2))}</li>`); continue; }
+    if (t.startsWith('- ')) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li${/^\s+- /.test(line) ? ' class="cl-sub"' : ''}>${inline(t.slice(2))}</li>`); continue; }
     close();
     if (!t) continue;
     const h = /^(#{1,4}) (.*)$/.exec(t);

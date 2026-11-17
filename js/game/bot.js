@@ -40,6 +40,7 @@ export class BotBrain {
     this.holdSpot = null; this.action = null; this.actionT = 0; this.burstLeft = 0; this.pauseT = 0;
     this.site = null;
     this.blindT = 0;
+    this.hideout = null; this.sweep = null; this.spotted = null;
   }
 
   blind(t) { this.blindT = Math.max(this.blindT, t); if (t > 0.6) { this.target = null; this.seenT = 0; } }
@@ -58,6 +59,7 @@ export class BotBrain {
   }
 
   enemies() {
+    if (this.g.party?.passive(this.p)) return []; // Prop Hunt hiders have nothing to shoot with
     const out = [];
     for (const o of this.g.players.values()) if (o !== this.p && o.alive && this.g.isEnemy(this.p, o)) out.push(o);
     return out;
@@ -69,6 +71,7 @@ export class BotBrain {
     const d = dst.clone().sub(eye);
     const dist = d.length();
     if (dist > (this.g.sightRange || 75)) return false;
+    if (this.g.party?.hiddenFrom(this, o, dist)) return false;
     const fwd = new THREE.Vector3(-Math.sin(this.p.yaw), 0, -Math.cos(this.p.yaw));
     const flat = new THREE.Vector3(d.x, 0, d.z).normalize();
     const ang = Math.acos(THREE.MathUtils.clamp(fwd.dot(flat), -1, 1));
@@ -91,6 +94,8 @@ export class BotBrain {
     if (g.objectives) return g.objectives.botGoal(this);
     if (kind === 'zombies') return g.zombies.squadGoal(this);
     if (kind === 'infect') return this.infectGoal();
+    const party = g.party?.botGoal(this);
+    if (party) return party;
     if (kind === 'bomb' || kind === 'retake') {
       const b = g.state.bomb || {};
       if (p.team === 0) {
@@ -181,7 +186,7 @@ export class BotBrain {
     this.hurtT = (this.hurtT || 0) - dt;
     this.blindT = Math.max(0, this.blindT - dt);
     this.thinkT -= dt;
-    const frozen = g.state.phase === 'buy' || g.state.phase === 'warmup';
+    const frozen = g.state.phase === 'buy' || g.state.phase === 'warmup' || !!g.party?.frozen(p);
     if (this.thinkT <= 0) { this.thinkT = 0.15 + Math.random() * 0.1; this.think(); }
 
     // Pick weapon

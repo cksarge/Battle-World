@@ -56,7 +56,7 @@ export class Viewmodel {
     this.id = id;
     this.skin = char?.skins?.[id] || null;
     if (!id) return;
-    const gun = buildGun(id, char?.skins?.[id]);
+    const gun = buildGun(id, char?.skins?.[id], char?.mods?.[id]);
     gun.traverse((o) => { if (o.isMesh) o.castShadow = false; });
     const sleeveM = new THREE.MeshStandardMaterial({ color: char?.top || '#3a4658', roughness: 0.85 });
     const gloveM = new THREE.MeshStandardMaterial({ color: char?.gloves || '#1d1d1f', roughness: 0.7 });

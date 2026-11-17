@@ -84,6 +84,27 @@ export const MODES = {
     desc: 'One player starts infected with only a blade. Everyone they kill joins them. Survive the round for 3 points, infect someone for 1. Four rounds; most points wins.',
     rounds: 4, roundTime: 150, maps: ALL,
   },
+  // ───────── party modes (js/game/party.js) ─────────
+  chamber: {
+    id: 'chamber', name: 'One in the Chamber', short: 'OIC', maxPlayers: 8, kind: 'chamber', party: true,
+    desc: 'A pistol with one bullet that kills in one hit, and a knife. Every kill gives you another bullet. Three lives each; the last player standing wins.',
+    lives: 3, timeLimit: 420, maps: ALL,
+  },
+  sharpshooter: {
+    id: 'sharpshooter', name: 'Sharpshooter', short: 'SHRP', maxPlayers: 8, kind: 'sharp', party: true,
+    desc: 'Everyone carries the same random gun, and it changes for everyone every 45 seconds. First to 20 kills.',
+    killsToWin: 20, timeLimit: 420, swapTime: 45, maps: ALL,
+  },
+  juggernaut: {
+    id: 'juggernaut', name: 'Juggernaut', short: 'JUGG', maxPlayers: 8, kind: 'jugg', party: true,
+    desc: 'One player is the Juggernaut: heavily armored, carrying an LMG and always on everyone\'s radar. Kill the Juggernaut to become it. Only the Juggernaut scores: a point for taking the role and one per kill. First to 15.',
+    scoreToWin: 15, timeLimit: 480, maps: ALL,
+  },
+  prophunt: {
+    id: 'prophunt', name: 'Prop Hunt', short: 'PROP', maxPlayers: 8, kind: 'prophunt', party: true,
+    desc: 'Hiders disguise themselves as crates, barrels and other props, and get 30 seconds to hide while the seekers wait blindfolded. Seekers lose a little health for every shot that hits nothing. Found hiders join the seekers. Four rounds; most points wins.',
+    rounds: 4, roundTime: 180, hideTime: 30, maps: ALL,
+  },
   zombies: {
     id: 'zombies', name: 'Zombies', short: 'ZMB', maxPlayers: 4, kind: 'zombies', coop: true,
     desc: 'Up to four players hold out against endless waves of the dead. Earn points to unlock doors, buy guns off the walls, gamble at the supply crate, drink perks and forge upgrades.',
@@ -108,12 +129,16 @@ export function econFor(mode) {
   return mode.economy ? DUEL_ECON : null;
 }
 
-export const RESPAWN_KINDS = new Set(['ffa', 'tdm', 'gungame', 'dom', 'koth', 'ctf']);
+export const RESPAWN_KINDS = new Set(['ffa', 'tdm', 'gungame', 'dom', 'koth', 'ctf', 'chamber', 'sharp', 'jugg']);
 // Everyone can damage everyone (no teams).
-export const SOLO_KINDS = new Set(['ffa', 'gungame', 'training']);
-// Players join as one pool instead of two teams (queues, parties, lobbies, the roster). Infection splits
-// the pool once the match starts; zombies puts everyone on team 0 against the horde.
-export const POOL_KINDS = new Set([...SOLO_KINDS, 'infect', 'zombies']);
+export const SOLO_KINDS = new Set(['ffa', 'gungame', 'training', 'chamber', 'sharp', 'jugg']);
+// Players join as one pool instead of two teams (queues, parties, lobbies, the roster). Infection and
+// Prop Hunt split the pool each round; zombies puts everyone on team 0 against the horde.
+export const POOL_KINDS = new Set([...SOLO_KINDS, 'infect', 'zombies', 'prophunt']);
+// Party modes: js/game/party.js runs their rules.
+export const PARTY_KINDS = new Set(['chamber', 'sharp', 'jugg', 'prophunt']);
+// Round modes where the pool is split into two sides each round (scored with match points).
+export const SPLIT_KINDS = new Set(['infect', 'prophunt']);
 // Team objective modes (capture points, the hill, flags): js/game/objectives.js.
 export const OBJECTIVE_KINDS = new Set(['dom', 'koth', 'ctf']);
 // Modes with a charge to plant or defuse.
@@ -133,7 +158,10 @@ export function goalText(mode) {
     case 'gungame': return `First through all ${GUN_GAME_ORDER.length} weapons`;
     case 'dom': case 'koth': return `First team to ${mode.scoreToWin} points`;
     case 'ctf': return `First team to ${mode.capsToWin} captures`;
-    case 'infect': return `Most points after ${mode.rounds} rounds`;
+    case 'infect': case 'prophunt': return `Most points after ${mode.rounds} rounds`;
+    case 'chamber': return `Last one standing · ${mode.lives} lives`;
+    case 'sharp': return `First to ${mode.killsToWin} kills`;
+    case 'jugg': return `First to ${mode.scoreToWin} points`;
     case 'zombies': return 'Survive as many waves as you can';
     default: return '';
   }

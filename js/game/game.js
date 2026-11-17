@@ -5,9 +5,10 @@ import { Viewmodel } from '../engine/viewmodel.js';
 import { buildGun } from '../engine/models.js';
 import { sfx, setListener, initAudio, setVolume, onSoundCue } from '../engine/audio.js';
 import { MAPS, withVariant, SIGHT } from '../data/maps.js';
-import { MODES, RESPAWN_KINDS, SOLO_KINDS, POOL_KINDS, BOMB_KINDS, SIDED_KINDS, OBJECTIVE_KINDS, goalText, econFor } from '../data/modes.js';
+import { MODES, RESPAWN_KINDS, SOLO_KINDS, POOL_KINDS, BOMB_KINDS, SIDED_KINDS, OBJECTIVE_KINDS, PARTY_KINDS, SPLIT_KINDS, goalText, econFor } from '../data/modes.js';
 import { HostageView } from './hostage.js';
 import { Objectives } from './objectives.js';
+import { PartyMode } from './party.js';
 import { ZombieMode, ZombieBrain } from './zombies.js';
 import { infectedChar } from '../data/zombies.js';
 import { masteryLevel } from '../data/mastery.js';
@@ -129,6 +130,7 @@ export class Game {
     if (this.mode.kind === 'hostage') this.hostageView = new HostageView(this);
     if (OBJECTIVE_KINDS.has(this.mode.kind)) this.objectives = new Objectives(this);
     if (this.mode.kind === 'zombies') this.zombies = new ZombieMode(this);
+    if (PARTY_KINDS.has(this.mode.kind)) this.party = new PartyMode(this);
 
     for (const info of this.opts.players) this.addPlayer(info);
 
@@ -232,7 +234,7 @@ export class Game {
   }
 
   // Team modes have full friendly fire, except co-op Zombies, Infection and the training modes.
-  get friendlyFire() { const k = this.mode.kind; return !SOLO_KINDS.has(k) && k !== 'zombies' && k !== 'infect' && k !== 'training'; }
+  get friendlyFire() { const k = this.mode.kind; return !SOLO_KINDS.has(k) && !SPLIT_KINDS.has(k) && k !== 'zombies' && k !== 'training'; }
 
   // Who can take damage from whom: opponents, and teammates too where friendly fire is on.
   canDamage(a, b) {
@@ -309,6 +311,7 @@ export class Game {
     this.hostageView?.update(dt);
     this.objectives?.update(dt);
     this.zombies?.update(dt);
+    this.party?.update(dt);
     this.training?.update(dt);
     this.tutorial?.update(dt);
     this.pings?.update(dt);
@@ -374,7 +377,7 @@ export class Game {
       this.handleUiKeys(p, ui);
       return;
     }
-    const frozen = this.state.phase === 'buy' || this.state.phase === 'warmup';
+    const frozen = this.state.phase === 'buy' || this.state.phase === 'warmup' || !!this.party?.frozen(p);
     const k = (c) => !ui && inp.down(c);
 
     // Plant / defuse (hold E)
@@ -862,6 +865,8 @@ export class Game {
       if (dmgBy.size) { ws.h++; this.myStats.hits++; }
       this.training?.onShot(dmgBy.size > 0);
     }
+    // Prop Hunt: seekers pay for shots that hit nobody.
+    if (isLocal && !dmgBy.size && this.party?.missPenalty(p)) this.request('miss', {}, p);
     for (const [victim, { d, part, tags: vt }] of dmgBy) {
       this.request('hit', { v: victim.id, d: Math.round(d), part, w: w.id, t: [...vt] }, p);
       if (isLocal) this.hud.hitmarker(part === 'head', false);
@@ -901,7 +906,7 @@ export class Game {
     } else {
       p.pitch += kick * 0.35;
     }
-    sfx.shot(w.id, isLocal ? null : p.pos);
+    sfx.shot(w.id, isLocal ? null : p.pos, w.suppressed);
     if (!isLocal && !w.silent) this.effects.muzzle(this.muzzlePos(p, false), w.type === 'pistol' ? 0.7 : 1);
   }
 
@@ -964,8 +969,8 @@ export class Game {
     for (const s of list) {
       const w = s[0];
       if (isKnife(w)) { sfx.knife(p.pos); continue; }
-      const wd = WEAPONS[w];
-      sfx.shot(w, p.pos);
+      const wd = p.gun(w);
+      sfx.shot(w, p.pos, wd?.suppressed);
       const muzzle = this.muzzlePos(p, false);
       if (!wd?.silent) this.effects.muzzle(muzzle, wd?.type === 'pistol' ? 0.7 : 1);
       p.firingT = 0.12;
@@ -1274,7 +1279,7 @@ export class Game {
   // ───────────────────────── dropped weapons ─────────────────────────
   // Dead players drop their main gun where they fell. Walking over one picks it up if that slot is
   // empty; pressing E swaps it for the gun you're holding in that slot. The host decides who gets it.
-  dropsAllowed() { return !['gungame', 'infect', 'zombies', 'training'].includes(this.mode.kind); }
+  dropsAllowed() { return !['gungame', 'infect', 'zombies', 'training'].includes(this.mode.kind) && !this.party; }
 
   dropInfo(p, id) {
     const w = WEAPONS[id], a = p.ammo[id];
@@ -1404,7 +1409,7 @@ export class Game {
     if ((p.resupplyAt || 0) > now) return;
     let topped = false;
     for (const id of [p.inv.primary, p.inv.secondary]) {
-      const w = WEAPONS[id], a = p.ammo[id];
+      const w = p.gun(id), a = p.ammo[id];
       if (w && a && a.reserve < w.reserve) { a.reserve = w.reserve; topped = true; }
     }
     if (!topped) { this.hud.info('Your ammo is already full', 1.5); return; }
@@ -1613,6 +1618,7 @@ export class Game {
     else if (type === 'pickup') this.rules.onPickup?.(p, data.i);
     else if (type === 'grab') this.hostGrab(p, data.did);
     else if (type === 'zbuy' || type === 'zrevive') this.zombies?.handleRequest(type, p, data);
+    else if (type === 'miss') this.party?.onMiss(p);
   }
 
   hostDamage(attacker, victim, raw, part, weapon, tags = null) {
@@ -1622,6 +1628,7 @@ export class Game {
     const explosive = nadeDef(weapon)?.explosive || weapon === 'bomb' || weapon === 'barrel' || !!WEAPONS[weapon]?.projectile;
     if (explosive && victim.char?.perk === 'blastsuit') raw *= 0.6;
     if (this.zombies) raw = this.zombies.adjustDamage(attacker, victim, raw);
+    if (this.party) { raw = this.party.adjustDamage(attacker, victim, raw, weapon); if (raw <= 0) return; }
     let dmg = raw, armorLoss = 0;
     const armored = part === 'head' ? victim.helmet : part !== 'legs' && victim.armor > 0;
     if (armored && victim.armor > 0) {
@@ -1745,7 +1752,7 @@ export class Game {
     const players = {};
     for (const p of this.players.values()) players[p.id] = [p.money, p.kills, p.deaths, p.hp, p.alive ? 1 : 0, p.team, p.hs, Math.round(p.damage), p.score || 0];
     const s = this.state;
-    return { phase: s.phase, time: s.time, round: s.round, scores: s.scores, bomb: s.bomb, players, obj: s.obj, z: s.z };
+    return { phase: s.phase, time: s.time, round: s.round, scores: s.scores, bomb: s.bomb, players, obj: s.obj, z: s.z, party: s.party };
   }
 
   statsPayload() {
@@ -1772,7 +1779,7 @@ export class Game {
         this.anticheat.onRoundEnd(d);
         s.scores = d.scores; s.phase = 'post'; s.time = 5;
         for (const [id, m] of Object.entries(d.money || {})) { const p = this.players.get(id); if (p) p.money = m; }
-        const reasonText = { elim: 'All enemies eliminated', bomb: 'The charge detonated', defuse: 'The charge was defused', time: 'Time ran out', draw: 'Draw', infected: 'Everyone was infected', survived: 'The survivors held out (+3 each)' }[d.reason] || '';
+        const reasonText = { elim: 'All enemies eliminated', bomb: 'The charge detonated', defuse: 'The charge was defused', time: 'Time ran out', draw: 'Draw', infected: 'Everyone was infected', survived: 'The survivors held out (+3 each)', found: 'Every hider was found', hid: 'The hiders stayed hidden (+3 each)' }[d.reason] || '';
         if (d.winner < 0) this.hud.center('ROUND DRAW', reasonText, 4);
         else {
           const name = this.teamName(d.winner);
@@ -1795,6 +1802,7 @@ export class Game {
           s.phase = d.phase; s.time = d.time; s.round = d.round; s.scores = d.scores;
           if (d.bomb) s.bomb = d.bomb;
           if (d.obj) s.obj = d.obj;
+          if (d.party) s.party = d.party;
           if (d.z) { s.z = d.z; this.zombies?.refreshPlayers(); }
           for (const [id, v] of Object.entries(d.players)) {
             const p = this.players.get(id);
@@ -1844,9 +1852,10 @@ export class Game {
           this.action = null;
           this.spectateIdx = 0;
           this.killer = k;
-          const how = itemInfo(d.w)?.name || { fire: 'Incendiary', barrel: 'Exploding barrel', fall: 'Fall damage', claws: 'Clawed', bloat: 'Bloater' }[d.w] || d.w;
+          const how = itemInfo(d.w)?.name || { fire: 'Incendiary', barrel: 'Exploding barrel', fall: 'Fall damage', claws: 'Clawed', bloat: 'Bloater', miss: 'Too many missed shots' }[d.w] || d.w;
           if (this.zombies) this.hud.center('YOU’RE DOWN', this.zombies.survivors().some((q) => q.alive) ? 'A teammate can revive you, or you’re back next wave' : '', 3);
           else if (this.mode.kind === 'infect' && v.team === 0) this.hud.center('INFECTED', 'You’ll come back as one of them', 2.5);
+          else if (this.mode.kind === 'prophunt' && v.team === 0) this.hud.center('FOUND', 'You’ll come back as a seeker', 2.5);
           else this.hud.center('YOU DIED', k ? `${k.name} · ${how}${d.hs ? ' · headshot' : ''}` : d.w === 'bloat' ? how : '', 2.5);
         }
         if (this.mode.kind === 'bomb' && this.state.bomb?.carrier === v.id) v.hasBomb = false;
@@ -1899,6 +1908,7 @@ export class Game {
       case 'ping': this.pings?.receive(d); break;
       case 'obj': this.objectives?.apply(d); break;
       case 'z': this.zombies?.apply(d); break;
+      case 'party': this.party?.apply(d); break;
       case 'infect': {
         const p = this.players.get(d.id);
         if (!p) break;
@@ -1951,6 +1961,7 @@ export class Game {
   teamName(team) {
     if (SIDED_KINDS.has(this.mode.kind)) return team === 0 ? 'ATTACKERS' : 'DEFENDERS';
     if (this.mode.kind === 'infect') return team === 0 ? 'SURVIVORS' : 'INFECTED';
+    if (this.mode.kind === 'prophunt') return team === 0 ? 'HIDERS' : 'SEEKERS';
     if (this.mode.kind === 'zombies') return team === 0 ? 'SURVIVORS' : 'THE HORDE';
     const lp = this.local;
     if (!lp && this.mode.teamSize !== 1) return 'TEAM ' + (team + 1);
@@ -1987,6 +1998,7 @@ export class Game {
     p.snapTo(at[0], at[1], at[2], at[3]);
     // Infected players are tougher and quicker; zombies set their own health after spawning.
     if (this.mode.kind === 'infect') { p.maxHp = p.team === 1 ? 150 : 100; p.speedMul = p.team === 1 ? 1.1 : 1; }
+    this.party?.onSpawn(p);
     p.alive = true; p.hp = p.maxHp || 100;
     if (resetKit) { p.resetKit(); p.armor = 0; p.helmet = false; }
     if (freeArmor && !(this.mode.kind === 'infect' && p.team === 1)) { p.armor = 100; p.helmet = true; }
@@ -2000,6 +2012,7 @@ export class Game {
   // Loadout given on spawn in respawn modes.
   giveSpawnLoadout(p, at) {
     const kind = this.mode.kind;
+    if (this.party) return this.party.loadout(p);
     if (kind === 'gungame') return this.setGunGameWeapon(p);
     if (kind === 'ffa') return this.giveFFALoadout(p, at);
     if (kind === 'infect') return p.team === 1 ? this.giveInfectedKit(p) : this.giveFFALoadout(p, at);
@@ -2055,7 +2068,7 @@ export class Game {
       const at = d.spawns[p.id];
       if (!at) { p.alive = false; continue; }
       this.spawnPlayer(p, at, reset.has(p.id), d.freeArmor);
-      if (RESPAWN_KINDS.has(this.mode.kind) || this.mode.kind === 'infect') this.giveSpawnLoadout(p, at);
+      if (RESPAWN_KINDS.has(this.mode.kind) || SPLIT_KINDS.has(this.mode.kind)) this.giveSpawnLoadout(p, at);
     }
     this.refreshBombCarrier();
     this.action = null;
@@ -2068,6 +2081,7 @@ export class Game {
     if (RESPAWN_KINDS.has(this.mode.kind)) this.hud.center(this.mode.name.toUpperCase(), goalText(this.mode), 3);
     else if (this.zombies) this.hud.center('ZOMBIES', 'Earn points, buy guns off the walls, unlock doors. Stay alive.', 4);
     else if (this.mode.kind === 'infect') this.hud.center(`ROUND ${d.round} OF ${this.mode.rounds}`, lp?.team === 1 ? 'You’re patient zero. Knife the survivors' : 'Survive. The infected only have blades', 3);
+    else if (this.mode.kind === 'prophunt') this.hud.center(`ROUND ${d.round} OF ${this.mode.rounds}`, lp?.team === 1 ? `You’re seeking. The hiders get ${this.mode.hideTime} seconds first` : 'You’re a prop. Find a spot that fits and stay still', 3.5);
     else if (this.training) this.hud.center('TRAINING RANGE', `Press ${pad.label('buy')} for weapons and drills`, 3);
     else {
       const kind = this.mode.kind, site = d.bomb?.site || d.hostages?.[0]?.site;
@@ -2114,7 +2128,7 @@ export class Game {
   // ───────────────────────── networking ─────────────────────────
   bindNet() {
     const n = this.net;
-    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'sold', 'kt', 'ff', 'drop', 'grab', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points'];
+    const evs = ['phase', 'round', 'roundEnd', 'sync', 'hp', 'kill', 'respawn', 'bomb', 'hostage', 'give', 'sold', 'kt', 'ff', 'drop', 'grab', 'nade', 'chat', 'msg', 'end', 'score', 'gg', 'boom', 'door', 'prop', 'emote', 'ping', 'obj', 'z', 'infect', 'points', 'party'];
     for (const e of evs) n.on(e, (d) => this.onEvent(e, d));
     n.on('S', (d) => this.onStates(d));
     n.on('req', (d) => { if (this.isHost) this.handleRequest(d.type, d.data, d.from); });
@@ -2284,8 +2298,8 @@ export class Game {
     if (this.isHost) {
       this.state.lossStreak = this.state.lossStreak || [0, 0];
       this.rules = new Rules(this);
-      if (RESPAWN_KINDS.has(this.mode.kind) || this.mode.kind === 'infect') {
-        for (const p of this.players.values()) if (!p.alive) this.rules.respawnQueue.set(p.id, 2);
+      if (RESPAWN_KINDS.has(this.mode.kind) || SPLIT_KINDS.has(this.mode.kind)) {
+        for (const p of this.players.values()) if (!p.alive && !(this.state.party?.lives && this.state.party.lives[p.id] === 0)) this.rules.respawnQueue.set(p.id, 2);
       }
       this.net?.send('host', { id: this.localId });
       this.hud.chatLine('', 'You are now hosting this match', -1);
@@ -2567,7 +2581,7 @@ export class Game {
     let result = 'draw';
     const wave = this.state.z?.wave || 0;
     if (this.zombies) result = wave >= 10 ? 'win' : 'loss';
-    else if (SOLO_KINDS.has(this.mode.kind) || this.mode.kind === 'infect') {
+    else if (SOLO_KINDS.has(this.mode.kind) || SPLIT_KINDS.has(this.mode.kind)) {
       result = d.winner === this.localId ? 'win' : 'loss';
     } else if (d.winner >= 0 && lp) result = d.winner === lp.team ? 'win' : 'loss';
     if (d.reason === 'host-left' && d.winner === -2) result = 'draw';
@@ -2586,6 +2600,7 @@ export class Game {
       } catch { /* ignore */ }
     }
     const score = this.zombies ? `Wave ${wave}`
+      : this.party ? this.party.scoreText(lp)
       : this.mode.kind === 'infect' ? `${lp?.score || 0} points`
       : this.mode.kind === 'ffa' ? `${myStats.k} kills`
       : this.mode.kind === 'gungame' ? `Weapon ${Math.min((lp?.gg || 0) + 1, GUN_GAME_ORDER.length)}/${GUN_GAME_ORDER.length}`
@@ -2645,6 +2660,7 @@ export class Game {
     onSoundCue(null);
     this.rec?.unwrap();
     this.tutorial?.dispose();
+    this.party?.dispose();
     this.input?.dispose();
     this.hud?.unmount();
     this.net?.leave();

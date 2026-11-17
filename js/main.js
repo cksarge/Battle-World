@@ -9,6 +9,7 @@ import { MenuScene } from './ui/menuscene.js';
 import { PartyManager } from './net/party.js';
 import { initAudio } from './engine/audio.js';
 import { pad, PadNav, isTouchOnly, applyPadSettings, padHelp } from './engine/gamepad.js';
+import { ATTACHMENTS, unlockedBetween } from './data/attachments.js';
 import { normalizeInventory, rollDrop, addToInventory, KINDS, WEAPON_SKINS } from './data/skins.js';
 import { WEAPONS } from './data/weapons.js';
 import { applySeasonRows, currentSeason, seasonById, seasonTrack, tierFor, rankedReward, RANKED_REWARD_WINS } from './data/seasons.js';
@@ -107,7 +108,7 @@ class App {
   // No internet: guest mode, where bot matches and the Training Range work (with offline play on,
   // the whole game loads from the saved copy).
   offlineGuest() {
-    this.user = null; this.profile = null;
+    this.user = null; this.profile = null; this.clan = null;
     this.loginGuest();
     this.ui.toast('You’re offline. Bot matches and the Training Range work; online play comes back with your connection.', '', null, 8000);
     addEventListener('online', () => this.ui.toast('You’re back online. Sign in from the top-right to play online.', 'good', null, 8000), { once: true });
@@ -186,7 +187,7 @@ class App {
   }
 
   me() {
-    if (this.user && this.profile) return { id: this.user.id, name: this.profile.username, elo: this.profile.elo, char: this.char };
+    if (this.user && this.profile) return { id: this.user.id, name: this.profile.username, elo: this.profile.elo, char: this.clan ? { ...this.char, clan: this.clan.tag } : this.char };
     if (!this.guestId) this.guestId = 'guest-' + Math.random().toString(36).slice(2, 8);
     return { id: this.guestId, name: this.char?.name || 'Guest', elo: 1000, char: this.char };
   }
@@ -222,6 +223,7 @@ class App {
     await deviceId().then((id) => this.api.registerDevice(id)).catch((e) => console.warn('Device check failed', e));
     await this.pollStatus();
     if (this.banned) return;
+    this.clan = await this.api.myClan().catch(() => null);
     this.joinPresence();
     this.grantSeasonRewards();
     this.claimPending();
@@ -230,7 +232,7 @@ class App {
   }
 
   loginGuest() {
-    this.user = null; this.profile = null; this.isAdmin = false; this.muted = null;
+    this.user = null; this.profile = null; this.clan = null; this.isAdmin = false; this.muted = null;
     this.inventory = this.loadLocalInventory();
     this.challenges = this.loadLocalChallenges();
     this.achievements = this.loadLocalAchievements();
@@ -266,7 +268,7 @@ class App {
     this.presence?.leave(); this.presence = null;
     await this.api?.signOut();
     clearInterval(this.statusTimer);
-    this.user = null; this.profile = null; this.isAdmin = false; this.muted = null; this.banned = null;
+    this.user = null; this.profile = null; this.clan = null; this.isAdmin = false; this.muted = null; this.banned = null;
     this.friends = []; this.friendsLoaded = false; this.friendsSeen = false; this.friendRequestCount = 0;
     this.inventory = this.loadLocalInventory();
     this.achievements = this.loadLocalAchievements();
@@ -470,7 +472,9 @@ class App {
     const ups = addMastery(this.achievements, m.weapons);
     for (const u of ups.slice(0, 3)) {
       const finish = Object.values(WEAPON_SKINS).find((d) => d.mastery === u.level);
-      this.ui.toast(`${WEAPONS[u.weapon]?.name || u.weapon} reached mastery level ${u.level}${finish ? `: ${finish.name} finish unlocked for it` : ''}`, 'good', null, 6000);
+      const att = unlockedBetween(u.weapon, u.level - 1, u.level).map((id) => ATTACHMENTS[id].name);
+      const got = [finish && `${finish.name} finish`, ...att.map((n) => `${n} attachment`)].filter(Boolean);
+      this.ui.toast(`${WEAPONS[u.weapon]?.name || u.weapon} reached mastery level ${u.level}${got.length ? `: ${got.join(' and ')} unlocked for it` : ''}${att.length ? '. Pick attachments in Armory → Weapons' : ''}`, 'good', null, 6000);
     }
     if (ups.length > 3) this.ui.toast(`${ups.length - 3} more weapons levelled up. See Stats → Mastery`, 'good', null, 6000);
     const got = applyMatchAchievements(this.achievements, m, this.profile);

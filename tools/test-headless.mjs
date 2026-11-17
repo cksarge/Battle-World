@@ -22,6 +22,7 @@ const { SEASONS, tierFor, seasonTrack } = await import('../js/data/seasons.js');
 const { activeChallenges, applyMatch, normalizeProgress } = await import('../js/data/challenges.js');
 const { validateMap, mapReport, CHARS, toDef, cleanData } = await import('../js/data/custommaps.js');
 const { censor } = await import('../js/data/profanity.js');
+const A = await import('../js/data/attachments.js');
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -573,6 +574,36 @@ test('anti-cheat: walls stop the line, glass and wooden cover do not', () => {
     }
   }
   for (const [ch, n] of Object.entries(seen)) if (!n) bad.push(`no ${ch} cell between two floor cells found to test`);
+  return bad;
+});
+
+test('attachments: never raise per-shot damage or fire rate; sanitizeMods drops junk; mastery levels in range', () => {
+  const bad = [];
+  for (const w of Object.values(WEAPONS)) for (const id of A.attachmentsFor(w.id)) {
+    const m = A.withAttachment(w, id);
+    if (m.damage !== w.damage || m.fireRate !== w.fireRate || (m.pellets || 1) !== (w.pellets || 1) || (m.hsMult ?? 0) !== (w.hsMult ?? 0)) bad.push(`${w.id}+${id} changes damage or fire rate`);
+    if ((m.rangeMod ?? 1) > (w.rangeMod ?? 1)) bad.push(`${w.id}+${id} raises rangeMod`);
+    if (m.id !== w.id) bad.push(`${w.id}+${id} changes the id`);
+    if (A.withAttachment(w, id) !== m) bad.push(`${w.id}+${id} isn't cached`);
+  }
+  if (A.attachmentsFor('knife').length || A.attachmentsFor('thumper').length) bad.push('knives or launchers take attachments');
+  if (A.canAttach('coach', 'extmag')) bad.push('extended mag fits a 2-round shotgun');
+  const s = A.sanitizeMods({ ar7: 'grip', knife: 'grip', nope: 'laser', vex: 'bogus' });
+  if (JSON.stringify(s) !== '{"ar7":"grip"}') bad.push('sanitizeMods kept junk: ' + JSON.stringify(s));
+  if (JSON.stringify(sanitizeChar({ mods: { ar7: 'extmag' }, clan: 'ABC' }).mods) !== '{"ar7":"extmag"}') bad.push('sanitizeChar drops mods');
+  if (sanitizeChar({ clan: '<b>' }).clan) bad.push('sanitizeChar keeps a bad clan tag');
+  for (const a of Object.values(A.ATTACHMENTS)) if (a.mastery < 2 || a.mastery > M.MAX_LEVEL) bad.push(`${a.id} unlocks at ${a.mastery}`);
+  return bad;
+});
+
+test('party modes: listed as pool modes with goals and maps', () => {
+  const bad = [];
+  for (const m of Object.values(MODES).filter((x) => x.party)) {
+    if (!goalText(m)) bad.push(`${m.id}: no goal text`);
+    if (!(m.maxPlayers >= 4)) bad.push(`${m.id}: maxPlayers`);
+    if (m.kind !== 'prophunt' && !RESPAWN_KINDS.has(m.kind)) bad.push(`${m.id}: not a respawn mode`);
+  }
+  if (Object.values(MODES).filter((x) => x.party).length !== 4) bad.push('expected 4 party modes');
   return bad;
 });
 
