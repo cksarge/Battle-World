@@ -659,7 +659,7 @@ class App {
 
   recordLocalStats(m) {
     const st = this.localStats(), d = m.details || {};
-    st.matches.unshift({ mode: m.mode, map: m.map, result: m.result, online: m.online, k: m.k, d: m.d, hs: m.hs, at: Date.now() });
+    st.matches.unshift({ mode: m.mode, map: m.map, result: m.result, online: m.online, k: m.k, a: m.a || 0, d: m.d, hs: m.hs, at: Date.now() });
     st.matches = st.matches.slice(0, 200);
     st.shots += d.shots || 0; st.hits += d.hits || 0;
     for (const [w, v] of Object.entries(d.weapons || {})) {

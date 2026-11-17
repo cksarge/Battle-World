@@ -205,7 +205,7 @@ export class Api {
   async recordMatch(o) {
     const args = {
       p_match_id: o.matchId, p_mode: o.mode, p_map: o.map, p_ranked: o.ranked, p_online: o.online,
-      p_result: o.result, p_kills: o.kills, p_deaths: o.deaths, p_headshots: o.headshots, p_score: o.score, p_elo_change: o.eloChange || 0,
+      p_result: o.result, p_kills: o.kills, p_deaths: o.deaths, p_headshots: o.headshots, p_score: o.score, p_elo_change: o.eloChange || 0, p_assists: o.assists || 0,
     };
     // Per-match details need the newer database function; older databases just skip them.
     if (o.details && this.detailsSupported !== false) {

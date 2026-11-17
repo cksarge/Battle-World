@@ -456,8 +456,8 @@ export class Effects {
     this.pulse(pos.clone().setY(pos.y + 1), 0xffa050, barrel ? 160 : 110, barrel ? 34 : 28, barrel ? 0.5 : 0.35);
   }
 
-  // Smoke grenade cloud. Returned object is used for line-of-sight blocking.
-  smoke(pos, radius, duration) {
+  // Smoke grenade cloud. Returned object is used for line-of-sight blocking; `owner` is the thrower's id.
+  smoke(pos, radius, duration, owner = null) {
     const group = new THREE.Group();
     const parts = [];
     for (let i = 0; i < 46; i++) {
@@ -478,12 +478,12 @@ export class Effects {
     group.add(can);
     group.position.copy(pos);
     this.scene.add(group);
-    const cloud = { pos: pos.clone().setY(pos.y + 1.6), radius, t: 0, duration, group, parts, base: pos.clone(), jetT: 0 };
+    const cloud = { pos: pos.clone().setY(pos.y + 1.6), radius, t: 0, duration, group, parts, base: pos.clone(), jetT: 0, owner };
     this.smokes.push(cloud);
     return cloud;
   }
 
-  // True if the segment a→b passes through an active smoke cloud.
+  // The active smoke cloud the segment a→b passes through, or null.
   smokeBlocks(a, b) {
     for (const s of this.smokes) {
       if (s.t < 0.8) continue;
@@ -491,9 +491,9 @@ export class Effects {
       ab.divideScalar(len);
       const t = Math.max(0, Math.min(len, new THREE.Vector3().subVectors(s.pos, a).dot(ab)));
       const closest = a.clone().addScaledVector(ab, t);
-      if (closest.distanceTo(s.pos) < s.radius * 0.85) return true;
+      if (closest.distanceTo(s.pos) < s.radius * 0.85) return s;
     }
-    return false;
+    return null;
   }
 
 

@@ -329,6 +329,8 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .zpts { position: absolute; left: calc(50% + 34px); top: calc(50% - 22px); pointer-events: none; }
 .zpts span { position: absolute; left: var(--dx, 0); font-family: var(--display); font-weight: 700; font-size: 16px; color: #ffd23f; text-shadow: 0 2px 4px rgba(0,0,0,.9); animation: zpt .9s ease-out forwards; }
 .zpts span.big { font-size: 22px; }
+.zpts span.ast { top: 20px; font-size: 15px; color: #cfe8ff; letter-spacing: .04em; animation-duration: 1.2s; }
+.kf .kf-plus { color: var(--muted); margin: 0 -4px; }
 @keyframes zpt { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-46px); opacity: 0; } }
 .zperk { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 3px; border-radius: 50%; background: var(--pc); color: #0b0d10; font-size: 13px; font-style: normal; font-weight: 800; box-shadow: 0 0 8px var(--pc); }
 
@@ -348,6 +350,7 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .kf .kt-wallbang { color: #d9a066; }
 .kf .kt-long { color: #7bd389; }
 .kf .kt-burn { color: #ff8a3d; }
+.kf .kt-assist { color: #cfe8ff; font-size: .85em; }
 .kf .kt-win { color: #10140c; background: #f2c14e; }
 .kf .kt-tk { color: #fff; background: #c0392b; }
 

@@ -309,7 +309,8 @@ export class ReplayViewer {
     const recent = this.kills.filter((k) => k.t <= this.t && k.t > this.t - 6).slice(-5).reverse();
     hud.querySelector('.rp-feed').innerHTML = recent.map((k) => {
       const w = itemInfo(k.a.w)?.name || k.a.w;
-      return `<div class="kf">${k.a.killer && k.a.killer !== k.a.victim ? `<span>${esc(this.nameOf(k.a.killer))}</span>` : ''}<span class="w">${esc(w)}</span>${killTagsHTML(k.a.hs, k.a.t)}<span>${esc(this.nameOf(k.a.victim))}</span></div>`;
+      const ast = k.a.a && k.a.killer ? `<span class="kf-plus">+</span><span>${esc(this.nameOf(k.a.a))}</span>${k.a.at ? '<span class="kt kt-assist">ASSIST</span>' : ''}` : '';
+      return `<div class="kf">${k.a.killer && k.a.killer !== k.a.victim ? `<span>${esc(this.nameOf(k.a.killer))}</span>${ast}` : ''}<span class="w">${esc(w)}</span>${killTagsHTML(k.a.hs, k.a.t)}<span>${esc(this.nameOf(k.a.victim))}</span></div>`;
     }).join('');
     const st = this.targetState(), p = d.players[this.targetIdx];
     hud.querySelector('.rp-target').innerHTML = p ? `<span class="muted small">${this.cam.mode === 'free' ? 'Free camera' : 'Watching'}</span><b>${esc(p.name)}</b>${st ? `<span>${st.alive ? st.hp + ' HP' : 'Dead'} · ${esc(itemInfo(st.weapon)?.name || '')}</span>` : ''}` : '';

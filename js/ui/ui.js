@@ -1172,13 +1172,14 @@ export class UI {
     if (!el.isConnected) return;
     const local = app.localStats();
     // Matches: database history when signed in, this browser's record otherwise.
-    const matches = rows.length ? rows.map((r) => ({ mode: r.mode, map: r.map, result: r.result, online: r.online, k: r.kills, d: r.deaths, hs: r.headshots, at: new Date(r.created_at).getTime(), details: r.details }))
+    const matches = rows.length ? rows.map((r) => ({ mode: r.mode, map: r.map, result: r.result, online: r.online, k: r.kills, a: r.assists || 0, d: r.deaths, hs: r.headshots, at: new Date(r.created_at).getTime(), details: r.details }))
       : local.matches;
     // Weapon / accuracy / rivals / death spots: from stored details if the database has them, else this browser.
     const withDetails = matches.filter((m) => m.details);
     const agg = withDetails.length ? this.aggregateDetails(withDetails) : { weapons: local.weapons, shots: local.shots, hits: local.hits, h2h: local.h2h, deaths: local.deaths };
     const totK = p ? p.kills : matches.reduce((a, m) => a + m.k, 0), totD = p ? p.deaths : matches.reduce((a, m) => a + m.d, 0);
     const totHS = p ? p.headshots : matches.reduce((a, m) => a + m.hs, 0);
+    const totA = p ? p.assists || 0 : matches.reduce((a, m) => a + (m.a || 0), 0);
     const wins = matches.filter((m) => m.result === 'win').length;
     const lvl = levelFor(p?.xp || 0);
     // Recent form: K/D per match, oldest → newest.
@@ -1202,6 +1203,7 @@ export class UI {
         ${p ? `<div><b>${p.elo}</b><span>Rating, peak ${p.peak_elo}</span></div><div><b>${p.ranked_wins}–${p.ranked_losses}</b><span>Ranked record</span></div>` : ''}
         <div><b>${kd(totK, totD)}</b><span>Kills per death</span></div>
         <div><b>${pct(totHS, totK)}%</b><span>Headshot kills</span></div>
+        <div><b>${totA.toLocaleString()}</b><span>Assists</span></div>
         <div><b>${pct(wins, matches.length)}%</b><span>Wins, last ${matches.length}</span></div>
         <div><b>${agg.shots ? pct(agg.hits, agg.shots) + '%' : '—'}</b><span>Shots that hit</span></div>
       </div>
@@ -1319,6 +1321,7 @@ export class UI {
         <div><b>${p.ranked_wins}–${p.ranked_losses}</b><span>Ranked record</span></div>
         <div><b>${kd(p.kills, p.deaths)}</b><span>Kills per death</span></div>
         <div><b>${pct(p.headshots, p.kills)}%</b><span>Headshot kills</span></div>
+        <div><b>${(p.assists || 0).toLocaleString()}</b><span>Assists</span></div>
         <div><b>${pct(p.wins, p.matches)}%</b><span>Win rate</span></div>
         <div><b>${p.matches}</b><span>Online matches</span></div>
       </div>

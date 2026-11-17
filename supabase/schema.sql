@@ -74,6 +74,10 @@ create table if not exists public.match_history (
 create index if not exists match_history_user_idx on public.match_history (user_id, created_at desc);
 -- Per-match details for the stats page (weapon kills, accuracy, head-to-head, death spots).
 alter table public.match_history add column if not exists details jsonb;
+-- Assists (4.3.2): another player who did 30+ damage in the 5 seconds before a kill, or flashed the
+-- victim, or threw the smoke the killer shot through.
+alter table public.profiles add column if not exists assists int not null default 0;
+alter table public.match_history add column if not exists assists int not null default 0;
 
 alter table public.match_history enable row level security;
 drop policy if exists "history is public" on public.match_history;
@@ -94,8 +98,9 @@ create policy "ranked results are public" on public.ranked_matches for select us
 
 -- report_ranked and record_match are defined further down (with season tracking and ban checks).
 
--- The older 11-argument record_match is dropped so the RPC isn't ambiguous.
+-- Older record_match versions are dropped so the RPC isn't ambiguous.
 drop function if exists public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int);
+drop function if exists public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int, jsonb);
 
 
 -- ═════════════════════════ seasons, challenges, commends, reports, admin ═════════════════════════
@@ -876,11 +881,12 @@ $$;
 create or replace function public.record_match(
   p_match_id text, p_mode text, p_map text, p_ranked boolean, p_online boolean,
   p_result text, p_kills int, p_deaths int, p_headshots int, p_score text, p_elo_change int,
-  p_details jsonb default null
+  p_details jsonb default null, p_assists int default 0
 ) returns void language plpgsql security definer set search_path = public as $$
 declare
   uid uuid := auth.uid();
   k int := least(greatest(p_kills, 0), 150);
+  ast int := least(greatest(coalesce(p_assists, 0), 0), 150);
   dth int := least(greatest(p_deaths, 0), 150);
   hs int := least(greatest(p_headshots, 0), k);
   gained int;
@@ -889,13 +895,13 @@ begin
   if uid is null then raise exception 'not signed in'; end if;
   if is_banned(uid) then raise exception 'account banned'; end if;
 
-  insert into match_history (user_id, match_id, mode, map, ranked, online, result, kills, deaths, headshots, score, elo_change, details)
-  values (uid, p_match_id, p_mode, p_map, p_ranked, p_online, p_result, k, dth, hs, p_score, coalesce(p_elo_change, 0), det)
+  insert into match_history (user_id, match_id, mode, map, ranked, online, result, kills, assists, deaths, headshots, score, elo_change, details)
+  values (uid, p_match_id, p_mode, p_map, p_ranked, p_online, p_result, k, ast, dth, hs, p_score, coalesce(p_elo_change, 0), det)
   on conflict (user_id, match_id) do nothing;
   if not found then return; end if;
 
   perform ensure_season(uid);
-  gained := k * 10 + case p_result when 'win' then 100 when 'draw' then 50 else 25 end;
+  gained := k * 10 + ast * 5 + case p_result when 'win' then 100 when 'draw' then 50 else 25 end;
   -- Admin XP events: {"multiplier": 2, "from": "<timestamp>", "until": "<timestamp>"} in app_settings.xp_boost.
   -- "from" is optional (scheduled events); without it the event runs until "until".
   gained := round(gained * coalesce((select least(greatest((value ->> 'multiplier')::numeric, 1), 3) from app_settings
@@ -907,7 +913,7 @@ begin
       matches = matches + 1,
       wins = wins + (p_result = 'win')::int,
       losses = losses + (p_result = 'loss')::int,
-      kills = kills + k, deaths = deaths + dth, headshots = headshots + hs,
+      kills = kills + k, assists = assists + ast, deaths = deaths + dth, headshots = headshots + hs,
       xp = xp + gained, pass_xp = pass_xp + gained, last_seen = now()
     where id = uid;
   else
@@ -1569,6 +1575,6 @@ begin
 end $$;
 
 revoke all on function public.report_ranked(text, uuid, uuid) from public, anon;
-revoke all on function public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int, jsonb) from public, anon;
+revoke all on function public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int, jsonb, int) from public, anon;
 grant execute on function public.report_ranked(text, uuid, uuid) to authenticated;
-grant execute on function public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int, jsonb) to authenticated;
+grant execute on function public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int, jsonb, int) to authenticated;

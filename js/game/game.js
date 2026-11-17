@@ -81,7 +81,7 @@ export class Game {
     this.dropSeq = 0;
     // Detailed personal stats for the stats page (weapons, accuracy, head-to-head, where you died).
     // multi: most kills within 5 s · streak: most kills without dying · long: longest kill (m).
-    this.myStats = { shots: 0, hits: 0, weapons: {}, victims: {}, killers: {}, deaths: [], nades: 0, plants: 0, defuses: 0, rescues: 0, multi: 0, streak: 0, long: 0 };
+    this.myStats = { assists: 0, shots: 0, hits: 0, weapons: {}, victims: {}, killers: {}, deaths: [], nades: 0, plants: 0, defuses: 0, rescues: 0, multi: 0, streak: 0, long: 0 };
     this.killTimes = []; this.killRun = 0;
     this.punch = 0;
     this.lookDX = 0; this.lookDY = 0;
@@ -1102,10 +1102,10 @@ export class Game {
       } else if (n.kind === 'he') {
         if (n.t >= g.fuse) this.detonate(i);
       } else if (n.kind === 'flash') {
-        if (n.t >= g.fuse) { this.flashBurst(n.pos.clone(), g); this.removeNade(i); }
+        if (n.t >= g.fuse) { this.flashBurst(n.pos.clone(), g, n.id); this.removeNade(i); }
       } else if (n.kind === 'smoke') {
         if ((n.still > 0.3 || n.t > 3) && n.t >= 1) {
-          this.effects.smoke(n.pos.clone().setY(floorY()), g.radius, g.duration);
+          this.effects.smoke(n.pos.clone().setY(floorY()), g.radius, g.duration, n.id);
           sfx.smoke(n.pos);
           // Smoke puts out fires it covers.
           for (const f of this.fires) if (f.pos.distanceTo(n.pos) < f.radius + g.radius) f.t = Math.min(f.t, 0.4);
@@ -1207,13 +1207,20 @@ export class Game {
     }
   }
 
-  // Flashbang: every client works out its own player's blindness; the host also blinds bots.
-  flashBurst(pos, g) {
+  // Flashbang: every client works out its own player's blindness; the host also blinds bots, and
+  // notes who flashed whom for assists.
+  flashBurst(pos, g, thrower = null) {
     this.effects.flash(pos);
     sfx.flash(pos);
     const lp = this.local;
     if (lp?.alive) this.hud.blind(this.blindAmount(lp, pos, g));
-    if (this.isHost) for (const [id, brain] of this.brains) { const p = this.players.get(id); if (p?.alive) brain.blind(this.blindAmount(p, pos, g)); }
+    if (!this.isHost) return;
+    for (const [id, brain] of this.brains) { const p = this.players.get(id); if (p?.alive) brain.blind(this.blindAmount(p, pos, g)); }
+    const by = this.players.get(thrower);
+    if (by) for (const p of this.players.values()) {
+      const t = p.alive && p !== by && this.isEnemy(by, p) ? this.blindAmount(p, pos, g) : 0;
+      if (t > 0.6) p.flashedBy = { id: by.id, until: performance.now() + t * 1000 };
+    }
   }
 
   blindAmount(p, pos, g) {
@@ -1642,6 +1649,11 @@ export class Game {
     const armor = Math.max(0, Math.round(victim.armor - armorLoss));
     const teamHit = attacker && attacker !== victim && !this.isEnemy(attacker, victim);
     if (attacker && !teamHit) attacker.damage += Math.min(victim.hp, dmg);
+    if (attacker && attacker !== victim && !teamHit) {
+      const now = performance.now();
+      victim.hitBy = (victim.hitBy || []).filter((h) => now - h.at < 5000);
+      victim.hitBy.push({ id: attacker.id, d: Math.min(victim.hp, dmg), at: now });
+    }
     if (teamHit) this.teamDamage(attacker, Math.min(victim.hp, dmg), hp <= 0);
     if (!victim.zombie) victim.hurtAt = performance.now();
     this.zombies?.award(attacker, victim, part, weapon, hp <= 0);
@@ -1656,7 +1668,9 @@ export class Game {
       const t = [...new Set(Array.isArray(tags) ? tags : [])].filter((x) => KILL_TAGS[x] && x !== 'tk' && x !== 'win');
       if (weapon !== 'fire' && this.fires.some((f) => Math.hypot(victim.pos.x - f.pos.x, victim.pos.z - f.pos.z) < f.radius && Math.abs(victim.pos.y - f.pos.y) < 1.2)) t.push('burn');
       if (teamHit) t.push('tk');
-      this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', t: t.length ? t : undefined, money: attacker ? attacker.money : 0 });
+      const ast = teamHit ? null : this.findAssist(attacker, victim, t.includes('smoke'));
+      victim.hitBy = null; victim.flashedBy = null;
+      this.broadcast('kill', { killer: attacker?.id ?? null, victim: victim.id, w: weapon, hs: part === 'head', t: t.length ? t : undefined, money: attacker ? attacker.money : 0, a: ast?.id, at: ast?.how });
       // The kill that ends the round or match gets a WIN tag once the rules decide it: straight away for
       // kill goals, or on the next rules update for eliminations (see tagWinningKill).
       this.lastKill = attacker && attacker !== victim && !teamHit && !this.zombies ? { victim: victim.id, at: performance.now() } : null;
@@ -1664,6 +1678,23 @@ export class Game {
       this.rules.onKill(attacker, victim, weapon, part);
       if (phase === 'live' && this.state.phase !== 'live') this.tagWinningKill();
     }
+  }
+
+  // Host: who gets the assist for a kill. Anyone else who did 30+ damage to the victim in the last
+  // 5 seconds (the most damage wins); failing that, whoever flashed the victim, or whoever threw the
+  // smoke the killer shot through. Never the killer, and never one of the victim's teammates.
+  findAssist(killer, victim, smoked) {
+    if (!killer || killer === victim || this.zombies) return null;
+    const ok = (id) => { const p = this.players.get(id); return p && p !== killer && p !== victim && this.isEnemy(p, victim) ? p : null; };
+    const now = performance.now(), sum = new Map();
+    for (const h of victim.hitBy || []) if (now - h.at < 5000 && ok(h.id)) sum.set(h.id, (sum.get(h.id) || 0) + h.d);
+    let best = null, most = 29.5;
+    for (const [id, d] of sum) if (d >= most) { best = id; most = d; }
+    if (best) return { id: best };
+    if (victim.flashedBy && victim.flashedBy.until > now && ok(victim.flashedBy.id)) return { id: victim.flashedBy.id, how: 'flash' };
+    const cloud = smoked && this.effects.smokeBlocks(killer.eye(), victim.pos.clone().setY(victim.pos.y + 1.1));
+    if (cloud && ok(cloud.owner)) return { id: cloud.owner, how: 'smoke' };
+    return null;
   }
 
   // Host: friendly fire adds up per human player per match, like CS2. A warning at the first team kill
@@ -1750,14 +1781,14 @@ export class Game {
 
   syncPayload() {
     const players = {};
-    for (const p of this.players.values()) players[p.id] = [p.money, p.kills, p.deaths, p.hp, p.alive ? 1 : 0, p.team, p.hs, Math.round(p.damage), p.score || 0];
+    for (const p of this.players.values()) players[p.id] = [p.money, p.kills, p.deaths, p.hp, p.alive ? 1 : 0, p.team, p.hs, Math.round(p.damage), p.score || 0, p.assists];
     const s = this.state;
     return { phase: s.phase, time: s.time, round: s.round, scores: s.scores, bomb: s.bomb, players, obj: s.obj, z: s.z, party: s.party };
   }
 
   statsPayload() {
     return [...this.players.values()].filter((p) => !p.zombie)
-      .map((p) => ({ id: p.id, name: p.name, team: p.team, k: p.kills, d: p.deaths, hs: p.hs, dmg: Math.round(p.damage), bot: p.isBot, gg: p.gg || 0, pts: p.score || 0 }));
+      .map((p) => ({ id: p.id, name: p.name, team: p.team, k: p.kills, a: p.assists, d: p.deaths, hs: p.hs, dmg: Math.round(p.damage), bot: p.isBot, gg: p.gg || 0, pts: p.score || 0 }));
   }
 
   // ───────────────────────── events (all clients) ─────────────────────────
@@ -1808,7 +1839,7 @@ export class Game {
             const p = this.players.get(id);
             if (!p) continue;
             [p.money, p.kills, p.deaths] = v;
-            p.hs = v[6] || 0; p.damage = v[7] || 0; p.score = v[8] || 0;
+            p.hs = v[6] || 0; p.damage = v[7] || 0; p.score = v[8] || 0; p.assists = v[9] || 0;
             if (p.team !== v[5]) this.setTeam(p, v[5]);
             if (!v[4] && p.alive) { p.alive = false; p.model?.die(1); }
           }
@@ -1835,11 +1866,16 @@ export class Game {
         v.model?.die(dir);
         const tk = k && k !== v && !this.isEnemy(k, v);
         if (k && k !== v && !tk) { k.kills++; if (d.hs) k.hs++; }
+        const ast = d.a ? this.players.get(d.a) : null;
+        if (ast) {
+          ast.assists++;
+          if (ast.isLocal) { this.myStats.assists++; this.hud.assist(); }
+        }
         if (k && k !== v && (this.isHost || this.zombies)) k.money = d.money ?? k.money;
         this.trackKill(k, v, d);
         this.training?.onKill(k, v);
         this.tutorial?.onKill(k, v);
-        if (!v.zombie) this.hud.killfeed(k, v, d.w, d.hs, d.t);
+        if (!v.zombie) this.hud.killfeed(k, v, d.w, d.hs, d.t, ast, d.at);
         else if (k?.isLocal) this.hud.zombieKill(d.hs, d.w);
         const fx = k && k !== v ? k.char?.killfx : null;
         if (fx && fx !== 'none' && KILL_FX[fx]) this.effects.killFx(fx, v.pos.clone().setY(v.pos.y + 1), KILL_FX[fx].color);
@@ -2586,7 +2622,7 @@ export class Game {
     } else if (d.winner >= 0 && lp) result = d.winner === lp.team ? 'win' : 'loss';
     if (d.reason === 'host-left' && d.winner === -2) result = 'draw';
     if (this.spectator) result = 'over';
-    const myStats = lp ? { k: lp.kills, d: lp.deaths, hs: lp.hs } : { k: 0, d: 0, hs: 0 };
+    const myStats = lp ? { k: lp.kills, a: lp.assists, d: lp.deaths, hs: lp.hs } : { k: 0, a: 0, d: 0, hs: 0 };
     this.endKillcam();
     this.app.storeReplay?.(this.rec.serialize({
       matchId: this.matchId, mode: this.mode.id, map: this.mapDef.id, mapRow: this.opts.mapRow || null, variant: this.variant, date: Date.now(), localId: this.localId,
@@ -2612,7 +2648,7 @@ export class Game {
     else this.hud.showResults(results);
     // Spectators and map-editor test matches don't count: no stats, drops, challenges or achievements.
     if (this.spectator || this.mapDef.id === 'draft') return;
-    this.app.recordLocalStats?.({ mode: this.mode.id, map: this.mapDef.id, result, online: this.online, k: myStats.k, d: myStats.d, hs: myStats.hs, details: this.myStats });
+    this.app.recordLocalStats?.({ mode: this.mode.id, map: this.mapDef.id, result, online: this.online, k: myStats.k, a: myStats.a, d: myStats.d, hs: myStats.hs, details: this.myStats });
     if (this.mode.kind !== 'training' && d.reason !== 'host-left') {
       const ms = this.myStats, knife = Object.entries(ms.weapons).reduce((a, [w, v]) => a + (isKnife(w) ? v.k : 0), 0);
       this.app.trackChallenges?.({ mode: this.mode.id, result, online: this.online, k: myStats.k, hs: myStats.hs, dmg: Math.round(lp?.damage || 0), weapons: ms.weapons, nades: ms.nades, plants: ms.plants, defuses: ms.defuses, rescues: ms.rescues, knife });
@@ -2637,7 +2673,7 @@ export class Game {
         }
         await api.recordMatch({
           matchId: this.matchId, mode: this.mode.id, map: this.mapDef.id, ranked: !!this.mode.ranked, online: this.online,
-          result, kills: myStats.k, deaths: myStats.d, headshots: myStats.hs, score, eloChange, details: this.myStats,
+          result, kills: myStats.k, assists: myStats.a, deaths: myStats.d, headshots: myStats.hs, score, eloChange, details: this.myStats,
         });
         this.hud.setEloChange(this.mode.ranked ? eloChange : null);
         this.app.refreshProfile?.();

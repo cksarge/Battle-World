@@ -264,12 +264,12 @@ export class Hud {
     // Zombies shows points (everyone's), infection shows match points.
     const pts = kind === 'zombies' ? (p) => p.money : kind === 'infect' || this.g.party?.points ? (p) => p.score || 0 : null;
     if (pts) players.sort((a, b) => pts(b) - pts(a));
-    return `<table class="tbl"><tr><th>Player</th>${pts ? '<th class="num">PTS</th>' : ''}${showMoney ? '<th class="num">$</th>' : ''}<th class="num">K</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${this.g.online ? '<th class="num">ELO</th>' : ''}</tr>
+    return `<table class="tbl"><tr><th>Player</th>${pts ? '<th class="num">PTS</th>' : ''}${showMoney ? '<th class="num">$</th>' : ''}<th class="num">K</th><th class="num">A</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${this.g.online ? '<th class="num">ELO</th>' : ''}</tr>
       ${(pts ? players : players.sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)).map((p) => `<tr class="${p === lp ? 'me' : ''} ${p.alive ? '' : 'dead'}">
         <td>${named(p)}${this.g.state.bomb?.carrier === p.id && lp && p.team === lp.team ? ' <span style="color:var(--bad)">◆</span>' : ''}</td>
         ${pts ? `<td class="num">${pts(p).toLocaleString()}</td>` : ''}
         ${showMoney ? `<td class="num">${lp && p.team === lp.team ? '$' + p.money : ''}</td>` : ''}
-        <td class="num">${p.kills}</td><td class="num">${p.deaths}</td><td class="num">${p.hs}</td><td class="num">${Math.round(p.damage)}</td>
+        <td class="num">${p.kills}</td><td class="num">${p.assists}</td><td class="num">${p.deaths}</td><td class="num">${p.hs}</td><td class="num">${Math.round(p.damage)}</td>
         ${this.g.online ? `<td class="num">${p.isBot ? '—' : p.elo}</td>` : ''}</tr>`).join('')}</table>`;
   }
 
@@ -433,14 +433,16 @@ export class Hud {
     }, kind === 'step' ? 500 : 1100);
   }
 
-  killfeed(k, v, w, hs, tags) {
+  // `ast` is the player who got the assist; `how` is 'flash' or 'smoke' when it came from a grenade.
+  killfeed(k, v, w, hs, tags, ast = null, how = null) {
     const cls = (p) => (SOLO_KINDS.has(this.g.mode.kind) ? 'ffa' : TEAM_CLASS[p.team]);
     const e = document.createElement('div');
     const lp = this.g.local;
-    e.className = 'kf' + ((k && k === lp) || v === lp ? ' mine' : '');
+    e.className = 'kf' + ((k && k === lp) || v === lp || ast === lp ? ' mine' : '');
     e.dataset.v = v.id;
     const wname = itemInfo(w)?.name || { bomb: 'Charge', barrel: 'Exploding barrel', fire: 'Incendiary', fall: 'Fall', claws: 'Claws', bloat: 'Bloater' }[w] || w;
-    e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${named(k)}</span>` : ''}<span class="w">${esc(wname)}</span>${killTagsHTML(hs, tags)}<span class="${cls(v)}">${named(v)}</span>`;
+    const assist = k && k !== v && ast ? `<span class="kf-plus">+</span><span class="${cls(ast)}">${named(ast)}</span>${how ? `<span class="kt kt-assist" title="${how === 'flash' ? 'Flashed them' : 'Smoked them'}">ASSIST</span>` : ''}` : '';
+    e.innerHTML = `${k && k !== v ? `<span class="${cls(k)}">${named(k)}</span>${assist}` : ''}<span class="w">${esc(wname)}</span>${killTagsHTML(hs, tags)}<span class="${cls(v)}">${named(v)}</span>`;
     this.el.kf.prepend(e);
     while (this.el.kf.children.length > 6) this.el.kf.lastChild.remove();
     setTimeout(() => e.remove(), 7000);
@@ -459,6 +461,15 @@ export class Hud {
   zombieKill(hs, w) {
     const melee = WEAPONS[w]?.type === 'knife';
     this.zpoints(melee ? POINTS.melee : hs ? POINTS.head : POINTS.kill, true);
+  }
+
+  // "+Assist" next to the crosshair when the local player gets an assist.
+  assist() {
+    const e = document.createElement('span');
+    e.className = 'ast';
+    e.textContent = '+Assist';
+    this.el.zpts.appendChild(e);
+    setTimeout(() => e.remove(), 1200);
   }
 
   zpoints(n, big = false) {
@@ -483,14 +494,14 @@ export class Hud {
     const canRate = (s) => social && !s.bot && s.id !== g.localId && /^[0-9a-f-]{36}$/.test(s.id);
     const rateCell = (s) => (social ? `<td class="rate">${canRate(s) ? `<button class="btn tiny" data-commend="${esc(s.id)}" title="Commend ${esc(s.name)}">👍</button><button class="btn tiny ghost" data-report="${esc(s.id)}" title="Report ${esc(s.name)}">⚑</button>` : ''}</td>` : '');
     const pts = g.mode.kind === 'infect' || !!g.party?.points, teamCol = !POOL_KINDS.has(g.mode.kind);
-    const rows = [...stats].sort((a, b) => (pts ? b.pts - a.pts : 0) || b.k - a.k).map((s) => `<tr class="${s.id === g.localId ? 'me' : ''}"><td>${named({ name: s.name, char: g.players.get(s.id)?.char })}</td>${teamCol ? `<td style="color:var(--${TEAM_CLASS[s.team]})">${SIDED_KINDS.has(g.mode.kind) ? (s.team === 0 ? 'ATK' : 'DEF') : 'T' + (s.team + 1)}</td>` : ''}${pts ? `<td class="num">${s.pts}</td>` : ''}<td class="num">${s.k}</td><td class="num">${s.d}</td><td class="num">${s.hs}</td><td class="num">${s.dmg}</td>${rateCell(s)}</tr>`).join('');
+    const rows = [...stats].sort((a, b) => (pts ? b.pts - a.pts : 0) || b.k - a.k).map((s) => `<tr class="${s.id === g.localId ? 'me' : ''}"><td>${named({ name: s.name, char: g.players.get(s.id)?.char })}</td>${teamCol ? `<td style="color:var(--${TEAM_CLASS[s.team]})">${SIDED_KINDS.has(g.mode.kind) ? (s.team === 0 ? 'ATK' : 'DEF') : 'T' + (s.team + 1)}</td>` : ''}${pts ? `<td class="num">${s.pts}</td>` : ''}<td class="num">${s.k}</td><td class="num">${s.a ?? 0}</td><td class="num">${s.d}</td><td class="num">${s.hs}</td><td class="num">${s.dmg}</td>${rateCell(s)}</tr>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay"><div class="panel" style="width:min(720px,94vw)">
       <div style="text-align:center"><div class="hud-num" style="font-size:64px;color:${color}">${title}</div>
       <div class="muted">${esc(g.mode.name)} · ${esc(g.mapDef.name)} · ${esc(score)}</div>
       ${reasonText ? `<div class="muted small">${esc(reasonText)}</div>` : ''}
       <div class="elo" style="margin:10px 0;font-family:var(--display);font-size:22px">${g.mode.ranked && g.app.user ? 'Updating rating…' : ''}</div>
       <div class="drop"></div></div>
-      <table class="tbl"><tr><th>Player</th>${teamCol ? '<th>Team</th>' : ''}${pts ? '<th class="num">PTS</th>' : ''}<th class="num">K</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${social ? '<th></th>' : ''}</tr>${rows}</table>
+      <table class="tbl"><tr><th>Player</th>${teamCol ? '<th>Team</th>' : ''}${pts ? '<th class="num">PTS</th>' : ''}<th class="num">K</th><th class="num">A</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${social ? '<th></th>' : ''}</tr>${rows}</table>
       <div class="row" style="justify-content:center;margin-top:16px"><button class="btn" data-a="replay">Watch replay</button><button class="btn primary" data-a="menu">Back to menu</button></div>
     </div></div>`;
     this.el.ovl.querySelector('[data-a=menu]').onclick = () => this.g.leave();

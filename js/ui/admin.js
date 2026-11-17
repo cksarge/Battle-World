@@ -219,7 +219,7 @@ export class AdminPanel {
       <div class="st-nums small">
         <div><b>${p.elo}</b><span>Rating (peak ${p.peak_elo})</span></div><div><b>${p.ranked_wins}–${p.ranked_losses}</b><span>Ranked</span></div>
         <div><b>${p.wins}–${p.losses}</b><span>Online W–L</span></div><div><b>${p.kills}/${p.deaths}</b><span>Kills / deaths</span></div>
-        <div><b>${p.headshots}</b><span>Headshots</span></div><div><b>${(p.xp || 0).toLocaleString()}</b><span>XP (season ${(p.pass_xp || 0).toLocaleString()})</span></div></div>
+        <div><b>${p.headshots}</b><span>Headshots</span></div><div><b>${p.assists || 0}</b><span>Assists</span></div><div><b>${(p.xp || 0).toLocaleString()}</b><span>XP (season ${(p.pass_xp || 0).toLocaleString()})</span></div></div>
       <div class="m-sub">Commends: ${commends} · Reports against: ${d.reports_against.length} · Reports filed: ${d.reports_filed}</div>
       <div class="m-sub">Devices: ${d.devices ?? 0}${d.shared_accounts?.length ? ` · Shares a device with ${d.shared_accounts.map((o) => `<a href="#" data-player="${esc(o.id)}">${esc(o.username)}</a>`).join(', ')}` : ''}</div>
       <div class="row" style="gap:8px;align-items:center"><span class="tag ${live ? 'ok' : ''}">${esc(liveText)}</span>${live?.match?.id && p.id !== this.app.user?.id ? '<button class="btn tiny primary" data-watch>Spectate match</button>' : ''}</div>

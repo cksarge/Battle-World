@@ -1,6 +1,13 @@
 # Changelog
 
-#### 4.3.1 · 2026-11-16
+#### 4.3.2 · 2026-11-16
+
+- **Assists**: you get one when you do at least 30 damage to someone in the 5 seconds before a teammate (or anyone, in free-for-all) kills them
+  - If nobody else damaged them, flashing the victim or throwing the smoke the killer shot through also counts, marked with a small ASSIST tag
+  - Your name shows next to the killer's in the kill feed (Killer + You), with a "+Assist" popup by your crosshair
+  - A new A column on the scoreboard and end-of-match table, assists on your profile and stats page, and 5 XP for each one
+
+#### 4.3.1 · 2026-11-16 · [28774a9](https://github.com/cksarge/John-Paul-Simulator/commit/28774a9)
 
 - Two new awarded calling cards, given out by the developers:
   - Contributor: for sending in 5 useful bug reports, feedback or ideas

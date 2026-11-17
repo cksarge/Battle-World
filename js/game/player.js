@@ -44,7 +44,7 @@ export class Player {
     this.hp = 100; this.armor = 0; this.helmet = false;
     this.alive = false;
     this.money = 800;
-    this.kills = 0; this.deaths = 0; this.hs = 0; this.score = 0; this.damage = 0;
+    this.kills = 0; this.assists = 0; this.deaths = 0; this.hs = 0; this.score = 0; this.damage = 0;
     this.resetKit();
     this.buffer = [];
     this.netSpeed = 0;
