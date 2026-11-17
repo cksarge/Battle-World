@@ -105,6 +105,41 @@ export function cardImage(id, w = 480, h = 120) {
       g.globalAlpha = 1; g.fillStyle = '#fff';
       for (let i = 0; i < 40; i++) g.fillRect(rnd() * w, rnd() * h * 0.5, 1.5, 1.5);
       break;
+    case 'bug': {
+      // Contributor: an issue list with ticked boxes on the left, a glowing bug on the right.
+      for (let i = 0, y = h * 0.16; i < 5; i++, y += h * 0.15) {
+        g.globalAlpha = 0.7; g.strokeStyle = fg; g.lineWidth = 2;
+        g.strokeRect(w * 0.05, y, h * 0.08, h * 0.08);
+        if (i < 4) { g.beginPath(); g.moveTo(w * 0.05 + h * 0.015, y + h * 0.04); g.lineTo(w * 0.05 + h * 0.035, y + h * 0.065); g.lineTo(w * 0.05 + h * 0.07, y + h * 0.01); g.stroke(); }
+        g.globalAlpha = 0.3 + rnd() * 0.25; g.fillStyle = fg; g.fillRect(w * 0.05 + h * 0.13, y + h * 0.02, 40 + rnd() * 110, h * 0.045);
+      }
+      g.globalAlpha = 1;
+      const bx = w * 0.8, by = h * 0.52, r = h * 0.2;
+      g.shadowColor = fg2; g.shadowBlur = h * 0.15;
+      g.strokeStyle = fg2; g.lineWidth = Math.max(2, h * 0.03);
+      for (const s of [-1, 1]) for (let k = -1; k <= 1; k++) { g.beginPath(); g.moveTo(bx + s * r * 0.7, by + k * r * 0.55); g.lineTo(bx + s * r * 1.5, by + k * r * 0.8 - r * 0.15); g.stroke(); }
+      g.beginPath(); g.moveTo(bx - r * 0.3, by - r * 1.1); g.lineTo(bx - r * 0.6, by - r * 1.6); g.moveTo(bx + r * 0.3, by - r * 1.1); g.lineTo(bx + r * 0.6, by - r * 1.6); g.stroke();
+      g.fillStyle = fg2; g.beginPath(); g.ellipse(bx, by + r * 0.15, r * 0.75, r, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(bx, by - r * 0.9, r * 0.42, 0, Math.PI * 2); g.fill();
+      g.shadowBlur = 0; g.strokeStyle = bg; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(bx, by - r * 0.75); g.lineTo(bx, by + r * 1.1); g.stroke();
+      break;
+    }
+    case 'code': {
+      // Developer: lines of code on the left, a glowing </> on the right.
+      g.font = `${Math.round(h * 0.09)}px monospace`;
+      for (let y = h * 0.14, i = 0; y < h * 0.95; y += h * 0.13, i++) {
+        let x = w * 0.04 + (i % 3) * h * 0.12;
+        for (let k = 0; k < 4; k++) { const len = 12 + rnd() * 50; g.globalAlpha = 0.25 + rnd() * 0.35; g.fillStyle = rnd() < 0.3 ? fg2 : fg; g.fillRect(x, y, len, h * 0.045); x += len + 6; if (x > w * 0.55) break; }
+      }
+      g.globalAlpha = 1;
+      g.font = `bold ${Math.round(h * 0.55)}px monospace`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.shadowColor = fg; g.shadowBlur = h * 0.18;
+      g.fillStyle = fg; g.fillText('</>', w * 0.8, h * 0.52);
+      g.shadowBlur = 0; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+      break;
+    }
     default: break;
   }
   g.globalAlpha = 1;

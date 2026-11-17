@@ -142,6 +142,7 @@ export class UI {
   // Mastery finishes depend on the weapon: pass it, or leave it out to ask "on any weapon".
   owned(kind, id, weapon = null) {
     const def = KINDS[kind]?.defs[id];
+    if (def?.awarded && this.app.isAdmin) return true;
     let lvl = 0;
     if (def?.mastery) lvl = weapon ? masteryLevel(this.app.achievements, weapon) : Math.max(...Object.keys(WEAPONS).map((w) => masteryLevel(this.app.achievements, w)));
     return owns(this.app.inventory, kind, id, this.milestoneStats(), lvl);
@@ -1021,7 +1022,7 @@ export class UI {
     const app = this.app, kind = this.armoryKind;
     const c = { ...app.char, skins: { ...(app.char.skins || {}) }, mods: { ...(app.char.mods || {}) }, emotes: [...(app.char.emotes || [])] };
     const defs = KINDS[kind].defs;
-    const total = Object.values(KINDS).reduce((n, k) => n + Object.keys(k.defs).length, 0);
+    const total = Object.entries(KINDS).reduce((n, [kk, k]) => n + Object.keys(k.defs).filter((id) => !k.defs[id].awarded || this.owned(kk, id)).length, 0);
     const have = Object.entries(KINDS).reduce((n, [k, d]) => n + Object.keys(d.defs).filter((id) => this.owned(k, id)).length, 0);
     const wid = this.armoryWeapon;
     const current = kind === 'finish' ? c.skins[wid] || 'factory' : kind === 'outfit' ? c.outfit || 'standard' : kind === 'card' ? c.card : kind === 'effect' ? c.killfx : null;
@@ -1029,9 +1030,9 @@ export class UI {
       const own = this.owned(kind, id, kind === 'finish' ? wid : null), r = RARITIES[d.rarity], sw = itemSwatch(kind, id);
       const eq = kind === 'emote' ? c.emotes.includes(id) : id === current;
       const ss = d.season ? seasonById(d.season) : null;
-      const lockText = d.mastery ? `Reach mastery level ${d.mastery} with the ${WEAPONS[wid]?.name || 'weapon'}` : d.milestone ? d.milestone.label : ss ? (d.rankedReward ? `Season ${ss.num} ranked reward` : `Season ${ss.num} reward track`) + (Date.parse(ss.start) > Date.now() ? ` · from ${fmtDate(ss.start)}` : '') : 'Earned from match drops';
+      const lockText = d.awarded ? `Awarded by the developers: ${d.awarded}` : d.mastery ? `Reach mastery level ${d.mastery} with the ${WEAPONS[wid]?.name || 'weapon'}` : d.milestone ? d.milestone.label : ss ? (d.rankedReward ? `Season ${ss.num} ranked reward` : `Season ${ss.num} reward track`) + (Date.parse(ss.start) > Date.now() ? ` · from ${fmtDate(ss.start)}` : '') : 'Earned from match drops';
       return `<button class="item-card ${kind === 'card' ? 'wide' : ''} ${eq ? 'equipped' : ''} ${own ? '' : 'locked'}" data-item="${id}" style="--rc:${r.color}" title="${esc(own ? d.name : lockText)}">
-        <span class="sw" style="background:${sw.bg}">${sw.glyph}</span><b>${esc(d.name)}</b><em>${own ? r.name : d.mastery ? `Mastery ${d.mastery}` : d.milestone ? 'Milestone' : ss ? `Season ${ss.num}` : 'Locked'}</em>
+        <span class="sw" style="background:${sw.bg}">${sw.glyph}</span><b>${esc(d.name)}</b><em>${own ? r.name : d.awarded ? 'Awarded' : d.mastery ? `Mastery ${d.mastery}` : d.milestone ? 'Milestone' : ss ? `Season ${ss.num}` : 'Locked'}</em>
         ${kind === 'emote' && eq ? `<i class="slot-tag">${WHEEL[c.emotes.indexOf(id)]}</i>` : ''}</button>`;
     };
     const classes = Object.keys(CLASS_NAMES);
@@ -1066,7 +1067,7 @@ export class UI {
       if (kind === 'emote') this.scene?.emote(id);
       if (kind === 'finish' && !own) { const prev = { ...c, skins: { ...c.skins, [wid]: id } }; this.scene?.setChar(prev, wid); this.scene?.faceFront(); }
       if (kind === 'outfit' && !own) { this.scene?.setChar({ ...c, outfit: id }, 'ar7'); this.scene?.faceFront(); }
-      if (!own) { const ss = d.season ? seasonById(d.season) : null; this.toast(`${d.name} is locked. ${d.mastery ? `Reach mastery level ${d.mastery} with the ${WEAPONS[wid]?.name} to unlock it for that weapon.` : d.milestone ? d.milestone.label + ' to unlock it.' : ss ? `It's a Season ${ss.num} (${ss.name}) ${d.rankedReward ? 'ranked reward' : 'reward-track item'}${Date.parse(ss.start) > Date.now() ? `, available from ${fmtDate(ss.start)}` : ''}.` : 'Win matches to earn drops.'}`, 'bad'); return; }
+      if (!own) { const ss = d.season ? seasonById(d.season) : null; this.toast(`${d.name} is locked. ${d.awarded ? `The developers award it to players who have: ${d.awarded.charAt(0).toLowerCase() + d.awarded.slice(1)}.` : d.mastery ? `Reach mastery level ${d.mastery} with the ${WEAPONS[wid]?.name} to unlock it for that weapon.` : d.milestone ? d.milestone.label + ' to unlock it.' : ss ? `It's a Season ${ss.num} (${ss.name}) ${d.rankedReward ? 'ranked reward' : 'reward-track item'}${Date.parse(ss.start) > Date.now() ? `, available from ${fmtDate(ss.start)}` : ''}.` : 'Win matches to earn drops.'}`, 'bad'); return; }
       if (kind === 'finish') { if (id === 'factory') delete c.skins[wid]; else c.skins[wid] = id; }
       else if (kind === 'outfit') c.outfit = id;
       else if (kind === 'card') c.card = id;

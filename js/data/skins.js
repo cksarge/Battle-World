@@ -5,6 +5,9 @@ export const RARITIES = {
   rare: { name: 'Rare', color: '#4ea3ff', weight: 14 },
   epic: { name: 'Epic', color: '#c06cff', weight: 6 },
   legendary: { name: 'Legendary', color: '#f2a33a', weight: 2 },
+  // Never dropped: an admin gives these to people who helped make the game (see `awarded` below).
+  contributor: { name: 'Contributor', color: '#7cffb2', weight: 0 },
+  developer: { name: 'Developer', color: '#00e5ff', weight: 0 },
 };
 
 // pattern: how the finish is drawn on the gun body. palette: colours used by the pattern.
@@ -112,6 +115,9 @@ export const CALLING_CARDS = {
   s5_ranked: { name: 'S5 Competitor', rarity: 'epic', colors: ['#0a0614', '#c06cff', '#ffd6ff'], motif: 'chevrons', season: 's5', rankedReward: true },
   veteran: { name: 'Veteran', rarity: 'epic', colors: ['#1d1f18', '#c9b46a'], motif: 'chevrons', milestone: { stat: 'matches', n: 50, label: 'Play 50 online matches' } },
   headhunter: { name: 'Headhunter', rarity: 'legendary', colors: ['#1a0606', '#ff3030'], motif: 'crosshair', milestone: { stat: 'headshots', n: 250, label: 'Land 250 headshot kills' } },
+  // Awarded cards: an admin gives them from the player's page in the admin panel (admins have both).
+  contributor: { name: 'Contributor', rarity: 'contributor', colors: ['#06120c', '#7cffb2', '#ffd23f'], motif: 'bug', awarded: 'Sent in 5 useful bug reports, feedback or ideas' },
+  developer: { name: 'Developer', rarity: 'developer', colors: ['#04070c', '#00e5ff', '#7cffb2'], motif: 'code', awarded: 'Helped write the game’s code: a GitHub collaborator, or had a pull request merged' },
 };
 
 // Effects that play where your victim falls. Everyone in the match sees them.
@@ -191,7 +197,7 @@ export function normalizeInventory(inv) {
 export function rollDrop(inv, rng = Math.random) {
   const pool = [];
   for (const [kind, k] of Object.entries(KINDS)) {
-    for (const [id, d] of Object.entries(k.defs)) if (!d.starter && !d.milestone && !d.season && !d.mastery) pool.push({ kind, id, rarity: d.rarity, name: d.name });
+    for (const [id, d] of Object.entries(k.defs)) if (!d.starter && !d.milestone && !d.season && !d.mastery && !d.awarded) pool.push({ kind, id, rarity: d.rarity, name: d.name });
   }
   const owned = (it) => (inv[KINDS[it.kind].key] || []).includes(it.id);
   const fresh = pool.filter((it) => !owned(it));

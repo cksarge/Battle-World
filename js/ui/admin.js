@@ -2,11 +2,14 @@
 // (public.admins, which only holds Carter's account), and every action here goes through an
 // admin_* database function that re-checks that on the server. Hiding or showing this screen
 // in the browser grants nothing.
-import { KINDS } from '../data/skins.js';
+import { KINDS, CALLING_CARDS } from '../data/skins.js';
 import { MODES, rankBadge } from '../data/modes.js';
 import { MAPS } from '../data/maps.js';
 import { FEATURED_SLOTS, registerRow } from '../data/custommaps.js';
 import { REPORT_REASONS, COMMENDS, FEEDBACK_KINDS, esc, banUntil, isActive } from './social.js';
+
+// Calling cards admins hand out by hand (Contributor, Developer), with a button each on a player's page.
+const AWARDED = Object.entries(CALLING_CARDS).filter(([, d]) => d.awarded);
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
 // A "Starts" picker: empty means now. Returns an ISO time, or null for now; false if it's in the past.
@@ -227,6 +230,7 @@ export class AdminPanel {
         <button class="btn tiny" data-act="kick" data-u="${p.id}">Kick from match</button><button class="btn tiny" data-act="warn" data-u="${p.id}">Warn</button>`}
         <button class="btn tiny" data-act="rename" data-u="${p.id}" data-name="${esc(p.username)}">Rename</button>
         <button class="btn tiny" data-act="stats" data-u="${p.id}">Edit stats</button>
+        ${AWARDED.map(([id, d]) => { const has = (p.inventory?.cards || []).includes(id); return `<button class="btn tiny ${has ? 'ghost' : ''}" data-act="${has ? 'unaward' : 'award'}" data-item="${id}" data-u="${p.id}" title="${esc(d.awarded)}">${has ? 'Remove' : 'Give'} ${esc(d.name)} card</button>`; }).join('')}
         <button class="btn tiny" data-act="grant" data-u="${p.id}">Give item</button>
         <button class="btn tiny" data-act="revoke" data-u="${p.id}">Remove item</button>
         <button class="btn tiny danger" data-act="reset" data-u="${p.id}">Reset stats</button>
@@ -299,6 +303,11 @@ export class AdminPanel {
           v = await ask(this.ui, 'Reset all stats', [], { confirm: 'Reset everything', danger: true, note: 'Rating back to 1000; wins, kills, XP and season progress to zero. Match history is kept.' });
           if (!v) return;
           await this.call('reset_stats', { p_user: u }, 'Stats reset');
+        } else if (act === 'award' || act === 'unaward') {
+          const d = CALLING_CARDS[b.dataset.item];
+          v = await ask(this.ui, `${act === 'award' ? 'Give' : 'Remove'} the ${d.name} card`, [], { confirm: act === 'award' ? 'Give' : 'Remove', danger: act === 'unaward', note: `For players who have: ${d.awarded.charAt(0).toLowerCase() + d.awarded.slice(1)}. It reaches their inventory within 30 seconds.` });
+          if (!v) return;
+          await this.call('grant_item', { p_user: u, p_kind: 'card', p_item: b.dataset.item, p_revoke: act === 'unaward' }, act === 'award' ? `${d.name} card given` : `${d.name} card removed`);
         } else if (act === 'grant' || act === 'revoke') {
           const items = Object.entries(KINDS).flatMap(([k, def]) => Object.entries(def.defs).filter(([, x]) => !x.starter && !x.milestone).map(([id, x]) => [`${k}:${id}`, `${def.label} — ${x.name}${x.season ? ` (${x.season.toUpperCase()})` : ''}`]));
           v = await ask(this.ui, act === 'grant' ? 'Give an item' : 'Remove an item', [{ id: 'item', label: 'Item', type: 'select', options: items, value: items[0][0] }], { confirm: act === 'grant' ? 'Give' : 'Remove', danger: act === 'revoke', note: 'It reaches their inventory the next time their game checks in (within 30 seconds).' });

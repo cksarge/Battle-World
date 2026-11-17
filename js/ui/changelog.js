@@ -27,7 +27,7 @@ export async function latestCommit() {
 
 // "Version x.y.z (abc1234)": the version opens the changelog, the commit opens on GitHub.
 export function versionHTML() {
-  return `<a href="#" class="foot-link" data-changelog>Version ${esc(GAME_VERSION)}</a><span data-commit></span>`;
+  return `<a href="#" class="foot-link" data-changelog>Version ${esc(GAME_VERSION)}</a><span data-commit></span> <a class="foot-link" href="https://github.com/${GITHUB_REPO}" target="_blank" rel="noopener">GitHub</a>`;
 }
 
 export function bindVersion(root, ui) {

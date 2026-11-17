@@ -1,6 +1,13 @@
 # Changelog
 
-### 4.3.0 · 2026-11-16
+#### 4.3.1 · 2026-11-16
+
+- Two new awarded calling cards, given out by the developers:
+  - Contributor: for sending in 5 useful bug reports, feedback or ideas
+  - Developer: for helping write the game's code, as a GitHub collaborator or with a merged pull request
+- A GitHub link next to the version number at the bottom of the menu
+
+### 4.3.0 · 2026-11-16 · [a266f8d](https://github.com/cksarge/John-Paul-Simulator/commit/a266f8d)
 
 - **Gun attachments**: one slot per gun and the same four choices on every gun, each with one upside and one downside
   - Grip (less recoil, a little slower), Laser (tighter hip-fire, slower draw), Extended Mag (half again as many rounds, slower reload) and Suppressor (quiet, no tracers and firing doesn't show you on radar, but damage drops off sooner)
