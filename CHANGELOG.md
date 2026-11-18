@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.7.1 · 2026-11-17
+#### 4.7.2 · 2026-11-17
+
+- Fixed starting a round on top of a box instead of at your spawn: if you were climbing onto a ledge (jumping at a box) when the round ended, the climb carried on after you respawned and pulled you back to the box once buy time ended
+
+#### 4.7.1 · 2026-11-17 · [898b6b2](https://github.com/cksarge/John-Paul-Simulator/commit/898b6b2)
 
 - Hair fixed on every style: it now sits right on the head with a proper hairline instead of floating pieces or a bald patch on top
   - Short and swept hair have their volume on top of the head, long hair falls from the head down past the shoulders, the mohawk crest sits on the skull, and the ponytail ties on at the back

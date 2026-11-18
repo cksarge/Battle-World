@@ -607,6 +607,21 @@ test('party modes: listed as pool modes with goals and maps', () => {
   return bad;
 });
 
+const { Player } = await import('../js/game/player.js');
+test('players: a spawn teleport cancels a mantle, ladder climb or fall in progress', () => {
+  const p = new Player({ id: 'p', name: 'P', team: 0, char: OPERATORS[0].char });
+  // Mid-air, climbing onto a box when the round ends.
+  p.mantle = { from: new THREE.Vector3(10, 0.6, 10), to: new THREE.Vector3(10.5, 0.5, 10), t: 0.4 };
+  Object.assign(p, { climbing: true, onGround: false, airVy: -4, groundY: 0.5 });
+  p.vel.set(1, -4, 0);
+  p.snapTo(40, 0, 30, 1.2);
+  const bad = [];
+  if (p.mantle) bad.push('mantle survives the teleport (it would carry the player back to the box)');
+  if (p.climbing || !p.onGround || p.airVy !== 0 || p.groundY !== 0) bad.push('climb / air state survives the teleport');
+  if (p.pos.x !== 40 || p.pos.z !== 30 || p.vel.lengthSq() !== 0) bad.push('not at the spawn at rest');
+  return bad;
+});
+
 console.log(failures.join('\n'));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

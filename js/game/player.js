@@ -197,6 +197,13 @@ export class Player {
   snapTo(x, y, z, yaw) {
     this.pos.set(x, y, z);
     this.vel.set(0, 0, 0);
+    // A teleport (spawn, round start) cancels anything mid-move: a mantle still running would
+    // otherwise carry the player from the spawn back to the ledge they were climbing.
+    this.mantle = null;
+    this.climbing = false;
+    this.onGround = true;
+    this.airVy = 0;
+    this.groundY = y;
     if (yaw !== undefined) this.yaw = yaw;
     this.pitch = 0;
     this.buffer = [];
