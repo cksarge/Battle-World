@@ -9,9 +9,9 @@ import { WEAPONS } from '../data/weapons.js';
 // mesh per material, so a gun costs a handful of draw calls however detailed it is. The merged
 // geometry is cached per gun + attachment; only the materials change with the finish.
 
-const rng = (seed) => { let s = seed % 2147483647 || 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
+export const rng = (seed) => { let s = seed % 2147483647 || 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 
-function canvasTex(S, draw, { srgb = true, w = S } = {}) {
+export function canvasTex(S, draw, { srgb = true, w = S } = {}) {
   const c = document.createElement('canvas');
   c.width = w; c.height = S;
   draw(c.getContext('2d'), w, S, c);
@@ -23,7 +23,7 @@ function canvasTex(S, draw, { srgb = true, w = S } = {}) {
 }
 
 // Tileable value noise in 0..1, summed over octaves of [cells, weight].
-function noiseField(S, seed, octaves = [[4, 1], [8, 0.5], [16, 0.25], [32, 0.12]]) {
+export function noiseField(S, seed, octaves = [[4, 1], [8, 0.5], [16, 0.25], [32, 0.12]]) {
   const out = new Float32Array(S * S), rnd = rng(seed);
   let total = 0;
   for (const [n, amp] of octaves) {
@@ -390,7 +390,7 @@ function box(w, h, d, x, y, z, key, o = {}) {
 
 // Side profile: pts are [z, y] around the outline (holes likewise), extruded `w` wide across the gun
 // and centred on o.x. o.y / o.z move it and o.rx tilts it about that point.
-function profGeo(pts, w, o = {}) {
+export function profGeo(pts, w, o = {}) {
   const bev = o.bevel ?? Math.min(0.0025, w * 0.22);
   const shape = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y)));
   for (const h of o.holes || []) shape.holes.push(new THREE.Path(h.map(([z, y]) => new THREE.Vector2(z, y))));
@@ -1516,7 +1516,7 @@ function gunGeometry(id, att) {
 // Object-space box projection per triangle, ~30 cm per texture repeat, so patterns keep the same
 // scale on every part. u follows the length of the gun on the sides and top.
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
-function boxUV(geo, s = 1 / 0.3) {
+export function boxUV(geo, s = 1 / 0.3) {
   const p = geo.attributes.position, uv = new Float32Array(p.count * 2);
   for (let i = 0; i + 2 < p.count; i += 3) {
     _a.fromBufferAttribute(p, i); _b.fromBufferAttribute(p, i + 1); _c.fromBufferAttribute(p, i + 2);

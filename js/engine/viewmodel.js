@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { buildGun } from './models.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { buildGun, operatorMat } from './models.js';
 import { WEAPONS, GRENADES, PROJECTILES } from '../data/weapons.js';
 
 const OFFSETS = {
@@ -20,13 +21,15 @@ const typeOf = (id) => WEAPONS[id]?.type || (GRENADES[id] || PROJECTILES[id] ? '
 const isPistol = (id) => typeOf(id) === 'pistol';
 const isOneHand = (id) => typeOf(id) === 'knife' || typeOf(id) === 'nade';
 
+// Forearm in a rounded sleeve with a cuff, and a gloved hand wrapped around the grip.
 function sleeve(len, mat, glove) {
   const g = new THREE.Group();
-  const s = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.075, len), mat);
-  s.position.z = len / 2 + 0.04;
-  const h = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.06, 0.1), glove);
-  h.position.z = 0.0;
-  g.add(s, h);
+  const add = (geo, m, x, y, z, rx = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.x = rx; g.add(o); return o; };
+  add(new THREE.CylinderGeometry(0.036, 0.044, len, 16), mat, 0, 0, len / 2 + 0.05, Math.PI / 2);
+  add(new THREE.TorusGeometry(0.037, 0.009, 8, 18), mat, 0, 0, 0.055);
+  add(new RoundedBoxGeometry(0.062, 0.052, 0.085, 2, 0.018), glove, 0, 0, 0.0);
+  add(new RoundedBoxGeometry(0.058, 0.04, 0.045, 2, 0.015), glove, 0, -0.03, -0.03, 0.5);
+  add(new RoundedBoxGeometry(0.022, 0.024, 0.05, 2, 0.009), glove, -0.032, 0.012, -0.03, 0.2);
   return g;
 }
 
@@ -58,8 +61,8 @@ export class Viewmodel {
     if (!id) return;
     const gun = buildGun(id, char?.skins?.[id], char?.mods?.[id]);
     gun.traverse((o) => { if (o.isMesh) o.castShadow = false; });
-    const sleeveM = new THREE.MeshStandardMaterial({ color: char?.top || '#3a4658', roughness: 0.85 });
-    const gloveM = new THREE.MeshStandardMaterial({ color: char?.gloves || '#1d1d1f', roughness: 0.7 });
+    const sleeveM = operatorMat('fabric', char?.top || '#3a4658');
+    const gloveM = operatorMat('leather', char?.gloves || '#1d1d1f');
     const right = sleeve(0.5, sleeveM, gloveM);
     right.position.set(0.01, -0.06, 0.04);
     right.rotation.set(0.5, 0.12, 0);

@@ -1,6 +1,16 @@
 # Changelog
 
-### 4.5.0 · 2026-11-17
+### 4.6.0 · 2026-11-17
+
+- **Operator graphics overhaul**: every operator has been rebuilt with rounded, shaped bodies instead of blocks
+  - Faces with eyes, brows, a nose and mouth; hair that sits on the head, and proper beards, stubble, glasses, masks, balaclavas and gas masks
+  - Headgear redone: ballistic helmet with rails and an NVG mount, cap with a curved brim, beanie, headset with a mic, and a floppy boonie hat
+  - Plate carriers with mag pouches, webbing and a radio; chest rigs with mags showing and back straps; shirts with pockets when there's no vest
+  - Cargo pants with knee pads, laced boots with rubber soles, gloved hands, and fabric, leather and skin that catch the light differently
+- Your first-person arms match: rounded sleeves and gloves instead of boxes
+- Operators are the same size as before, so hitboxes haven't changed, and they're drawn with fewer draw calls than the old models
+
+### 4.5.0 · 2026-11-17 · [77f1add](https://github.com/cksarge/John-Paul-Simulator/commit/77f1add)
 
 - **Lineups on the ready-up screen**: before a match starts you see everyone's calling card, with your team on the left and the other team on the right
   - Each card shows the player's name and clan tag, plus their ELO online (or the bot difficulty against bots); yours is highlighted

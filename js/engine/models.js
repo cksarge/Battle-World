@@ -1,49 +1,340 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { TEAM_COLORS } from '../data/modes.js';
 import { OUTFITS } from '../data/skins.js';
 import { WEAPONS, GRENADES } from '../data/weapons.js';
-import { buildGun } from './guns.js';
+import { buildGun, canvasTex, noiseField, rng, boxUV, profGeo } from './guns.js';
 
 // Weapons, grenades and their finishes live in guns.js.
 export { buildGun };
 
 // ───────────────────────── characters ─────────────────────────
-function mat(color, rough = 0.85, metal = 0) {
-  return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: rough, metalness: metal });
-}
-function bx(parent, w, h, d, x, y, z, m) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-  mesh.position.set(x, y, z);
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  parent.add(mesh);
-  return mesh;
-}
-function rbx(parent, w, h, d, x, y, z, m, r = 0.02) {
-  const geo = roundedBox(w, h, d, r);
-  const mesh = new THREE.Mesh(geo, m);
-  mesh.position.set(x, y, z);
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  parent.add(mesh);
-  return mesh;
-}
-const rbCache = new Map();
-function roundedBox(w, h, d, r) {
-  const key = [w, h, d, r].join();
-  if (rbCache.has(key)) return rbCache.get(key);
-  // Box with chamfered silhouette: a capsule-ish shape via scaled sphere-box blend.
-  const geo = new THREE.BoxGeometry(w, h, d, 3, 3, 3);
-  const p = geo.attributes.position, v = new THREE.Vector3();
-  const hx = w / 2 - r, hy = h / 2 - r, hz = d / 2 - r;
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const c = new THREE.Vector3(Math.max(-hx, Math.min(hx, v.x)), Math.max(-hy, Math.min(hy, v.y)), Math.max(-hz, Math.min(hz, v.z)));
-    const dir = v.clone().sub(c);
-    if (dir.lengthSq() > 1e-8) { dir.setLength(r); v.copy(c).add(dir); }
-    p.setXYZ(i, v.x, v.y, v.z);
+// Operators are built on a fixed skeleton (hips, knees, torso, head, shoulders, elbows) that the
+// animations below pose. Each bone's parts are merged into one mesh per material role and cached by
+// the options that shape them, so a match full of operators shares geometry and costs few draw calls.
+
+// ───── surface textures ─────
+const tex = {};
+// Fabric weave, used as a bump map on clothing and gear.
+const weaveTex = () => tex.weave ??= canvasTex(128, (g, W, H) => {
+  const f = noiseField(128, 5, [[16, 1], [64, 0.6]]), img = g.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const w = ((x >> 1) + (y >> 1)) % 2 ? Math.sin((x % 2) * Math.PI) : Math.sin((y % 2) * Math.PI);
+    const v = 120 + w * 40 + (f[y * W + x] - 0.5) * 70;
+    img.data.set([v, v, v, 255], (y * W + x) * 4);
   }
+  g.putImageData(img, 0, 0);
+}, { srgb: false });
+// Hair strands running down the head.
+const strandTex = () => tex.strand ??= canvasTex(256, (g, W, H) => {
+  const r = rng(77);
+  g.fillStyle = '#808080'; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 1400; i++) { const v = Math.floor(60 + r() * 140); g.strokeStyle = `rgb(${v},${v},${v})`; g.lineWidth = 0.6 + r(); const x = r() * W, y = r() * H; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (r() - 0.5) * 6, y + 20 + r() * 40); g.stroke(); }
+}, { srgb: false });
+// Soft mottling for skin and leather.
+const poreTex = () => tex.pore ??= canvasTex(128, (g, W, H) => {
+  const f = noiseField(128, 31, [[8, 1], [32, 0.7], [128, 0.5]]), img = g.createImageData(W, H);
+  for (let i = 0; i < f.length; i++) { const v = 128 + (f[i] - 0.5) * 110; img.data.set([v, v, v, 255], i * 4); }
+  g.putImageData(img, 0, 0);
+}, { srgb: false });
+
+// ───── materials, shared between every operator with the same colours ─────
+const matCache = new Map();
+const KINDS = {
+  fabric: (c) => ({ color: c, roughness: 0.93, bumpMap: weaveTex(), bumpScale: 0.9, side: THREE.DoubleSide }),
+  skin: (c) => ({ color: c, roughness: 0.55, bumpMap: poreTex(), bumpScale: 0.25 }),
+  hair: (c) => ({ color: c, roughness: 0.72, bumpMap: strandTex(), bumpScale: 1.4, side: THREE.DoubleSide }),
+  leather: (c) => ({ color: c, roughness: 0.6, bumpMap: poreTex(), bumpScale: 0.8 }),
+  plain: (c) => ({ color: c, roughness: 0.85 }),
+  rubber: (c) => ({ color: c, roughness: 0.95, bumpMap: poreTex(), bumpScale: 0.6, side: THREE.DoubleSide }),
+  metal: (c) => ({ color: c, roughness: 0.35, metalness: 0.85 }),
+  gloss: (c) => ({ color: c, roughness: 0.2, metalness: 0.1 }),
+  lens: (c) => ({ color: c, roughness: 0.05, metalness: 0.6, envMapIntensity: 2 }),
+  glow: (c, i = 1.2) => ({ color: c, emissive: c, emissiveIntensity: i, roughness: 0.6, side: THREE.DoubleSide }),
+  stubble: (c) => ({ color: c, roughness: 1, transparent: true, opacity: 0.38, depthWrite: false, bumpMap: poreTex(), bumpScale: 1 }),
+};
+function cmat(kind, color, arg) {
+  const key = kind + color + (arg ?? '');
+  if (!matCache.has(key)) matCache.set(key, new THREE.MeshStandardMaterial(KINDS[kind](new THREE.Color(color), arg)));
+  return matCache.get(key);
+}
+// For the first-person arms (viewmodel.js), so they match the operator's clothing.
+export const operatorMat = (kind, color) => cmat(kind, color);
+const shade = (hex, k) => '#' + new THREE.Color(hex).multiplyScalar(k).getHexString();
+
+// ───── modelling kit (mirrors the gun kit in guns.js) ─────
+let acc = null;
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+function put(role, geo, x = 0, y = 0, z = 0, o = {}) {
+  let g = geo.index ? geo.toNonIndexed() : geo.clone();
+  for (const n of Object.keys(g.attributes)) if (n !== 'position' && n !== 'normal') g.deleteAttribute(n);
+  g.clearGroups();
+  _m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(o.rx || 0, o.ry || 0, o.rz || 0)), _s.set(o.sx ?? 1, o.sy ?? 1, o.sz ?? 1));
+  g.applyMatrix4(_m);
+  acc.push([role, g]);
+}
+const rbox = (w, h, d, r = Math.min(w, h, d) * 0.3) => new RoundedBoxGeometry(w, h, d, 2, Math.min(r, Math.min(w, h, d) * 0.45));
+// Lathed limb segment around Y: pts are [radius, y] from the bottom up.
+const limb = (pts, seg = 16) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
+// Scales x and z by f(y) → [kx, kz] (tapering torsos and pelvises).
+function taper(geo, f) {
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) { const [kx, kz] = f(p.getY(i)); p.setX(i, p.getX(i) * kx); p.setZ(i, p.getZ(i) * kz); }
   geo.computeVertexNormals();
-  rbCache.set(key, geo);
   return geo;
+}
+const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+function rod(role, a, b, r) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), g = new THREE.CylinderGeometry(r, r, A.distanceTo(B), 6);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()));
+  put(role, g, (A.x + B.x) / 2, (A.y + B.y) / 2, (A.z + B.z) / 2);
+}
+
+// The head: a sphere pulled into a skull with a narrower jaw and flatter face. Partial shells of the
+// same shape (scaled up a little) make hair, beards, masks and hats that sit snugly on it.
+const HEAD_C = 0.125;
+function headShell(scale = 1, o = {}) {
+  const g = new THREE.SphereGeometry(1, o.ws ?? 32, o.hs ?? 22, o.phiStart ?? 0, o.phiLength ?? Math.PI * 2, o.thetaStart ?? 0, o.thetaLength ?? Math.PI);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    let X = x * 0.104, Y = y * 0.13, Z = z * 0.118;
+    if (y < 0) { const t = -y; X *= 1 - 0.13 * t * t; Z *= z < 0 ? 1 - 0.04 * t : 1 - 0.3 * t; Y *= 1 - 0.12 * t; }
+    if (z < 0) Z *= 0.94 + 0.06 * Math.abs(y);
+    if (y > 0.2) Y *= 1 + 0.04 * (y - 0.2); // a little more crown
+    p.setXYZ(i, X * scale, Y * scale, Z * scale);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+// Cached builds: key → [[role, merged geometry]].
+const built = new Map();
+function build(key, fn) {
+  if (built.has(key)) return built.get(key);
+  acc = [];
+  fn();
+  const byRole = new Map();
+  for (const [role, g] of acc) { boxUV(g, 1 / 0.16); if (!byRole.has(role)) byRole.set(role, []); byRole.get(role).push(g); }
+  const out = [...byRole].map(([role, gs]) => [role, mergeGeometries(gs, false)]);
+  acc = null;
+  built.set(key, out);
+  return out;
+}
+
+// ───── bones ─────
+function thigh(side, bw) {
+  put('pants', limb([[0.054, -0.47], [0.06, -0.4], [0.07, -0.26], [0.08, -0.12], [0.086, -0.03], [0.078, 0.02], [0.05, 0.06]]), 0, 0, 0, { sx: bw, sz: 1.08 });
+  // Cargo pocket with its flap on the outside of the thigh.
+  put('pants', rbox(0.022, 0.1, 0.095, 0.008), side * 0.078 * bw, -0.23, 0.005);
+  put('pants', rbox(0.026, 0.026, 0.1, 0.008), side * 0.08 * bw, -0.18, 0.005);
+  put('strap', rbox(0.012, 0.012, 0.012, 0.004), side * 0.094 * bw, -0.19, -0.03);
+}
+function shin(side, bw) {
+  put('pants', limb([[0.05, -0.33], [0.052, -0.28], [0.058, -0.18], [0.061, -0.07], [0.058, 0.0], [0.054, 0.04]]), 0, 0, 0, { sx: bw, sz: 1.06 });
+  // Knee pad with its strap.
+  put('pad', rbox(0.11 * bw, 0.115, 0.05, 0.022), 0, -0.025, -0.052, { rx: 0.08 });
+  put('strap', new THREE.CylinderGeometry(0.062, 0.062, 0.022, 18, 1, true), 0, -0.085, 0, { sx: bw, sz: 1.06 });
+  // Boot: side profile with a rubber sole, laces and a padded collar.
+  const w = 0.112;
+  put('boots', profGeo([[0.075, -0.455], [-0.15, -0.455], [-0.18, -0.44], [-0.182, -0.42], [-0.145, -0.396], [-0.07, -0.376], [-0.055, -0.3], [0.062, -0.3], [0.072, -0.38], [0.082, -0.43]], w, { bevel: 0.012, bs: 3 }));
+  put('sole', profGeo([[0.087, -0.47], [-0.16, -0.47], [-0.192, -0.456], [-0.186, -0.448], [0.087, -0.448]], w + 0.008, { bevel: 0.004 }));
+  for (let i = 0; i < 4; i++) put('strap', rbox(0.06, 0.006, 0.01, 0.002), 0, -0.395 + i * 0.024, -0.072 - (3 - i) * 0.012 + 0.012, { rx: -0.5 });
+  put('boots', new THREE.TorusGeometry(0.058, 0.012, 8, 20), 0, -0.3, 0.004, { rx: Math.PI / 2, sx: bw });
+}
+function pelvis(bw) {
+  put('pants', taper(rbox(0.36 * bw, 0.21, 0.225, 0.07), (y) => [0.94 + 0.06 * sstep(-0.1, 0.1, y), 1]), 0, 0.98, 0);
+  put('strap', rbox(0.385 * bw, 0.05, 0.245, 0.02), 0, 1.07, 0);
+  put('metal', rbox(0.05, 0.036, 0.012, 0.004), 0, 1.07, -0.124);
+  for (const s of [-1, 1]) {
+    put('vest', rbox(0.055, 0.075, 0.07, 0.012), s * 0.185 * bw, 1.03, 0.03);
+    put('vest', rbox(0.06, 0.022, 0.074, 0.008), s * 0.186 * bw, 1.07, 0.03);
+  }
+}
+function torso(bw, vest, glow, zombie) {
+  // Chest wider than the waist; shoulders, collar and neck.
+  put('top', taper(rbox(0.4 * bw, 0.5, 0.24, 0.07), (y) => { const t = sstep(-0.25, 0.12, y); return [0.85 + 0.15 * t, 0.9 + 0.1 * t]; }), 0, 0.27, 0);
+  for (const s of [-1, 1]) put('top', new THREE.SphereGeometry(0.078, 16, 12), s * 0.19 * bw, 0.45, 0, { sx: 1.05, sy: 0.9 });
+  put('top', new THREE.CylinderGeometry(0.066, 0.08, 0.05, 22), 0, 0.535, 0.008);
+  put('top', new THREE.TorusGeometry(0.066, 0.01, 6, 22), 0, 0.56, 0.008, { rx: Math.PI / 2 });
+  put('skin', new THREE.CylinderGeometry(0.054, 0.06, 0.13, 16), 0, 0.565, 0.01);
+  let backZ = 0.122;
+  if (vest === 'plate') {
+    backZ = 0.152;
+    // Plate carrier: front and back plate bags, cummerbund, shoulder straps, pouches and webbing.
+    put('vest', rbox(0.36 * bw, 0.33, 0.055, 0.018), 0, 0.31, -0.124);
+    put('vest', rbox(0.36 * bw, 0.35, 0.055, 0.018), 0, 0.31, 0.124);
+    put('vest', rbox(0.43 * bw, 0.13, 0.27, 0.04), 0, 0.15, 0);
+    for (const s of [-1, 1]) put('vest', rbox(0.075, 0.03, 0.27, 0.012), s * 0.115 * bw, 0.5, 0);
+    for (let i = -1; i <= 1; i++) {
+      put('vest', rbox(0.074, 0.1, 0.045, 0.012), i * 0.085 * bw, 0.2, -0.165);
+      put('vest', rbox(0.078, 0.028, 0.05, 0.01), i * 0.085 * bw, 0.252, -0.167);
+      put('strap', rbox(0.016, 0.03, 0.006, 0.003), i * 0.085 * bw, 0.232, -0.193);
+    }
+    put('vest', rbox(0.17 * bw, 0.07, 0.03, 0.01), 0, 0.37, -0.164);
+    for (const y of [0.29, 0.43]) put('strap', rbox(0.32 * bw, 0.008, 0.006, 0.002), 0, y, -0.153);
+    for (const y of [0.24, 0.3, 0.36, 0.42]) put('strap', rbox(0.3 * bw, 0.008, 0.006, 0.002), 0, y, 0.153);
+    put('vest', rbox(0.22 * bw, 0.22, 0.045, 0.02), 0, 0.29, 0.17);
+    // Radio on the left hip with its antenna.
+    put('vest', rbox(0.05, 0.12, 0.07, 0.012), -0.235 * bw, 0.2, 0.03);
+    rod('strap', [-0.235 * bw, 0.26, 0.05], [-0.22 * bw, 0.56, 0.1], 0.004);
+  } else if (vest === 'rig') {
+    // Chest rig: mag pouches with the mags showing, shoulder straps and an X across the back.
+    put('vest', rbox(0.36 * bw, 0.15, 0.05, 0.016), 0, 0.2, -0.138);
+    for (const x of [-0.12, -0.04, 0.04, 0.12]) {
+      put('vest', rbox(0.066, 0.11, 0.046, 0.012), x * bw, 0.24, -0.17);
+      put('gunmetal', rbox(0.03, 0.03, 0.022, 0.004), x * bw, 0.305, -0.17);
+    }
+    for (const s of [-1, 1]) put('strap', rbox(0.05, 0.3, 0.02, 0.008), s * 0.12 * bw, 0.38, -0.125, { rx: 0.12 });
+    for (const s of [-1, 1]) put('strap', rbox(0.05, 0.46, 0.02, 0.008), 0, 0.3, 0.126, { rz: s * 0.62 });
+    put('strap', rbox(0.42 * bw, 0.035, 0.262, 0.012), 0, 0.14, 0);
+  } else {
+    // Shirt: chest pockets with flaps and a button placket.
+    for (const s of [-1, 1]) {
+      put('top', rbox(0.09, 0.095, 0.018, 0.006), s * 0.085 * bw, 0.35, -0.117);
+      put('top', rbox(0.095, 0.028, 0.024, 0.006), s * 0.085 * bw, 0.395, -0.118);
+    }
+    put('top', rbox(0.026, 0.42, 0.014, 0.005), 0, 0.27, -0.116);
+  }
+  // Team patch on the back.
+  put('team', rbox(0.12, 0.08, 0.012, 0.004), 0.1 * bw, 0.42, backZ);
+  if (glow) for (const s of [-1, 1]) put('glow', rbox(0.012, 0.36, 0.06, 0.004), s * 0.205 * bw, 0.27, -0.06);
+  if (zombie) {
+    put('rot', rbox(0.16, 0.12, 0.012, 0.004), -0.08 * bw, 0.2, -0.125);
+    put('rot', rbox(0.1, 0.08, 0.012, 0.004), 0.11 * bw, 0.36, -0.125);
+  }
+}
+function upperArm(side) {
+  put('top', limb([[0.046, -0.3], [0.054, -0.24], [0.061, -0.12], [0.064, -0.03], [0.058, 0.03], [0.036, 0.07]]), 0, 0, 0, { sz: 1.05 });
+  if (side === -1) put('team', new THREE.CylinderGeometry(0.066, 0.066, 0.06, 18, 1, true), 0, -0.1, 0, { sz: 1.05 });
+}
+function forearm(side) {
+  put('top', limb([[0.04, -0.26], [0.045, -0.2], [0.051, -0.09], [0.051, -0.01], [0.047, 0.03]]));
+  put('top', new THREE.TorusGeometry(0.043, 0.009, 8, 18), 0, -0.245, 0, { rx: Math.PI / 2 });
+  // Gloved hand: palm, curled fingers, thumb and a knuckle guard.
+  put('gloves', rbox(0.07, 0.085, 0.042, 0.016), 0, -0.3, 0);
+  put('gloves', rbox(0.066, 0.05, 0.044, 0.016), 0, -0.355, -0.012, { rx: 0.45 });
+  put('gloves', rbox(0.024, 0.05, 0.024, 0.01), -side * 0.03, -0.305, -0.028, { rz: side * 0.35, rx: -0.2 });
+  put('pad', rbox(0.06, 0.022, 0.012, 0.005), 0, -0.322, -0.026, { rx: 0.2 });
+}
+
+function eyes(z = 0, glow = false) {
+  for (const s of [-1, 1]) {
+    if (glow) { put('zeye', new THREE.SphereGeometry(0.017, 10, 8), s * 0.038, 0.135, -0.1 + z, { sz: 0.6 }); continue; }
+    put('eyeW', new THREE.SphereGeometry(0.0155, 12, 10), s * 0.038, 0.135, -0.097 + z, { sz: 0.7 });
+    put('iris', new THREE.SphereGeometry(0.0085, 10, 8), s * 0.038, 0.135, -0.1065 + z, { sz: 0.5 });
+  }
+}
+function head(hair, face, gear, zombie) {
+  headParts(hair, face, gear, zombie);
+  for (const [, g] of acc) g.translate(0, -0.014, 0);
+}
+function headParts(hair, face, gear, zombie) {
+  put('skin', headShell(), 0, HEAD_C, 0);
+  for (const s of [-1, 1]) put('skin', new THREE.SphereGeometry(1, 12, 10), s * 0.102, 0.122, 0.008, { sx: 0.018, sy: 0.034, sz: 0.024 });
+  // Face: nose, brow ridge, eyes, eyebrows and lips.
+  put('skin', rbox(0.026, 0.048, 0.03, 0.012), 0, 0.112, -0.112, { rx: -0.28 });
+  put('skin', new THREE.SphereGeometry(0.014, 10, 8), 0, 0.093, -0.123, { sx: 1.3 });
+  put('skin', rbox(0.09, 0.016, 0.02, 0.007), 0, 0.152, -0.103);
+  const covered = face === 'balaclava' || face === 'gasmask';
+  eyes(covered ? -0.022 : 0, !!zombie);
+  if (!covered) {
+    for (const s of [-1, 1]) put('hair', rbox(0.036, 0.008, 0.012, 0.003), s * 0.038, 0.158, -0.108, { rz: s * -0.12 });
+    put('lips', rbox(0.042, 0.009, 0.014, 0.004), 0, 0.066, -0.108);
+  }
+  if (zombie) put('rot', rbox(0.08, 0.04, 0.012, 0.004), 0.03, 0.05, -0.112);
+
+  // Hair: shells of the head shape tilted back so the hairline sits above the forehead.
+  const cap = (scale, len, tilt = 0.45) => put('hair', headShell(scale, { thetaLength: len, hs: 14 }), 0, HEAD_C, 0.004, { rx: tilt });
+  if (hair === 'buzz') cap(1.018, 1.4);
+  if (['short', 'swept', 'long', 'ponytail'].includes(hair)) cap(1.06, 1.55);
+  const hat = gear !== 'none' && gear !== 'headset';
+  if (hair === 'swept' && !hat) put('hair', rbox(0.17, 0.05, 0.08, 0.025), 0.012, 0.25, -0.07, { rx: -0.35, rz: 0.12 });
+  if (hair === 'short' && !hat) put('hair', rbox(0.16, 0.035, 0.06, 0.017), 0, 0.245, -0.075, { rx: -0.25 });
+  if (hair === 'long') {
+    put('hair', rbox(0.2, 0.26, 0.07, 0.03), 0, 0.09, 0.09);
+    for (const s of [-1, 1]) put('hair', rbox(0.03, 0.2, 0.15, 0.014), s * 0.104, 0.12, 0.02);
+  }
+  if (hair === 'ponytail') {
+    put('strap', new THREE.TorusGeometry(0.018, 0.007, 6, 14), 0, 0.15, 0.128, { rx: 0.5 });
+    put('hair', limb([[0.004, -0.17], [0.022, -0.12], [0.03, -0.06], [0.024, -0.01], [0.012, 0.01]], 12), 0, 0.15, 0.135, { rx: -0.3 });
+  }
+  if (hair === 'mohawk') cap(1.012, 1.35);
+  if (hair === 'mohawk' && !hat) {
+    const crest = [];
+    for (let i = 0; i <= 10; i++) { const a = -1.1 + i * 0.22; crest.push([Math.sin(a) * 0.15, HEAD_C + Math.cos(a) * 0.15 + (i % 2 ? 0.015 : 0)]); }
+    for (let i = 10; i >= 0; i--) { const a = -1.1 + i * 0.22; crest.push([Math.sin(a) * 0.118, HEAD_C + Math.cos(a) * 0.118]); }
+    put('hair', profGeo(crest, 0.04, { bevel: 0.01 }));
+  }
+
+  // Facial hair and coverings.
+  if (face === 'beard' || face === 'stubble') {
+    const big = face === 'beard';
+    // Along the jaw from ear to ear, below the mouth, with a moustache over the lip.
+    put(big ? 'hair' : 'stubble', headShell(big ? 1.035 : 1.012, { phiStart: Math.PI - 0.15, phiLength: Math.PI + 0.3, thetaStart: 1.95, thetaLength: 1.05, hs: 12 }), 0, HEAD_C, big ? -0.002 : 0);
+    if (big) {
+      for (const s of [-1, 1]) put('hair', rbox(0.022, 0.07, 0.05, 0.01), s * 0.092, 0.09, -0.04, { rz: s * 0.15 });
+      put('hair', rbox(0.06, 0.013, 0.02, 0.006), 0, 0.08, -0.111);
+    }
+  }
+  if (face === 'glasses') {
+    for (const s of [-1, 1]) {
+      put('dark', new THREE.TorusGeometry(0.021, 0.003, 6, 18), s * 0.039, 0.136, -0.121);
+      put('lens', new THREE.CircleGeometry(0.02, 18), s * 0.039, 0.136, -0.1215, { ry: Math.PI });
+      put('dark', rbox(0.004, 0.004, 0.115, 0.0015), s * 0.103, 0.14, -0.06);
+    }
+    put('dark', rbox(0.02, 0.004, 0.004, 0.0015), 0, 0.142, -0.121);
+  }
+  if (face === 'balaclava') {
+    put('balac', headShell(1.045), 0, HEAD_C, 0);
+    put('skin', rbox(0.13, 0.046, 0.02, 0.012), 0, 0.137, -0.117);
+  }
+  if (face === 'mask') put('balac', headShell(1.07, { thetaStart: 1.62, thetaLength: 1.4, hs: 12 }), 0, HEAD_C - 0.004, 0);
+  if (face === 'gasmask') {
+    put('rubber', headShell(1.075, { phiStart: Math.PI - 0.7, phiLength: Math.PI + 1.4, thetaStart: 1.0, thetaLength: 1.75, hs: 14 }), 0, HEAD_C, 0);
+    for (const s of [-1, 1]) {
+      put('lens', new THREE.CylinderGeometry(0.026, 0.026, 0.012, 20), s * 0.04, 0.137, -0.127, { rx: Math.PI / 2 });
+      put('metal', new THREE.TorusGeometry(0.027, 0.004, 6, 20), s * 0.04, 0.137, -0.133);
+    }
+    put('rubber', new THREE.CylinderGeometry(0.03, 0.034, 0.05, 18), 0.0, 0.06, -0.152, { rx: Math.PI / 2 - 0.4 });
+    for (let i = 0; i < 4; i++) put('metal', new THREE.TorusGeometry(0.031, 0.002, 4, 18), 0, 0.06 - 0.003 - i * 0.004, -0.165 - i * 0.009, { rx: -0.4 });
+    put('strap', new THREE.TorusGeometry(0.115, 0.007, 6, 30), 0, 0.15, 0.01, { rx: Math.PI / 2 + 0.25, sx: 1.0, sy: 1.12 });
+  }
+
+  // Headgear.
+  if (gear === 'helmet') {
+    // Ballistic helmet with side rails, NVG shroud, a velcro patch and the chin strap.
+    put('vest', headShell(1.26, { thetaLength: 1.6, hs: 14 }), 0, HEAD_C + 0.012, 0.006, { rx: 0.22 });
+    put('vest', new THREE.TorusGeometry(0.117, 0.008, 6, 36), 0, 0.145, 0.04, { rx: Math.PI / 2 + 0.22, sx: 1.12, sy: 1.25 });
+    for (const s of [-1, 1]) put('strap', rbox(0.012, 0.03, 0.11, 0.004), s * 0.128, 0.185, 0.01, { rz: s * 0.25 });
+    put('gunmetal', rbox(0.05, 0.032, 0.022, 0.006), 0, 0.225, -0.142, { rx: -0.45 });
+    for (const s of [-1, 1]) put('strap', rbox(0.006, 0.13, 0.016, 0.002), s * 0.098, 0.07, 0.0, { rz: s * 0.12 });
+  }
+  if (gear === 'cap') {
+    put('top', headShell(1.1, { thetaLength: 1.4, hs: 12 }), 0, HEAD_C + 0.01, 0, { rx: 0.15 });
+    put('top', new THREE.CylinderGeometry(0.1, 0.1, 0.008, 20, 1, false, Math.PI / 2, Math.PI), 0, 0.196, -0.075, { rx: -0.12, sz: 0.95 });
+    put('top', new THREE.SphereGeometry(0.01, 8, 6), 0, 0.272, 0.0);
+  }
+  if (gear === 'beanie') {
+    put('top', headShell(1.12, { thetaLength: 1.5, hs: 14 }), 0, HEAD_C + 0.02, 0.004, { rx: 0.3, sy: 1.08 });
+    put('top', new THREE.CylinderGeometry(0.125, 0.127, 0.045, 28, 1, true), 0, 0.185, 0.012, { rx: 0.3, sx: 0.98, sz: 1.08 });
+  }
+  if (gear === 'headset') {
+    put('dark', new THREE.TorusGeometry(0.125, 0.009, 6, 24, Math.PI), 0, 0.135, 0.0);
+    for (const s of [-1, 1]) {
+      put('dark', new THREE.CylinderGeometry(0.044, 0.044, 0.036, 18), s * 0.118, 0.122, 0.0, { rz: Math.PI / 2 });
+      put('pad', new THREE.CylinderGeometry(0.032, 0.032, 0.006, 16), s * 0.138, 0.122, 0.0, { rz: Math.PI / 2 });
+    }
+    rod('dark', [-0.12, 0.1, -0.02], [-0.06, 0.065, -0.11], 0.004);
+    put('dark', new THREE.SphereGeometry(0.009, 8, 6), -0.055, 0.064, -0.114);
+  }
+  if (gear === 'boonie') {
+    put('vest', new THREE.CylinderGeometry(0.105, 0.122, 0.09, 24, 1, true), 0, 0.245, 0.005);
+    put('vest', headShell(1.0, { thetaLength: 0.9, hs: 8 }), 0, 0.18, 0.005, { sy: 0.5, sx: 1.0 });
+    put('vest', new THREE.CylinderGeometry(0.122, 0.2, 0.03, 28, 1, true), 0, 0.19, 0.005);
+    put('strap', new THREE.CylinderGeometry(0.119, 0.121, 0.022, 24, 1, true), 0, 0.212, 0.005);
+  }
 }
 
 // Procedural operator. Root sits at the feet, faces -Z.
@@ -65,155 +356,81 @@ export class CharacterModel {
     this.scale = s;
     this.body.scale.setScalar(s);
     const bw = match ? 1 : c.build === 'heavy' ? 1.14 : c.build === 'slim' ? 0.9 : 1;
+    // The undead (zombies mode, infected players): glowing eyes, torn shirt, arms reaching forward.
+    this.zombie = c.zombie || null;
+    const z = this.zombie;
 
-    const skin = mat(c.skin, 0.6), top = mat(c.top), pants = mat(c.pants), boots = mat(c.boots || '#2a221b', 0.7);
-    const gloves = mat(c.gloves || '#1d1d1f', 0.7), hair = mat(c.hairColor, 0.9), vestM = mat(c.vestColor, 0.8);
-    const dark = mat('#141414', 0.5);
-    const teamM = team >= 0 ? new THREE.MeshStandardMaterial({ color: TEAM_COLORS[team], emissive: TEAM_COLORS[team], emissiveIntensity: 0.35, roughness: 0.6 }) : mat(c.accent || '#f2a33a');
+    const skin = c.skin || '#d19a6b', eyeC = z === 'infected' ? '#9dff2e' : z === 'brute' ? '#ff3a1f' : '#ffd23f';
+    const roles = {
+      skin: cmat('skin', skin), lips: cmat('skin', shade(skin, 0.72)), eyeW: cmat('gloss', '#e9e5dc'), iris: cmat('gloss', '#2a1d14'),
+      hair: cmat('hair', c.hairColor || '#3b2416'), stubble: cmat('stubble', c.hairColor || '#3b2416'),
+      top: cmat('fabric', c.top || '#3a4658'), pants: cmat('fabric', c.pants || '#2b2f33'), vest: cmat('fabric', c.vestColor || '#59614d'),
+      boots: cmat('leather', c.boots || '#2a221b'), sole: cmat('rubber', '#161616'), gloves: cmat('leather', c.gloves || '#1d1d1f'),
+      strap: cmat('fabric', '#1b1c1e'), pad: cmat('rubber', '#2e2e2c'), dark: cmat('plain', '#141414'), balac: cmat('fabric', '#1a1a1a'),
+      rubber: cmat('rubber', '#232323'), metal: cmat('metal', '#7a7f86'), gunmetal: cmat('metal', '#2a2c30'), lens: cmat('lens', '#1c2a33'),
+      team: team >= 0 ? cmat('glow', '#' + new THREE.Color(TEAM_COLORS[team]).getHexString(), 0.35) : cmat('fabric', c.accent || '#f2a33a'),
+      glow: outfit?.glow ? cmat('glow', outfit.glow, 1.4) : null, rot: cmat('fabric', '#3a1612'), zeye: cmat('glow', eyeC, 2.4),
+    };
+    const attach = (group, key, fn) => {
+      for (const [role, geo] of build(key, fn)) {
+        const m = new THREE.Mesh(geo, roles[role]);
+        m.castShadow = true; m.receiveShadow = true;
+        group.add(m);
+      }
+    };
 
     // legs
     this.legs = [];
     for (const side of [-1, 1]) {
       const hip = new THREE.Group();
       hip.position.set(0.1 * side * bw, 0.93, 0);
-      rbx(hip, 0.16 * bw, 0.46, 0.18, 0, -0.23, 0, pants, 0.04);
+      attach(hip, `thigh${side}|${bw}`, () => thigh(side, bw));
       const knee = new THREE.Group();
       knee.position.set(0, -0.46, 0);
-      rbx(knee, 0.14 * bw, 0.4, 0.16, 0, -0.2, 0, pants, 0.035);
-      rbx(knee, 0.15, 0.1, 0.27, 0, -0.42, -0.04, boots, 0.03);
-      bx(knee, 0.12 * bw, 0.1, 0.05, 0, -0.04, -0.085, mat('#3a3a36', 0.9)); // knee pad
+      attach(knee, `shin${side}|${bw}`, () => shin(side, bw));
       hip.add(knee);
       hip.userData.knee = knee;
       this.body.add(hip);
       this.legs.push(hip);
     }
-    rbx(this.body, 0.36 * bw, 0.2, 0.22, 0, 0.98, 0, pants, 0.04);
-    bx(this.body, 0.38 * bw, 0.05, 0.24, 0, 1.07, 0, dark); // belt
+    attach(this.body, `pelvis|${bw}`, () => pelvis(bw));
 
     // torso
     this.torso = new THREE.Group();
     this.torso.position.set(0, 1.06, 0);
     this.body.add(this.torso);
-    rbx(this.torso, 0.4 * bw, 0.5, 0.24, 0, 0.27, 0, top, 0.06);
-    if (c.vest === 'plate') {
-      rbx(this.torso, 0.42 * bw, 0.4, 0.29, 0, 0.27, 0, vestM, 0.04);
-      bx(this.torso, 0.3 * bw, 0.12, 0.05, 0, 0.17, -0.16, vestM);
-      for (const x of [-0.1, 0, 0.1]) bx(this.torso, 0.08, 0.1, 0.05, x * bw, 0.19, -0.18, mat(c.vestColor, 0.9));
-    } else if (c.vest === 'rig') {
-      bx(this.torso, 0.42 * bw, 0.06, 0.27, 0, 0.42, 0, vestM);
-      for (const x of [-0.12, -0.04, 0.04, 0.12]) bx(this.torso, 0.07, 0.12, 0.05, x * bw, 0.16, -0.14, vestM);
-    }
-    // neck & head
-    bx(this.torso, 0.1, 0.08, 0.1, 0, 0.55, 0, skin);
+    attach(this.torso, `torso|${bw}|${c.vest}|${!!outfit?.glow}|${!!z}`, () => torso(bw, c.vest, !!outfit?.glow, !!z));
+
+    // head
     this.head = new THREE.Group();
     this.head.position.set(0, 0.6, 0);
     this.torso.add(this.head);
-    rbx(this.head, 0.21, 0.25, 0.23, 0, 0.12, 0, skin, 0.05);
-    bx(this.head, 0.04, 0.025, 0.02, -0.05, 0.14, -0.115, dark);
-    bx(this.head, 0.04, 0.025, 0.02, 0.05, 0.14, -0.115, dark);
-    bx(this.head, 0.03, 0.05, 0.03, 0, 0.1, -0.12, skin);
-    bx(this.head, 0.07, 0.015, 0.01, 0, 0.045, -0.116, mat('#5a2a22'));
-    for (const x of [-0.11, 0.11]) bx(this.head, 0.02, 0.06, 0.04, x, 0.12, 0, skin);
-    this._hair(c.hair, hair);
-    this._face(c.face, hair, skin);
-    this._headgear(c.headgear, vestM, top);
+    attach(this.head, `head|${c.hair}|${c.face}|${c.headgear}|${!!z}`, () => head(c.hair, c.face, c.headgear, !!z));
 
     // arms (rifle hold)
     this.arms = [];
     for (const side of [-1, 1]) {
       const sh = new THREE.Group();
       sh.position.set(0.25 * side * bw, 0.46, 0);
-      rbx(sh, 0.12, 0.3, 0.13, 0, -0.14, 0, top, 0.04);
+      attach(sh, `upper${side}`, () => upperArm(side));
       const elbow = new THREE.Group();
       elbow.position.set(0, -0.28, 0);
-      rbx(elbow, 0.11, 0.28, 0.11, 0, -0.13, 0, top, 0.035);
-      rbx(elbow, 0.09, 0.1, 0.1, 0, -0.3, 0, gloves, 0.03);
+      attach(elbow, `fore${side}`, () => forearm(side));
       sh.add(elbow);
       sh.userData.elbow = elbow;
-      if (side === -1) bx(sh, 0.13, 0.06, 0.14, 0, -0.1, 0, teamM); // armband
       this.torso.add(sh);
       this.arms.push(sh);
     }
-    bx(this.torso, 0.12, 0.08, 0.04, 0.12 * bw, 0.4, 0.15, teamM); // back patch
 
-    if (outfit?.glow) {
-      const glow = new THREE.MeshStandardMaterial({ color: outfit.glow, emissive: outfit.glow, emissiveIntensity: 1.2 });
-      for (const x of [-0.12, 0.12]) bx(this.torso, 0.02, 0.36, 0.3, x * bw * 1.7, 0.27, 0, glow);
-    }
     this.gunHolder = new THREE.Group();
     this.gunHolder.position.set(0.1, 0.28, -0.3);
     this.torso.add(this.gunHolder);
-    // The undead (zombies mode, infected players): glowing eyes, torn shirt, arms reaching forward.
-    this.zombie = c.zombie || null;
-    if (this.zombie) {
-      const eyeC = this.zombie === 'infected' ? '#9dff2e' : this.zombie === 'brute' ? '#ff3a1f' : '#ffd23f';
-      const glow = new THREE.MeshStandardMaterial({ color: eyeC, emissive: eyeC, emissiveIntensity: 2.2 });
-      for (const x of [-0.05, 0.05]) bx(this.head, 0.045, 0.03, 0.02, x, 0.14, -0.122, glow);
-      const rot = mat('#3a1612', 0.9);
-      bx(this.torso, 0.16, 0.12, 0.03, -0.08 * bw, 0.2, -0.125, rot);
-      bx(this.torso, 0.1, 0.08, 0.03, 0.11 * bw, 0.36, -0.125, rot);
-      bx(this.head, 0.1, 0.05, 0.02, 0.03, 0.05, -0.118, rot);
-      this.lurch = Math.random() * 6;
-    }
+    if (z) this.lurch = Math.random() * 6;
 
     this.phase = 0;
     this.dead = false;
     this.deathT = 0;
     this.weaponId = null;
-  }
-
-  _hair(style, m) {
-    const h = this.head;
-    if (style === 'none') return;
-    if (style === 'buzz') { bx(h, 0.215, 0.04, 0.235, 0, 0.245, 0, m); return; }
-    bx(h, 0.225, 0.06, 0.245, 0, 0.26, 0.005, m);
-    bx(h, 0.225, 0.12, 0.05, 0, 0.18, 0.11, m);
-    if (style === 'short') { bx(h, 0.23, 0.05, 0.06, 0, 0.24, -0.09, m); }
-    if (style === 'swept') { const f = bx(h, 0.23, 0.06, 0.1, 0.01, 0.27, -0.08, m); f.rotation.z = 0.12; }
-    if (style === 'long') { bx(h, 0.24, 0.26, 0.08, 0, 0.1, 0.1, m); for (const x of [-0.115, 0.115]) bx(h, 0.03, 0.2, 0.18, x, 0.13, 0.02, m); }
-    if (style === 'mohawk') { bx(h, 0.05, 0.08, 0.25, 0, 0.3, 0, m); }
-    if (style === 'ponytail') { bx(h, 0.06, 0.18, 0.06, 0, 0.13, 0.15, m); }
-  }
-
-  _face(face, hairM, skin) {
-    const h = this.head;
-    if (face === 'beard') { bx(h, 0.215, 0.1, 0.06, 0, 0.04, -0.1, hairM); bx(h, 0.215, 0.1, 0.2, 0, 0.06, 0, hairM).scale.set(1.02, 1, 1); }
-    if (face === 'stubble') { const m = hairM.clone(); m.transparent = true; m.opacity = 0.45; bx(h, 0.212, 0.07, 0.23, 0, 0.04, 0.0, m); }
-    if (face === 'glasses') { const g = mat('#111', 0.15, 0.6); bx(h, 0.2, 0.04, 0.02, 0, 0.145, -0.122, g); }
-    if (face === 'balaclava') { const m = mat('#1a1a1a', 0.95); bx(h, 0.222, 0.2, 0.242, 0, 0.1, 0, m); bx(h, 0.15, 0.04, 0.02, 0, 0.14, -0.123, skin); bx(h, 0.04, 0.025, 0.02, -0.05, 0.14, -0.13, mat('#000')); bx(h, 0.04, 0.025, 0.02, 0.05, 0.14, -0.13, mat('#000')); }
-    if (face === 'mask') { bx(h, 0.2, 0.09, 0.05, 0, 0.06, -0.11, mat('#222', 0.8)); }
-    if (face === 'gasmask') {
-      const m = mat('#232323', 0.6);
-      bx(h, 0.225, 0.22, 0.05, 0, 0.11, -0.11, m);
-      for (const x of [-0.05, 0.05]) { const l = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 14), mat('#3a5060', 0.1, 0.8)); l.rotation.x = Math.PI / 2; l.position.set(x, 0.15, -0.14); h.add(l); }
-      const f = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.06, 12), m); f.rotation.x = Math.PI / 2; f.position.set(0, 0.05, -0.16); h.add(f);
-    }
-  }
-
-  _headgear(g, vestM, topM) {
-    const h = this.head;
-    if (g === 'helmet') {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(0.15, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2), vestM);
-      m.scale.set(1, 0.85, 1.08); m.position.set(0, 0.2, 0.005); m.castShadow = true; h.add(m);
-      bx(h, 0.26, 0.025, 0.28, 0, 0.2, 0.005, vestM);
-    }
-    if (g === 'cap') {
-      bx(h, 0.225, 0.07, 0.24, 0, 0.27, 0, topM);
-      bx(h, 0.18, 0.015, 0.1, 0, 0.245, -0.16, topM);
-    }
-    if (g === 'beanie') { rbx(h, 0.23, 0.12, 0.25, 0, 0.27, 0, topM, 0.04); }
-    if (g === 'headset') {
-      const m = mat('#151515', 0.6);
-      bx(h, 0.25, 0.025, 0.04, 0, 0.27, 0, m);
-      for (const x of [-0.125, 0.125]) bx(h, 0.04, 0.08, 0.08, x, 0.13, 0, m);
-      bx(h, 0.015, 0.015, 0.11, -0.13, 0.08, -0.06, m);
-    }
-    if (g === 'boonie') {
-      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.012, 20), vestM);
-      brim.position.set(0, 0.22, 0); h.add(brim);
-      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.1, 16), vestM);
-      crown.position.set(0, 0.27, 0); h.add(crown);
-    }
   }
 
   setWeapon(id) {
