@@ -213,7 +213,9 @@ export class Effects {
     if (len < 0.5) return;
     for (const [w, color, life] of [[0.05, 0x6fc8ff, 0.35], [0.016, 0xffffff, 0.25]]) {
       const m = new THREE.Mesh(this.tracerGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, toneMapped: false, blending: THREE.AdditiveBlending, depthWrite: false }));
-      m.position.copy(from); m.lookAt(to);
+      // The tracer box runs along -Z from its origin, so anchor it at the target facing away from
+      // the muzzle: it then spans muzzle → target (anchored at the muzzle it would point backwards).
+      m.position.copy(to); m.lookAt(to.clone().multiplyScalar(2).sub(from));
       m.scale.set(w / 0.012, w / 0.012, len);
       this.scene.add(m);
       this.items.push({ obj: m, life, max: life, fade: true });

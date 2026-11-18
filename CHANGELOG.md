@@ -1,6 +1,10 @@
 # Changelog
 
-### 4.4.0 · 2026-11-17
+#### 4.4.1 · 2026-11-17
+
+- The Arc Rail's beam now shoots out toward where you aimed instead of streaking backwards behind you
+
+### 4.4.0 · 2026-11-17 · [71e2b12](https://github.com/cksarge/John-Paul-Simulator/commit/71e2b12)
 
 - **Weapon graphics overhaul**: every gun, knife, grenade and attachment has been rebuilt with far more detail
   - Bevelled receivers and slides, real rails, magazines, trigger guards, sights, scopes with glass, muzzle brakes and flash hiders
