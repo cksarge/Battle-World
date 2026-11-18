@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gun lab</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/" } }</script>
+<link rel="stylesheet" href="../css/fonts.css">
+<style>
+  body { margin: 0; background: #15181d; color: #ddd; font: 13px/1.4 ui-monospace, monospace; overflow: hidden; }
+  #ui { position: fixed; top: 8px; left: 8px; z-index: 2; display: flex; gap: 8px; flex-wrap: wrap; }
+  select, button { background: #222831; color: #ddd; border: 1px solid #3a4250; padding: 4px 6px; font: inherit; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<!-- Dev tool: every weapon, grenade and attachment model with any finish. Drag to orbit, scroll to zoom, pick one gun to look closely. -->
+<div id="ui">
+  <select id="gun"><option value="">All weapons</option></select>
+  <select id="skin"></select>
+  <select id="att"><option value="">No attachment</option><option>suppressor</option><option>laser</option><option>grip</option><option>extmag</option></select>
+  <button id="spin">Spin</button>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildGun } from '../js/engine/guns.js';
+import { WEAPONS, GRENADES } from '../js/data/weapons.js';
+import { WEAPON_SKINS } from '../js/data/skins.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b2028);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+scene.add(new THREE.HemisphereLight(0xdde6ff, 0x3a3228, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 2.4); sun.position.set(-1, 2, 1.4); scene.add(sun);
+const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+const controls = new OrbitControls(camera, renderer.domElement);
+const holder = new THREE.Group(); scene.add(holder);
+
+const ids = [...Object.keys(WEAPONS), ...Object.keys(GRENADES).filter((k) => ['he', 'flash', 'smoke', 'fire', 'mine', 'decoy'].includes(k)), 'gl', 'bomb'];
+const $ = (id) => document.getElementById(id);
+for (const id of ids) $('gun').add(new Option(id, id));
+for (const [id, s] of Object.entries(WEAPON_SKINS)) $('skin').add(new Option(`${s.name} (${s.pattern})`, id));
+const q = new URLSearchParams(location.search);
+$('gun').value = q.get('gun') || ''; $('skin').value = q.get('skin') || 'factory'; $('att').value = q.get('att') || '';
+let spin = q.has('spin');
+
+function rebuild() {
+  holder.clear();
+  const one = $('gun').value, list = one ? [one] : ids, cols = 6;
+  list.forEach((id, i) => {
+    const g = buildGun(id, $('skin').value, $('att').value || null);
+    g.rotation.y = Math.PI / 2;
+    if (!one) {
+      const nade = !WEAPONS[id];
+      g.scale.setScalar(nade ? 2.2 : 1);
+      g.position.set((i % cols) * 1.15, -Math.floor(i / cols) * 0.42, 0);
+    }
+    holder.add(g);
+  });
+  const box = new THREE.Box3().setFromObject(holder), c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length();
+  controls.target.copy(c);
+  camera.position.copy(c).add(new THREE.Vector3(one ? -0.15 * r : 0, 0.15 * r, one ? 1.1 * r : 0.85 * r));
+  history.replaceState(null, '', '?' + new URLSearchParams({ gun: $('gun').value, skin: $('skin').value, att: $('att').value, ...(spin ? { spin: 1 } : {}) }));
+}
+['gun', 'skin', 'att'].forEach((id) => $(id).addEventListener('change', rebuild));
+$('spin').onclick = () => { spin = !spin; rebuild(); };
+rebuild();
+window.lab = { rebuild, holder, camera, controls };
+
+function frame() {
+  requestAnimationFrame(frame);
+  const w = innerWidth, h = innerHeight;
+  if (renderer.domElement.width !== Math.floor(w * renderer.getPixelRatio())) { renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  if (spin && $('gun').value) holder.rotation.y += 0.006;
+  controls.update();
+  renderer.render(scene, camera);
+}
+frame();
+</script>
+</body>
+</html>

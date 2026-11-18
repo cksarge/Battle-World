@@ -1,6 +1,18 @@
 # Changelog
 
-#### 4.3.2 · 2026-11-16
+### 4.4.0 · 2026-11-17
+
+- **Weapon graphics overhaul**: every gun, knife, grenade and attachment has been rebuilt with far more detail
+  - Bevelled receivers and slides, real rails, magazines, trigger guards, sights, scopes with glass, muzzle brakes and flash hiders
+  - Better materials: brushed metal, stippled polymer, walnut grain and glass that reflects the sky
+  - Grenades have moulded frag segments, a proper spoon and pull ring, and sharper markings
+- **Finishes look much better**: they now cover the whole gun, including the receiver, slide and magazine
+  - Camo, digital, tiger stripe, marble, damascus and the rest are redrawn at higher resolution with light wear
+  - Glowing finishes only glow along their lines, and polished, carbon and prism finishes get a glossy clear coat
+- **Attachments are fully modelled**: a proper suppressor, a laser with a lit emitter, a ribbed foregrip, and the Extended Mag now shows a longer magazine
+- Guns are drawn with far fewer draw calls, so the extra detail doesn't cost frame rate
+
+#### 4.3.2 · 2026-11-16 · [6a9a17b](https://github.com/cksarge/John-Paul-Simulator/commit/6a9a17b)
 
 - **Assists**: you get one when you do at least 30 damage to someone in the 5 seconds before a teammate (or anyone, in free-for-all) kills them
   - If nobody else damaged them, flashing the victim or throwing the smoke the killer shot through also counts, marked with a small ASSIST tag
