@@ -94,20 +94,37 @@ function rod(role, a, b, r) {
 // The head: a sphere pulled into a skull with a narrower jaw and flatter face. Partial shells of the
 // same shape (scaled up a little) make hair, beards, masks and hats that sit snugly on it.
 const HEAD_C = 0.125;
+// Head surface point for a unit direction (x, y, z), relative to the head's centre.
+function headPoint(x, y, z, scale = 1) {
+  let X = x * 0.104, Y = y * 0.13, Z = z * 0.118;
+  if (y < 0) { const t = -y; X *= 1 - 0.13 * t * t; Z *= z < 0 ? 1 - 0.04 * t : 1 - 0.3 * t; Y *= 1 - 0.12 * t; }
+  if (z < 0) Z *= 0.94 + 0.06 * Math.abs(y);
+  if (y > 0.2) Y *= 1 + 0.04 * (y - 0.2); // a little more crown
+  return [X * scale, Y * scale, Z * scale];
+}
+// o.hairline(x, y, z) → the largest angle from the top of the head the shell reaches in that
+// direction; anything below it is pulled up onto the line, so hair follows the skull exactly and
+// ends at a clean hairline instead of being a tilted cap.
 function headShell(scale = 1, o = {}) {
   const g = new THREE.SphereGeometry(1, o.ws ?? 32, o.hs ?? 22, o.phiStart ?? 0, o.phiLength ?? Math.PI * 2, o.thetaStart ?? 0, o.thetaLength ?? Math.PI);
   const p = g.attributes.position;
   for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-    let X = x * 0.104, Y = y * 0.13, Z = z * 0.118;
-    if (y < 0) { const t = -y; X *= 1 - 0.13 * t * t; Z *= z < 0 ? 1 - 0.04 * t : 1 - 0.3 * t; Y *= 1 - 0.12 * t; }
-    if (z < 0) Z *= 0.94 + 0.06 * Math.abs(y);
-    if (y > 0.2) Y *= 1 + 0.04 * (y - 0.2); // a little more crown
-    p.setXYZ(i, X * scale, Y * scale, Z * scale);
+    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    // hairline: the shell stops at that angle going down; beardline: it starts there going down.
+    const r = Math.hypot(x, z), th = Math.acos(Math.max(-1, Math.min(1, y)));
+    const L = o.hairline ? Math.min(th, o.hairline(x, y, z)) : o.beardline ? Math.max(th, o.beardline(x, y, z)) : th;
+    if (r > 1e-6 && L !== th) { x = (x / r) * Math.sin(L); z = (z / r) * Math.sin(L); y = Math.cos(L); }
+    p.setXYZ(i, ...headPoint(x, y, z, scale));
   }
   g.computeVertexNormals();
   return g;
 }
+// Hairline that runs from `front` (forehead) through `side` (over the ears) to `back` (the nape),
+// as angles from the top of the head.
+const hairline = (front, side, back, lean = 0) => (x, y, z) => {
+  const r = Math.hypot(x, z) || 1, c = -z / r;
+  return (c >= 0 ? side + (front - side) * c : side + (back - side) * -c) + lean * (x / r);
+};
 
 // Cached builds: key → [[role, merged geometry]].
 const built = new Map();
@@ -245,44 +262,66 @@ function headParts(hair, face, gear, zombie) {
   }
   if (zombie) put('rot', rbox(0.08, 0.04, 0.012, 0.004), 0.03, 0.05, -0.112);
 
-  // Hair: shells of the head shape tilted back so the hairline sits above the forehead.
-  const cap = (scale, len, tilt = 0.45) => put('hair', headShell(scale, { thetaLength: len, hs: 14 }), 0, HEAD_C, 0.004, { rx: tilt });
-  if (hair === 'buzz') cap(1.018, 1.4);
-  if (['short', 'swept', 'long', 'ponytail'].includes(hair)) cap(1.06, 1.55);
+  // Hair: layers of the head's own shape, each ending at its hairline, so every piece sits on the
+  // skull. Volume layers (a quiff, a fringe) are the same shape a little further out.
+  const layer = (scale, line) => put('hair', headShell(scale, { hairline: line, hs: 26 }), 0, HEAD_C, 0);
   const hat = gear !== 'none' && gear !== 'headset';
-  if (hair === 'swept' && !hat) put('hair', rbox(0.17, 0.05, 0.08, 0.025), 0.012, 0.25, -0.07, { rx: -0.35, rz: 0.12 });
-  if (hair === 'short' && !hat) put('hair', rbox(0.16, 0.035, 0.06, 0.017), 0, 0.245, -0.075, { rx: -0.25 });
+  if (hair === 'buzz') layer(1.014, hairline(1.05, 1.5, 1.95));
+  if (hair === 'short' || hair === 'swept' || hair === 'ponytail') layer(1.04, hairline(1.0, 1.48, 2.0));
+  // Short: a little height at the front of the crown. Swept: a deeper layer pushed over to one side.
+  if (hair === 'short' && !hat) layer(1.075, hairline(0.85, 0.6, 0.35));
+  if (hair === 'swept' && !hat) { layer(1.07, hairline(1.0, 0.75, 0.45, 0.25)); layer(1.1, hairline(0.75, 0.45, 0.2, 0.3)); }
   if (hair === 'long') {
-    put('hair', rbox(0.2, 0.26, 0.07, 0.03), 0, 0.09, 0.09);
-    for (const s of [-1, 1]) put('hair', rbox(0.03, 0.2, 0.15, 0.014), s * 0.104, 0.12, 0.02);
+    // Down over the ears and the back of the head, then a fall of hair to the shoulders behind.
+    layer(1.045, hairline(1.0, 2.0, 2.5));
+    // The fall wraps round the back from ear to ear: its top tucks inside the hair layer, its bottom
+    // flares a little over the shoulders.
+    put('hair', new THREE.CylinderGeometry(0.1, 0.112, 0.22, 24, 1, true, -1.45, 2.9), 0, -0.005, 0.004, { sz: 1.12 });
   }
   if (hair === 'ponytail') {
-    put('strap', new THREE.TorusGeometry(0.018, 0.007, 6, 14), 0, 0.15, 0.128, { rx: 0.5 });
-    put('hair', limb([[0.004, -0.17], [0.022, -0.12], [0.03, -0.06], [0.024, -0.01], [0.012, 0.01]], 12), 0, 0.15, 0.135, { rx: -0.3 });
+    const [, ty, tz] = headPoint(0, Math.cos(1.75), Math.sin(1.75), 1.04);
+    put('strap', new THREE.TorusGeometry(0.016, 0.007, 6, 14), 0, HEAD_C + ty, tz + 0.004, { rx: 0.2 });
+    put('hair', limb([[0.004, -0.17], [0.022, -0.12], [0.03, -0.06], [0.024, -0.01], [0.014, 0.012]], 12), 0, HEAD_C + ty, tz + 0.01, { rx: -0.3 });
   }
-  if (hair === 'mohawk') cap(1.012, 1.35);
-  if (hair === 'mohawk' && !hat) {
-    const crest = [];
-    for (let i = 0; i <= 10; i++) { const a = -1.1 + i * 0.22; crest.push([Math.sin(a) * 0.15, HEAD_C + Math.cos(a) * 0.15 + (i % 2 ? 0.015 : 0)]); }
-    for (let i = 10; i >= 0; i--) { const a = -1.1 + i * 0.22; crest.push([Math.sin(a) * 0.118, HEAD_C + Math.cos(a) * 0.118]); }
-    put('hair', profGeo(crest, 0.04, { bevel: 0.01 }));
+  if (hair === 'mohawk') {
+    // Shaved sides, and a spiked crest sitting on the skull from the forehead to the crown.
+    layer(1.008, hairline(1.0, 1.45, 1.9));
+    if (!hat) {
+      const outer = [], inner = [];
+      for (let i = 0; i <= 12; i++) {
+        const a = -1.05 + i * 0.2, [, py, pz] = headPoint(0, Math.cos(a), Math.sin(a), 0.98);
+        const h = 0.03 + (i % 2 ? 0.018 : 0), k = Math.hypot(py, pz) || 1;
+        inner.push([pz, HEAD_C + py]); outer.push([pz + (pz / k) * h, HEAD_C + py + (py / k) * h]);
+      }
+      put('hair', profGeo([...outer, ...inner.reverse()], 0.036, { bevel: 0.009 }));
+    }
   }
 
   // Facial hair and coverings.
   if (face === 'beard' || face === 'stubble') {
     const big = face === 'beard';
     // Along the jaw from ear to ear, below the mouth, with a moustache over the lip.
-    put(big ? 'hair' : 'stubble', headShell(big ? 1.035 : 1.012, { phiStart: Math.PI - 0.15, phiLength: Math.PI + 0.3, thetaStart: 1.95, thetaLength: 1.05, hs: 12 }), 0, HEAD_C, big ? -0.002 : 0);
-    if (big) {
-      for (const s of [-1, 1]) put('hair', rbox(0.022, 0.07, 0.05, 0.01), s * 0.092, 0.09, -0.04, { rz: s * 0.15 });
-      put('hair', rbox(0.06, 0.013, 0.02, 0.006), 0, 0.08, -0.111);
-    }
+    // Starts below the mouth at the front and rises along the jaw to sideburns at the ears; nothing
+    // round the back of the neck.
+    const beardline = (x, y, z) => {
+      const rr = Math.hypot(x, z) || 1, c = -z / rr;
+      return c >= 0 ? 1.44 + (2.12 - 1.44) * Math.pow(c, 0.7) : 1.44 + (Math.PI - 1.44) * Math.min(1, -c * 4);
+    };
+    put(big ? 'hair' : 'stubble', headShell(big ? 1.035 : 1.012, { beardline, hs: 30 }), 0, HEAD_C, 0);
+    if (big) put('hair', rbox(0.06, 0.013, 0.02, 0.006), 0, 0.08, -0.111);
   }
   if (face === 'glasses') {
     for (const s of [-1, 1]) {
       put('dark', new THREE.TorusGeometry(0.021, 0.003, 6, 18), s * 0.039, 0.136, -0.121);
       put('lens', new THREE.CircleGeometry(0.02, 18), s * 0.039, 0.136, -0.1215, { ry: Math.PI });
-      put('dark', rbox(0.004, 0.004, 0.115, 0.0015), s * 0.103, 0.14, -0.06);
+      // Arm: from the rim back along the side of the head to the ear.
+      const arm = [new THREE.Vector3(s * 0.058, 0.138, -0.118)];
+      for (let i = 0; i <= 6; i++) {
+        const az = 0.85 + i * 0.12, th = 1.5;
+        const [px, py, pz] = headPoint(s * Math.sin(az) * Math.sin(th), Math.cos(th), -Math.cos(az) * Math.sin(th), 1.03);
+        arm.push(new THREE.Vector3(px, HEAD_C + py, pz));
+      }
+      put('dark', new THREE.TubeGeometry(new THREE.CatmullRomCurve3(arm), 12, 0.0025, 5, false));
     }
     put('dark', rbox(0.02, 0.004, 0.004, 0.0015), 0, 0.142, -0.121);
   }
@@ -309,7 +348,15 @@ function headParts(hair, face, gear, zombie) {
     put('vest', new THREE.TorusGeometry(0.117, 0.008, 6, 36), 0, 0.145, 0.04, { rx: Math.PI / 2 + 0.22, sx: 1.12, sy: 1.25 });
     for (const s of [-1, 1]) put('strap', rbox(0.012, 0.03, 0.11, 0.004), s * 0.128, 0.185, 0.01, { rz: s * 0.25 });
     put('gunmetal', rbox(0.05, 0.032, 0.022, 0.006), 0, 0.225, -0.142, { rx: -0.45 });
-    for (const s of [-1, 1]) put('strap', rbox(0.006, 0.13, 0.016, 0.002), s * 0.098, 0.07, 0.0, { rz: s * 0.12 });
+    // Chin strap: from the rim in front of each ear, down the jaw and under the chin, just off the skin.
+    const strap = [];
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16, side = t < 0.5 ? -1 : 1, k = Math.abs(t - 0.5) * 2; // 1 at the ears, 0 under the chin
+      const th = 1.45 + (1 - k) * 1.35, az = side * (0.12 + 0.66 * k) * Math.PI / 2;
+      const [px, py, pz] = headPoint(Math.sin(az) * Math.sin(th), Math.cos(th), -Math.cos(az) * Math.sin(th), 1.04);
+      strap.push(new THREE.Vector3(px, HEAD_C + py, pz));
+    }
+    put('strap', new THREE.TubeGeometry(new THREE.CatmullRomCurve3(strap), 24, 0.0035, 5, false));
   }
   if (gear === 'cap') {
     put('top', headShell(1.1, { thetaLength: 1.4, hs: 12 }), 0, HEAD_C + 0.01, 0, { rx: 0.15 });

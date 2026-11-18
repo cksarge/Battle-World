@@ -1,6 +1,12 @@
 # Changelog
 
-### 4.7.0 · 2026-11-17
+#### 4.7.1 · 2026-11-17
+
+- Hair fixed on every style: it now sits right on the head with a proper hairline instead of floating pieces or a bald patch on top
+  - Short and swept hair have their volume on top of the head, long hair falls from the head down past the shoulders, the mohawk crest sits on the skull, and the ponytail ties on at the back
+- Beards are one piece from sideburn to sideburn and join the hair, the helmet's chin strap runs along the jaw, and glasses arms follow the head back to the ears
+
+### 4.7.0 · 2026-11-17 · [a6ec05d](https://github.com/cksarge/John-Paul-Simulator/commit/a6ec05d)
 
 - **Operators hold their guns properly**: the right hand is on the grip and the left on the handguard (or cupped under the pistol hand), with long guns raised to the shoulder in a bladed stance
 - **Better deaths**: the knees give way first, then the body falls with a twist, the arms go loose, the gun drops and the eyes close
