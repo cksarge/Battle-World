@@ -1,6 +1,15 @@
 # Changelog
 
-#### 4.4.1 · 2026-11-17
+### 4.5.0 · 2026-11-17
+
+- **Lineups on the ready-up screen**: before a match starts you see everyone's calling card, with your team on the left and the other team on the right
+  - Each card shows the player's name and clan tag, plus their ELO online (or the bot difficulty against bots); yours is highlighted
+  - In free-for-all and party modes everyone is split across both sides, and the lineup updates as players join or leave
+- In Duel, Wingman and the other modes that open the buy menu at the start, the ready-up screen now stays up until you click to play, then the buy menu opens
+- The buy menu now closes by itself when buy time ends, with a quick "click anywhere to jump in" prompt to get back into the game. In modes where you can keep buying after the start it stays open until that window closes, and modes where you can buy all round leave it alone
+- Replays moved from the main menu into a Replays tab in Stats, next to Overview, Achievements and Mastery
+
+#### 4.4.1 · 2026-11-17 · [122160e](https://github.com/cksarge/John-Paul-Simulator/commit/122160e)
 
 - The Arc Rail's beam now shoots out toward where you aimed instead of streaking backwards behind you
 

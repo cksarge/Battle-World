@@ -133,14 +133,55 @@ export class Hud {
     this.overlay = 'start';
     const m = this.g.mode, map = this.g.mapDef;
     const cond = this.g.variant && this.g.variant !== 'day' ? ' · ' + variantName(map, this.g.variant) : '';
-    this.el.ovl.innerHTML = `<div class="overlay"><div class="panel pause" style="text-align:center">
-      <h3>${esc(m.name)} · ${esc(map.name)}${esc(cond)}</h3>
-      <h1 style="margin:0">Ready up</h1>
-      <p class="muted small">${pad.active ? padHelp().split(' In menus')[0] : 'WASD move · Space jump · Ctrl crouch · Shift walk · R reload · B buy (1-3 presets) · F rebuy · K keep loadout · E doors, ammo, plant/defuse · Tab scores · 1-5 weapons'}</p>
-      <p class="goal-tag" style="margin:0">${esc(goalText(m))}</p>
-      <button class="btn primary big" data-a="go">${pad.active ? pad.label('play') + ' to play' : 'Click to play'}</button>
+    const [left, right] = this.lineup();
+    this.el.ovl.innerHTML = `<div class="overlay"><div class="ready-wrap">
+      <div class="lineup" data-side="0">${left}</div>
+      <div class="panel pause" style="text-align:center">
+        <h3>${esc(m.name)} · ${esc(map.name)}${esc(cond)}</h3>
+        <h1 style="margin:0">Ready up</h1>
+        <p class="muted small">${pad.active ? padHelp().split(' In menus')[0] : 'WASD move · Space jump · Ctrl crouch · Shift walk · R reload · B buy (1-3 presets) · F rebuy · K keep loadout · E doors, ammo, plant/defuse · Tab scores · 1-5 weapons'}</p>
+        <p class="goal-tag" style="margin:0">${esc(goalText(m))}</p>
+        <button class="btn primary big" data-a="go">${pad.active ? pad.label('play') + ' to play' : 'Click to play'}</button>
+      </div>
+      <div class="lineup" data-side="1">${right}</div>
     </div></div>`;
+    this.el.ovl.querySelector('[data-a=go]').onclick = () => {
+      if (this.buyAfterStart && this.g.canBuy()) { this.buyAfterStart = false; this.closeOverlay(false); this.openBuy(); } else this.closeOverlay(true);
+    };
+  }
+
+  // Buy time ran out with the buy menu open. Browsers only hand the mouse back to the game on a
+  // click, so this swaps the menu for a light click-anywhere prompt instead of the pause screen.
+  buyTimeOver() {
+    if (pad.active) return this.closeOverlay(true);
+    this.closeOverlay(false);
+    this.overlay = 'resume';
+    this.el.ovl.innerHTML = `<div class="overlay resume-prompt" data-a="go"><div><b>Buy time is over</b><span>Click anywhere to jump in</span></div></div>`;
     this.el.ovl.querySelector('[data-a=go]').onclick = () => this.closeOverlay(true);
+  }
+
+  // Everyone's calling card either side of the ready-up panel: your team on the left and the other
+  // team on the right, or everyone split across both sides in free-for-all style modes.
+  lineup() {
+    const g = this.g, lp = g.local, kind = g.mode.kind;
+    const all = [...g.players.values()].filter((p) => !p.zombie && !p.spectator);
+    if (kind === 'training' || all.length < 2) return ['', ''];
+    const card = (p, cls) => `<div class="lu-card ${cls}${p === lp ? ' me' : ''}" style="background-image:url(${cardImage(p.char?.card || 'standard')})">
+      <div class="lu-text"><b>${named(p)}</b><span>${p === lp ? 'You' : p.isBot ? (g.opts.botLevel || 'normal') + ' bot' : g.online ? 'ELO ' + p.elo : 'Player'}</span></div></div>`;
+    const sorted = (list) => list.sort((a, b) => (b === lp) - (a === lp) || a.isBot - b.isBot);
+    if (SOLO_KINDS.has(kind) || POOL_KINDS.has(kind)) {
+      const list = sorted(all), half = Math.ceil(list.length / 2);
+      return [list.slice(0, half), list.slice(half)].map((side) => side.map((p) => card(p, 'ffa')).join(''));
+    }
+    const mine = lp?.team ?? 0;
+    return [mine, 1 - mine].map((t) => `<div class="lu-head ${TEAM_CLASS[t]}">${esc(g.teamName(t))}</div>` + sorted(all.filter((p) => p.team === t)).map((p) => card(p, TEAM_CLASS[t])).join(''));
+  }
+
+  // Players joining or leaving while the ready-up screen is open.
+  refreshLineup() {
+    if (this.overlay !== 'start') return;
+    const sides = this.lineup();
+    this.el.ovl.querySelectorAll('.lineup').forEach((el) => { el.innerHTML = sides[+el.dataset.side]; });
   }
 
   showPause(note = '') {
@@ -540,6 +581,10 @@ export class Hud {
   // ───────────── per-frame ─────────────
   update(dt) {
     const g = this.g, el = this.el, s = g.state;
+    // The buy menu closes itself once buying ends: when the round starts, or in bomb and hostage
+    // modes when the short buy window after the start runs out or you leave spawn. Modes that let
+    // you buy all round (deathmatch, the objective modes, the range) keep it open.
+    if (this.overlay === 'buy' && !g.canBuy()) this.buyTimeOver();
     // Spectators see the HUD of whoever they are watching.
     const p = g.local || (g.spectator ? g.spectateTarget : null);
     if (g.spectator) {

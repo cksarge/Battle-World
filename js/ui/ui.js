@@ -50,15 +50,14 @@ const NAV = [
   ['season', 'Season', 'Reward track and challenges'],
   ['operators', 'Operators', 'Pick and build your operator'],
   ['armory', 'Armory', 'Finishes, attachments, outfits, cards, emotes'],
-  ['stats', 'Stats', 'Your record, weapons and rivals'],
-  ['replays', 'Replays', 'Rewatch your recent matches'],
+  ['stats', 'Stats', 'Your record, weapons, rivals and replays'],
   ['workshop', 'Workshop', 'Build, share and download maps'],
   ['clan', 'Clan', 'Create or join a clan'],
   ['leaderboard', 'Leaderboard', 'Top players and clans'],
   ['settings', 'Settings', 'Graphics, controls and audio'],
 ];
-const FOCUS = { play: 'play', season: 'operator', operators: 'operator', armory: 'weapon', stats: 'stats', replays: 'stats', workshop: 'stats', clan: 'stats', leaderboard: 'play', settings: 'play', admin: 'stats' };
-const WIDE = new Set(['season', 'stats', 'replays', 'workshop', 'clan', 'leaderboard', 'settings', 'admin']);
+const FOCUS = { play: 'play', season: 'operator', operators: 'operator', armory: 'weapon', stats: 'stats', workshop: 'stats', clan: 'stats', leaderboard: 'play', settings: 'play', admin: 'stats' };
+const WIDE = new Set(['season', 'stats', 'workshop', 'clan', 'leaderboard', 'settings', 'admin']);
 const ADMIN_NAV = ['admin', 'Admin', 'Reports, players and game switches'];
 const ARMORY_KINDS = [['finish', 'Weapons'], ['outfit', 'Outfits'], ['card', 'Calling cards'], ['effect', 'Kill effects'], ['emote', 'Emotes']];
 const WHEEL = ['Up', 'Right', 'Down', 'Left'];
@@ -369,6 +368,8 @@ export class UI {
     if (this.app.banned) { this.showBanned(this.app.banned); return; }
     if (this.app.maintenanceShown) { this.showMaintenance(this.app.maintenance); return; }
     if (tab === 'profile') tab = 'stats';
+    // Replays live under Stats now.
+    if (tab === 'replays') { tab = 'stats'; this.statsView = 'replays'; }
     this.cleanup();
     if (this.lobby && !this.lobby.started) { this.lobby.leave(); this.lobby = null; }
     this.tab = tab;
@@ -409,7 +410,7 @@ export class UI {
     const el = this.root.querySelector('#tab');
     ({
       play: () => this.renderPlay(el), season: () => renderSeason(this, el), admin: () => (this.adminPanel ||= new AdminPanel(this)).render(el), operators: () => this.renderOperators(el), armory: () => this.renderArmory(el),
-      stats: () => this.renderStats(el), replays: () => this.renderReplays(el), workshop: () => (this.workshop ||= new Workshop(this)).render(el), clan: () => renderClan(this, el), leaderboard: () => this.renderLeaderboard(el), settings: () => this.renderSettings(el),
+      stats: () => this.renderStats(el), workshop: () => (this.workshop ||= new Workshop(this)).render(el), clan: () => renderClan(this, el), leaderboard: () => this.renderLeaderboard(el), settings: () => this.renderSettings(el),
     })[tab]();
     if (tab === 'play') this.maybeOfferTutorial();
   }
@@ -1123,10 +1124,10 @@ export class UI {
   }
 
   // ───────────────────────── stats ─────────────────────────
-  // Stats has three views: the overview, achievements and weapon mastery.
+  // Stats has four views: the overview, achievements, weapon mastery and replays.
   statsSwitch() {
     const v = this.statsView || 'overview';
-    return `<div class="m-switch" role="tablist">${[['overview', 'Overview'], ['achievements', 'Achievements'], ['mastery', 'Mastery']].map(([k, l]) => `<button data-sv="${k}" class="${v === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+    return `<div class="m-switch" role="tablist">${[['overview', 'Overview'], ['achievements', 'Achievements'], ['mastery', 'Mastery'], ['replays', 'Replays']].map(([k, l]) => `<button data-sv="${k}" class="${v === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
   }
 
   renderMastery(el) {
@@ -1165,6 +1166,7 @@ export class UI {
   async renderStats(el, mapId = null) {
     if (this.statsView === 'achievements') return this.renderAchievements(el);
     if (this.statsView === 'mastery') return this.renderMastery(el);
+    if (this.statsView === 'replays') return this.renderReplays(el);
     const app = this.app, p = app.profile;
     el.innerHTML = '<p class="m-sub">Loading your stats…</p>';
     let rows = [];
@@ -1193,7 +1195,7 @@ export class UI {
     const bots = agg.h2h?.bot;
     const deathMaps = Object.keys(agg.deaths || {}).filter((k) => MAPS[k] && agg.deaths[k].length);
     const heatMap = mapId && deathMaps.includes(mapId) ? mapId : deathMaps[0];
-    if (this.statsView === 'achievements' || this.statsView === 'mastery') return;
+    if ((this.statsView || 'overview') !== 'overview') return;
     el.innerHTML = `${this.statsSwitch()}<div class="st-head">
         <div><h2 class="m-h1">${esc(app.me().name)}</h2><p class="m-sub">${p ? `Joined ${new Date(p.created_at).toLocaleDateString()} · level ${lvl.level}` : 'Playing as a guest. Stats below are from this browser only.'}</p></div>
         <span class="spacer"></span>${p ? rankBadge(p.elo, true) : ''}
@@ -1334,7 +1336,8 @@ export class UI {
 
   // ───────────────────────── replays ─────────────────────────
   async renderReplays(el) {
-    el.innerHTML = `<h2 class="m-h1">Replays</h2><p class="m-sub">Your last 8 matches are saved in this browser. Open one to rewatch it from any player's view or a free camera.</p><div id="rp-list"><p class="m-sub">Loading…</p></div>`;
+    el.innerHTML = `${this.statsSwitch()}<p class="m-sub">Your last 8 matches are saved in this browser. Open one to rewatch it from any player's view or a free camera.</p><div id="rp-list"><p class="m-sub">Loading…</p></div>`;
+    this.bindStatsSwitch(el);
     const body = el.querySelector('#rp-list');
     try {
       const { listReplays, deleteReplay } = await import('../game/replaystore.js');

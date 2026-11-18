@@ -426,6 +426,31 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 .buy-item kbd { margin-right: 6px; }
 .pause { width: 360px; display: flex; flex-direction: column; gap: 10px; }
 
+.resume-prompt { cursor: pointer; background: rgba(0,0,0,.25); }
+.resume-prompt > div { display: flex; flex-direction: column; align-items: center; gap: 4px; text-shadow: 0 2px 8px #000; }
+.resume-prompt b { font-family: var(--display); font-size: 40px; letter-spacing: 3px; text-transform: uppercase; }
+.resume-prompt span { font-size: 14px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); }
+
+/* Ready up: everyone's calling card either side of the panel. */
+.ready-wrap { display: flex; align-items: center; justify-content: center; gap: 28px; }
+.lineup { width: 290px; display: flex; flex-direction: column; gap: 6px; }
+.lineup:empty { display: none; }
+.lu-head { font-family: var(--display); font-weight: 700; font-size: 18px; letter-spacing: 2px; text-transform: uppercase; padding: 0 2px 2px; }
+.lu-head.t { color: var(--t); } .lu-head.ct { color: var(--ct); }
+.lineup[data-side="1"] .lu-head { text-align: right; }
+.lu-card { height: 64px; background-size: cover; background-position: center; border: 1px solid rgba(255,255,255,.18); border-left: 4px solid #ddd; position: relative; display: flex; align-items: center; padding: 0 14px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.45); animation: lu-in .4s ease-out both; }
+.lu-card.t { border-left-color: var(--t); } .lu-card.ct { border-left-color: var(--ct); }
+.lu-card.me { border-color: rgba(255,255,255,.55); box-shadow: 0 0 0 1px rgba(255,255,255,.35), 0 6px 18px rgba(0,0,0,.45); }
+.lu-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(0,0,0,.8), rgba(0,0,0,.3) 70%, transparent); }
+.lu-text { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.lu-text b { font-family: var(--display); font-size: 21px; line-height: 1.05; letter-spacing: .5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lu-text span { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,.7); font-weight: 600; }
+.lu-card.me .lu-text span { color: var(--accent); }
+.lineup .lu-card:nth-child(2) { animation-delay: .04s; } .lineup .lu-card:nth-child(3) { animation-delay: .08s; } .lineup .lu-card:nth-child(4) { animation-delay: .12s; } .lineup .lu-card:nth-child(5) { animation-delay: .16s; } .lineup .lu-card:nth-child(n+6) { animation-delay: .2s; }
+@keyframes lu-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .lu-card { animation: none; } }
+@media (max-width: 1100px) { .ready-wrap { flex-direction: column; gap: 14px; } .lineup { width: 360px; max-width: 100%; } .lineup[data-side="1"] .lu-head { text-align: left; } }
+
 .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .preset { border: 1px solid var(--line, rgba(255,255,255,.12)); background: rgba(255,255,255,.03); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .preset-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }

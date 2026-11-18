@@ -185,6 +185,7 @@ export class Game {
     p.isLocal = info.id === this.localId;
     p.isRemoteView = p.owner !== this.localId;
     this.players.set(p.id, p);
+    this.hud?.refreshLineup();
     p.dummy = !!info.dummy;
     if (info.isBot && !info.dummy && this.isHost) this.brains.set(p.id, this.makeBrain(p));
     if (!p.isLocal) {
@@ -224,6 +225,7 @@ export class Game {
     p.model?.dispose();
     this.players.delete(id);
     this.brains.delete(id);
+    this.hud?.refreshLineup();
   }
 
   // Opponents: who bots aim at, pings mark and spawns stay hidden from.
@@ -2128,7 +2130,11 @@ export class Game {
       this.hud.center(`ROUND ${d.round}`, side, 2.5);
       const keep = this.settings.keepLoadout && this.savedBuys.length;
       if (lp && lp.alive && keep) setTimeout(() => this.rebuy(), 350);
-      else if (lp && lp.alive && this.mode.kind !== 'bomb' && this.mode.kind !== 'hostage' && reset.has(lp.id)) this.hud.openBuy();
+      else if (lp && lp.alive && this.mode.kind !== 'bomb' && this.mode.kind !== 'hostage' && reset.has(lp.id)) {
+        // Leave the ready-up lineup up; the buy menu opens once they click to play.
+        if (this.hud.overlay === 'start') this.hud.buyAfterStart = true;
+        else this.hud.openBuy();
+      }
     }
     if (lp?.hasBomb) this.hud.info('You have the charge — hold E inside a bomb site to plant', 5);
   }
