@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Model check</title>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/" } }</script>
+<style>body { font: 14px/1.5 ui-monospace, monospace; background: #111; color: #ddd; padding: 20px; } .bad { color: #ff6b6b; } .ok { color: #6bff9a; }</style>
+</head>
+<body>
+<h1>Model check</h1>
+<p>Builds every weapon with every finish and attachment, every grenade, and every operator option (each hair, face, headgear, vest and build, on and off a team, as a zombie, alive and dead), and checks that nothing throws, no geometry has broken (NaN) vertices, and everything is a sensible size. Must end with 0 failures. <code>window.modelCheck</code> holds the result for scripts.</p>
+<pre id="out">Running…</pre>
+<script type="module">
+import * as THREE from 'three';
+import { buildGun } from '../js/engine/guns.js';
+import { CharacterModel, MATCH_SCALE } from '../js/engine/models.js';
+import { WEAPONS, GRENADES } from '../js/data/weapons.js';
+import { WEAPON_SKINS, OUTFITS } from '../js/data/skins.js';
+import { attachmentsFor } from '../js/data/attachments.js';
+import { CHAR_OPTIONS, DEFAULT_CHAR, OPERATORS } from '../js/data/characters.js';
+
+const out = [], fails = [];
+let checks = 0;
+const fail = (what, why) => fails.push(`${what}: ${why}`);
+
+function broken(obj) {
+  let bad = false;
+  obj.traverse((o) => {
+    if (!o.isMesh || bad) return;
+    const p = o.geometry.attributes.position.array;
+    for (let i = 0; i < p.length; i++) if (!Number.isFinite(p[i])) { bad = true; break; }
+    if (!o.material) bad = true;
+  });
+  return bad;
+}
+// Size of what's actually drawn (hidden parts, like a dead operator's dropped gun, don't count).
+function size(obj) {
+  const box = new THREE.Box3(), vis = (o) => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+  obj.updateMatrixWorld(true);
+  obj.traverse((o) => { if (o.isMesh && vis(o)) box.expandByObject(o); });
+  return box.getSize(new THREE.Vector3());
+}
+
+// ───── weapons ─────
+const NADES = ['he', 'flash', 'smoke', 'fire', 'mine', 'decoy'];
+for (const id of [...Object.keys(WEAPONS), ...NADES, 'gl', 'bomb']) {
+  const w = WEAPONS[id], gun = !!w?.mag;
+  const atts = [null, ...(w ? attachmentsFor(id) : [])];
+  for (const att of atts) for (const skin of Object.keys(WEAPON_SKINS)) {
+    const what = `${id}${att ? ' + ' + att : ''} (${skin})`;
+    checks++;
+    let g;
+    try { g = buildGun(id, skin, att); } catch (e) { fail(what, 'threw ' + e.message); continue; }
+    if (skin !== 'factory' && skin !== 'gold') continue; // geometry is shared between finishes; size it once
+    if (broken(g)) fail(what, 'NaN vertices or missing material');
+    const s = size(g), len = Math.max(s.x, s.y, s.z);
+    const [lo, hi] = NADES.includes(id) ? [0.05, 0.25] : id === 'gl' ? [0.04, 0.12] : w?.type === 'knife' ? [0.2, 0.7] : w?.type === 'pistol' ? [0.15, 0.45] : id === 'bomb' ? [0.15, 0.35] : [0.4, 1.6];
+    if (len < lo || len > hi) fail(what, `longest side ${len.toFixed(2)} m, expected ${lo}–${hi}`);
+    if (g.userData.generic) fail(what, 'no model of its own (generic placeholder)');
+    if (gun) {
+      const m = g.userData.muzzle, box = new THREE.Box3().setFromObject(g).expandByScalar(0.02);
+      if (!m || !box.containsPoint(m)) fail(what, 'muzzle is outside the model');
+      if (!g.userData.grip || (g.userData.grip[0] === 0 && g.userData.grip[1] === 0)) fail(what, 'no grip position for the hands');
+      if (att === 'extmag' && !g.userData.parts.mag && !['mauler', 'hailstorm', 'bulldog', 'anvil', 'reaper', 'striker', 'nailer', 'breacher', 'coach', 'kestrel'].includes(id)) fail(what, 'extended mag but no magazine part');
+    }
+    if (NADES.includes(id) && ['mine', 'decoy'].includes(id) && !g.getObjectByName('led')) fail(what, 'armed device has no led');
+  }
+}
+out.push(`Weapons: ${checks} builds`);
+
+// ───── operators ─────
+const opts = [];
+for (const k of ['hair', 'face', 'headgear', 'vest', 'build']) for (const v of CHAR_OPTIONS[k]) opts.push({ [k]: v });
+const looks = [...OPERATORS.map((o) => o.char), ...opts.map((o) => ({ ...DEFAULT_CHAR, ...o })), ...Object.keys(OUTFITS).map((outfit) => ({ ...DEFAULT_CHAR, outfit })),
+  ...['walker', 'infected', 'brute'].map((zombie) => ({ ...DEFAULT_CHAR, zombie }))];
+let ops = 0;
+for (const c of looks) for (const team of [-1, 0, 1]) for (const match of [false, true]) {
+  const what = `operator ${JSON.stringify({ hair: c.hair, face: c.face, headgear: c.headgear, vest: c.vest, build: c.build, outfit: c.outfit, zombie: c.zombie, team, match })}`;
+  ops++;
+  let m;
+  try {
+    m = new CharacterModel(c, { team, match });
+    m.setWeapon(c.zombie ? null : 'ar7');
+    m.update(0.016, { speed: 3, crouch: 0, pitch: 0.2, onGround: true, firing: true });
+  } catch (e) { fail(what, 'threw ' + e.message); continue; }
+  if (broken(m.root)) fail(what, 'NaN vertices or missing material');
+  m.root.updateMatrixWorld(true);
+  const s = size(m.body), h = s.y, want = 1.88 * (match ? MATCH_SCALE : c.height || 1);
+  if (Math.abs(h - want) > 0.28) fail(what, `height ${h.toFixed(2)} m, expected about ${want.toFixed(2)}`);
+  if (s.x > 1.4 || s.z > 1.6) fail(what, `too wide (${s.x.toFixed(2)} × ${s.z.toFixed(2)} m)`);
+  // Dead: lies flat and the eyes are shut.
+  try { m.die(1); for (let i = 0; i < 60; i++) m.update(0.05, { speed: 0, crouch: 0, pitch: 0, onGround: true, firing: false }); } catch (e) { fail(what, 'death threw ' + e.message); continue; }
+  m.root.updateMatrixWorld(true);
+  if (size(m.body).y > 0.75) fail(what, 'still upright after dying');
+  if (!c.zombie && !m.lids.visible) fail(what, 'eyes open after dying');
+  m.revive();
+}
+out.push(`Operators: ${ops} builds (alive, posed and dead)`);
+
+window.modelCheck = { checks: checks + ops, failures: fails };
+const el = document.getElementById('out');
+el.innerHTML = [...out, '', fails.length ? `<span class="bad">${fails.length} failure(s):</span>\n` + fails.slice(0, 200).map((f) => '  ' + f).join('\n') : '<span class="ok">0 failures</span>'].join('\n');
+</script>
+</body>
+</html>

@@ -37,6 +37,13 @@ export class Rules {
 
     if (s.phase === 'warmup') {
       if (g.waitingForPlayers() && s.time > -12) return;
+      // Give everyone time to read the ready-up lineup: the first round waits until each player has
+      // clicked to play (online, at most 20 s more, so one AFK player can't hold up the match).
+      if (s.time <= 0 && g.waitingForReady() && (this.readyHold = (this.readyHold || 0) + dt) < (g.online ? 20 : Infinity)) {
+        if (!s.readyWait) { s.readyWait = true; this.syncT = 0; }
+        return;
+      }
+      s.readyWait = false;
       if (s.time <= 0) {
         if (this.mode.kind === 'zombies') g.zombies.start();
         else if (this.mode.kind === 'infect') this.startInfectRound();

@@ -36,7 +36,7 @@ export class Input {
       plc: () => {
         const was = this.locked;
         this.locked = document.pointerLockElement === this.canvas;
-        if (was && !this.locked) { this.keys.clear(); this.mouse.left = this.mouse.right = false; this.onUnlock?.(); }
+        if (was && !this.locked) { this.unlockedAt = performance.now(); this.keys.clear(); this.mouse.left = this.mouse.right = false; this.onUnlock?.(); }
       },
       cm: (e) => e.preventDefault(),
       // Clicking the game view always recaptures the mouse (e.g. after alt-tabbing away).
@@ -121,6 +121,10 @@ export class Input {
   lock() {
     // A controller (or a touch screen with no pointer lock at all) needs no mouse capture.
     if (this.locked || pad.active || !this.canvas.requestPointerLock) return Promise.resolve();
+    // Browsers refuse a new lock for about a second after the last one ended. A click still counts
+    // for a few seconds, so wait out the rest of that second and then ask, instead of failing.
+    const wait = 1150 - (performance.now() - (this.unlockedAt || 0));
+    if (wait > 0) { this.lockRequestedAt = performance.now() + wait; return new Promise((r) => setTimeout(r, wait)).then(() => this.lock()); }
     this.lockRequestedAt = performance.now();
     return new Promise((resolve, reject) => {
       const done = () => { cleanup(); resolve(); };

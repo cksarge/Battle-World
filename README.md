@@ -159,6 +159,8 @@ Limitations:
 
 - `tools/test-headless.mjs`: `node tools/test-headless.mjs` runs the game-logic tests (data, every map, collision with walls and props, doors and glass, grenades, bot paths) with no browser. Run it after changing maps or the engine.
 - `tools/check-spawns.html`: open in the browser after editing any map. Every map must show 0 spawn sightlines and 0 unreachable spots. (Retakes picks defender spawns per site at match start, hidden from the whole site.)
+- `tools/check-models.html`: open in the browser after changing any weapon, grenade, finish, attachment or operator model. It builds every combination (about 6,300) and must show 0 failures: nothing throws, no broken geometry, sensible sizes, a grip for the hands on every gun, and operators that lie down and close their eyes when they die.
+- `tools/gun-lab.html` and `tools/operator-lab.html`: look at any weapon (with any finish and attachment) or any operator (with any hair, face, headgear, vest, team and pose) up close. Drag to orbit, scroll to zoom.
 - `tools/audit-ui.js`: in the browser console, `await (await import('/tools/audit-ui.js')).auditMenus()` (and `auditGame()`) checks that every button on every screen can be scrolled to and clicked, and that nothing is cut off sideways without a scrollbar. Run it at a few window sizes.
 
 Fonts are self-hosted in `fonts/` (Latin subsets) with their SIL Open Font License files.

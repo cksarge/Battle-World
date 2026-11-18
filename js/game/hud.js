@@ -37,7 +37,11 @@ export function killTagsHTML(hs, tags) {
   return t.join('');
 }
 // A player's name with their clan tag in front, if they're in one.
-const named = (p) => (p?.char?.clan ? `<i class="clan-tag">[${esc(p.char.clan)}]</i>` : '') + esc(p?.name);
+// Bots' "BOT " prefix becomes a small tag the same way.
+const named = (p) => {
+  const bot = p?.isBot && /^BOT /.test(p.name || '');
+  return (p?.char?.clan ? `<i class="clan-tag">[${esc(p.char.clan)}]</i>` : '') + (bot ? `<i class="bot-tag">BOT</i>${esc(p.name.slice(4))}` : esc(p?.name));
+};
 const fmtTime = (t) => { t = Math.max(0, Math.ceil(t)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 
 // In-match DOM overlay: vitals, scores, killfeed, radar and the interactive panels.
@@ -124,13 +128,14 @@ export class Hud {
     this.g.paused = false;
     if (relock && !this.g.ended) {
       this.g.input.lock().catch(() => {
-        if (!this.overlay && !this.g.ended) this.showPause('The browser needs a moment after you leave the game. Click Resume again.');
+        if (!this.overlay && !this.g.ended) this.showResume('Back in the game?');
       });
     }
   }
 
   showClickToPlay() {
     this.overlay = 'start';
+    this.startShown = true;
     const m = this.g.mode, map = this.g.mapDef;
     const cond = this.g.variant && this.g.variant !== 'day' ? ' · ' + variantName(map, this.g.variant) : '';
     const [left, right] = this.lineup();
@@ -155,8 +160,14 @@ export class Hud {
   buyTimeOver() {
     if (pad.active) return this.closeOverlay(true);
     this.closeOverlay(false);
+    this.showResume('Buy time is over');
+  }
+
+  // Light click-anywhere prompt for when the game needs the mouse back but the player didn't ask to
+  // pause (browsers only hand the mouse over on a click). Esc still opens the full pause menu.
+  showResume(title) {
     this.overlay = 'resume';
-    this.el.ovl.innerHTML = `<div class="overlay resume-prompt" data-a="go"><div><b>Buy time is over</b><span>Click anywhere to jump in</span></div></div>`;
+    this.el.ovl.innerHTML = `<div class="overlay resume-prompt" data-a="go"><div><b>${esc(title)}</b><span>Click anywhere to jump in</span></div></div>`;
     this.el.ovl.querySelector('[data-a=go]').onclick = () => this.closeOverlay(true);
   }
 
@@ -167,7 +178,7 @@ export class Hud {
     const all = [...g.players.values()].filter((p) => !p.zombie && !p.spectator);
     if (kind === 'training' || all.length < 2) return ['', ''];
     const card = (p, cls) => `<div class="lu-card ${cls}${p === lp ? ' me' : ''}" style="background-image:url(${cardImage(p.char?.card || 'standard')})">
-      <div class="lu-text"><b>${named(p)}</b><span>${p === lp ? 'You' : p.isBot ? (g.opts.botLevel || 'normal') + ' bot' : g.online ? 'ELO ' + p.elo : 'Player'}</span></div></div>`;
+      <div class="lu-text"><b>${named(p)}</b><span>${p === lp ? 'You' : p.isBot ? (g.opts.botLevel || 'normal') + ' difficulty' : g.online ? 'ELO ' + p.elo : 'Player'}</span></div></div>`;
     const sorted = (list) => list.sort((a, b) => (b === lp) - (a === lp) || a.isBot - b.isBot);
     if (SOLO_KINDS.has(kind) || POOL_KINDS.has(kind)) {
       const list = sorted(all), half = Math.ceil(list.length / 2);
@@ -358,7 +369,7 @@ export class Hud {
     if (info.highlight) {
       el.innerHTML = `<div class="kc-tag hl"><i></i>PLAY OF THE MATCH</div>
         <div class="kc-card" style="background-image:url(${cardImage(k?.char?.card || 'standard')})">
-          <div class="kc-text"><span>${esc(info.highlight.title)}</span><b>${esc(k?.name || '')}</b><em>${esc(info.highlight.detail)}</em></div>
+          <div class="kc-text"><span>${esc(info.highlight.title)}</span><b>${k ? named(k) : ''}</b><em>${esc(info.highlight.detail)}</em></div>
         </div>`;
       el.classList.remove('hidden');
       return;
@@ -366,7 +377,7 @@ export class Hud {
     const wname = itemInfo(info.weapon)?.name || info.weapon;
     el.innerHTML = `<div class="kc-tag"><i></i>KILL CAM</div>
       <div class="kc-card" style="background-image:url(${cardImage(k?.char?.card || 'standard')})">
-        <div class="kc-text"><span>KILLED BY</span><b>${esc(k?.name || '')}</b><em>${esc(wname)}${info.hs ? ' · headshot' : ''}${info.hp ? ` · ${info.hp} HP left` : ''}</em></div>
+        <div class="kc-text"><span>KILLED BY</span><b>${k ? named(k) : ''}</b><em>${esc(wname)}${info.hs ? ' · headshot' : ''}${info.hp ? ` · ${info.hp} HP left` : ''}</em></div>
       </div>
       <div class="kc-skip">${pad.active ? pad.label('next') : 'Space'} · skip</div>`;
     el.classList.remove('hidden');
@@ -581,6 +592,8 @@ export class Hud {
   // ───────────── per-frame ─────────────
   update(dt) {
     const g = this.g, el = this.el, s = g.state;
+    // However the ready-up screen goes away (click, controller, another menu), that player is ready.
+    if (this.startShown && this.overlay !== 'start' && !g.readySent) g.markReady();
     // The buy menu closes itself once buying ends: when the round starts, or in bomb and hostage
     // modes when the short buy window after the start runs out or you leave spawn. Modes that let
     // you buy all round (deathmatch, the objective modes, the range) keep it open.
@@ -590,7 +603,7 @@ export class Hud {
     if (g.spectator) {
       this.root.classList.add('spectator-hud');
       const t = g.spectateTarget;
-      const html = `<span class="spec-tag">SPECTATING</span>${t ? `<b>${esc(t.name)}</b>` : '<b>No one alive</b>'}<span class="muted small">${pad.active ? 'A next · Y previous · X camera' : 'Click / Space next · Q previous · V camera'} (${{ follow: 'third person', pov: 'first person', free: 'free' }[g.specCam.mode]})${pad.active ? ' · View scores · Menu pause' : ' · Tab scores · Esc leave'}</span>`;
+      const html = `<span class="spec-tag">SPECTATING</span>${t ? `<b>${named(t)}</b>` : '<b>No one alive</b>'}<span class="muted small">${pad.active ? 'A next · Y previous · X camera' : 'Click / Space next · Q previous · V camera'} (${{ follow: 'third person', pov: 'first person', free: 'free' }[g.specCam.mode]})${pad.active ? ' · View scores · Menu pause' : ' · Tab scores · Esc leave'}</span>`;
       if (html !== this.specHtml) { this.specHtml = html; el.spec.innerHTML = html; }
       el.spec.classList.remove('hidden');
     }
@@ -638,7 +651,7 @@ export class Hud {
     const bomb = s.bomb || {};
     const planted = bomb.state === 'planted';
     const timer = planted ? bomb.time : s.time;
-    const phaseLabel = { warmup: g.waitingForPlayers() ? 'WAITING' : 'WARMUP', buy: 'BUY', live: planted ? 'CHARGE' : '', post: '', over: 'FINAL' }[s.phase] ?? '';
+    const phaseLabel = { warmup: g.waitingForPlayers() ? 'WAITING' : s.readyWait ? 'READY UP' : 'WARMUP', buy: 'BUY', live: planted ? 'CHARGE' : '', post: '', over: 'FINAL' }[s.phase] ?? '';
     const kind = g.mode.kind;
     let goal = goalText(g.mode);
     if (kind === 'rounds' || SIDED_KINDS.has(kind)) goal += ` · Round ${Math.max(1, s.round)}`;

@@ -1,6 +1,16 @@
 # Changelog
 
-### 4.6.0 · 2026-11-17
+### 4.7.0 · 2026-11-17
+
+- **Operators hold their guns properly**: the right hand is on the grip and the left on the handguard (or cupped under the pistol hand), with long guns raised to the shoulder in a bladed stance
+- **Better deaths**: the knees give way first, then the body falls with a twist, the arms go loose, the gun drops and the eyes close
+- Operators blink now and then
+- **Guns move when you use them** (first person): pistol slides kick back on every shot, bolt-action snipers and the Breacher's pump cycle after each shot, and the magazine drops out and goes back in when you reload
+- **Getting back into the game is smoother**: clicking Resume too soon after leaving no longer fails with "the browser needs a moment"; the game waits that second and takes the mouse itself. When the game does need a click, you get a light "click anywhere to jump in" prompt instead of the pause menu (Esc still opens the pause menu)
+- **The first round waits for everyone to ready up**, so reading the lineup no longer eats into buy time. Online it waits at most 20 seconds for anyone who hasn't clicked in
+- Bot names show "BOT" as a small tag, like clan tags, in the kill feed, scoreboard, kill cam and spectator bar; the lineup shows their difficulty instead
+
+### 4.6.0 · 2026-11-17 · [76e98ca](https://github.com/cksarge/John-Paul-Simulator/commit/76e98ca)
 
 - **Operator graphics overhaul**: every operator has been rebuilt with rounded, shaped bodies instead of blocks
   - Faces with eyes, brows, a nose and mouth; hair that sits on the head, and proper beards, stubble, glasses, masks, balaclavas and gas masks

@@ -337,6 +337,34 @@ function headParts(hair, face, gear, zombie) {
   }
 }
 
+// ───── two-bone arm solver ─────
+// Arms hang down their shoulder's -Y; the elbow bends the forearm toward -Z. Lengths run from the
+// shoulder to the elbow and from the elbow to the middle of the palm.
+const UPPER = 0.28, LOWER = 0.3, BLADE = 0.42;
+const IK = { t: new THREE.Vector3(), d: new THREE.Vector3(), w: new THREE.Vector3(), u: new THREE.Vector3(), f: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3(), m: new THREE.Matrix4(),
+  poleR: new THREE.Vector3(0.8, -1, 0.25).normalize(), poleL: new THREE.Vector3(-0.35, -1, 0.1).normalize() };
+const clamp1 = (x) => Math.max(-1, Math.min(1, x));
+// Turns shoulder group `sh` and its elbow so the hand lands on T (in the shoulder's parent space),
+// with the elbow pointing toward `pole`. Out of reach, the arm points straight at T.
+function reach(sh, T, pole) {
+  const v = IK;
+  v.d.subVectors(T, sh.position);
+  const dist = Math.min(UPPER + LOWER - 0.002, Math.max(0.1, v.d.length()));
+  v.d.normalize();
+  const a = Math.acos(clamp1((UPPER * UPPER + dist * dist - LOWER * LOWER) / (2 * UPPER * dist)));
+  const bend = Math.PI - Math.acos(clamp1((UPPER * UPPER + LOWER * LOWER - dist * dist) / (2 * UPPER * LOWER)));
+  v.w.copy(pole).addScaledVector(v.d, -pole.dot(v.d)).normalize();
+  v.u.copy(v.d).multiplyScalar(Math.cos(a)).addScaledVector(v.w, Math.sin(a));
+  v.f.copy(v.d).multiplyScalar(dist).addScaledVector(v.u, -UPPER).normalize();
+  v.y.copy(v.u).negate();
+  v.z.copy(v.f).addScaledVector(v.u, -v.f.dot(v.u));
+  if (v.z.lengthSq() < 1e-6) v.z.copy(v.w);
+  v.z.normalize().negate();
+  v.x.crossVectors(v.y, v.z);
+  sh.quaternion.setFromRotationMatrix(v.m.makeBasis(v.x, v.y, v.z));
+  sh.userData.elbow.rotation.set(bend, 0, 0);
+}
+
 // Procedural operator. Root sits at the feet, faces -Z.
 // In matches every operator is drawn at the same size, matched to the hitboxes in game/player.js
 // (head around the camera eye at 1.64 m), so no body type is easier or harder to hit than another.
@@ -406,6 +434,13 @@ export class CharacterModel {
     this.head.position.set(0, 0.6, 0);
     this.torso.add(this.head);
     attach(this.head, `head|${c.hair}|${c.face}|${c.headgear}|${!!z}`, () => head(c.hair, c.face, c.headgear, !!z));
+    // Eyelids: hidden until a blink, and closed for good when the operator dies.
+    const covered = c.face === 'balaclava' || c.face === 'gasmask';
+    const [[, lidGeo]] = build(`lids|${covered}`, () => { for (const s of [-1, 1]) put('skin', new THREE.SphereGeometry(0.0172, 12, 8), s * 0.038, 0.121, -0.096 + (covered ? -0.022 : 0), { sz: 0.78 }); });
+    this.lids = new THREE.Mesh(lidGeo, roles.skin);
+    this.lids.visible = false;
+    if (!z) this.head.add(this.lids);
+    this.blinkT = 1 + Math.random() * 4;
 
     // arms (rifle hold)
     this.arms = [];
@@ -447,7 +482,12 @@ export class CharacterModel {
     const type = WEAPONS[id]?.type;
     const pistol = type === 'pistol' || type === 'knife' || !!GRENADES[id] || id === 'bomb';
     this.pistolPose = pistol;
-    this.gunHolder.position.set(pistol ? 0.02 : 0.1, pistol ? 0.36 : 0.28, pistol ? -0.42 : -0.3);
+    // Long guns are held in a bladed stance: the torso turns BLADE so the left shoulder comes forward,
+    // and the gun (in torso space) turns back the same amount so it still points straight ahead.
+    this.blade = pistol ? 0 : BLADE;
+    if (pistol) this.gunHolder.position.set(0.02, 0.36, -0.42);
+    else this.gunHolder.position.set(0.1 * Math.cos(BLADE) - 0.3 * Math.sin(BLADE), 0.37, -0.1 * Math.sin(BLADE) - 0.3 * Math.cos(BLADE));
+    this.gunHolder.rotation.y = this.blade;
   }
 
   playEmote(id, dur = 2) {
@@ -515,12 +555,28 @@ export class CharacterModel {
       else { this._emotePose(this.emote, dt); return; }
     }
     if (this.dead) {
-      this.deathT = Math.min(1, this.deathT + dt * 2.2);
-      const e = 1 - Math.pow(1 - this.deathT, 3);
-      this.body.rotation.x = e * (Math.PI / 2) * this.deathDir;
-      this.body.position.y = e * 0.15;
+      // The knees go first, then the body falls with a twist to one side and the limbs go loose.
+      this.deathT = Math.min(1, this.deathT + dt * 1.7);
+      const t = this.deathT, d = this.deathDir, side = this.deathSide;
+      const buckle = sstep(0, 0.35, t), fall = 1 - Math.pow(1 - sstep(0.12, 1, t), 3);
+      this.body.rotation.set(fall * (Math.PI / 2) * d, 0, side * 0.32 * fall);
+      this.body.position.y = -0.18 * buckle * (1 - fall) + 0.15 * fall;
+      this.legs.forEach((l, i) => {
+        l.rotation.set(-0.75 * buckle * (1 - 0.92 * fall) * (i ? 1 : 0.7), 0, (i ? 1 : -1) * 0.12 * fall);
+        l.userData.knee.rotation.x = 1.5 * buckle * (1 - 0.85 * fall) * (i ? 1 : 0.8);
+      });
+      this.torso.rotation.set(0.35 * buckle * (1 - fall), 0, -side * 0.15 * fall);
+      this.arms.forEach((a, i) => {
+        a.rotation.set(0.5 * (1 - fall) - d * 0.5 * fall, 0, (i ? 1 : -1) * (0.15 + 0.9 * fall));
+        a.userData.elbow.rotation.set(0.6 * (1 - fall) + 0.25, 0, 0);
+      });
+      this.head.rotation.set(0.25 * d * fall, side * 0.3 * fall, side * 0.45 * fall);
+      this.gunHolder.visible = t < 0.25;
+      this.lids.visible = true;
       return;
     }
+    // Blinking.
+    if ((this.blinkT -= dt) < 0) { this.lids.visible = this.blinkT > -0.12; if (this.blinkT <= -0.12) this.blinkT = 2 + Math.random() * 4; }
     const sp = Math.min(1.4, st.speed / 5.5);
     this.phase += dt * (3 + st.speed * 1.6);
     const swing = Math.sin(this.phase) * 0.6 * sp;
@@ -535,6 +591,9 @@ export class CharacterModel {
     // Only a slight lean with aim pitch, so the head stays where its hitbox is.
     this.torso.rotation.x = -cr * 0.25 + st.pitch * 0.12;
     this.head.rotation.x = st.pitch * 0.5;
+    const blade = this.zombie || !this.weaponId ? 0 : this.blade || 0;
+    this.torso.rotation.y = -blade;
+    this.head.rotation.y = blade;
     if (this.zombie && !(this.zombie === 'infected' && this.weaponId && !WEAPONS[this.weaponId]?.type?.includes('knife'))) {
       // Arms out in front, swaying with the shamble; a swipe while "firing".
       this.lurch += dt * (2 + st.speed);
@@ -559,10 +618,38 @@ export class CharacterModel {
     this.arms[0].userData.elbow.rotation.x = pistol ? 0.1 : 0.25;
     this.arms[0].userData.elbow.rotation.z = 0;
     this.gunHolder.rotation.x = st.pitch * 0.6 + kick * 0.5;
+    this.holdGun();
   }
 
-  die(dir = 1) { this.dead = true; this.deathT = 0; this.deathDir = dir; }
-  revive() { this.dead = false; this.body.rotation.set(0, 0, 0); this.body.position.y = 0; }
+  // Puts the hands on the gun: the right hand on its grip, the left on the handguard (long guns) or
+  // cupped under the right (pistols). One-handed items keep the left arm in the pose set above.
+  holdGun() {
+    const gun = this.gunHolder.children[0], grip = gun?.userData.grip;
+    if (!grip) return;
+    const gh = this.gunHolder, sc = gun.scale.x, type = WEAPONS[this.weaponId]?.type;
+    gh.updateMatrix();
+    const toTorso = (x, y, z, out) => out.set(x, y, z).multiplyScalar(sc).applyMatrix4(gh.matrix);
+    reach(this.arms[1], toTorso(0, grip[0], grip[1], IK.t), IK.poleR);
+    if (type === 'pistol') {
+      reach(this.arms[0], toTorso(-0.022, grip[0] - 0.015, grip[1] - 0.01, IK.t), IK.poleL);
+    } else if (gun.userData.under && !this.pistolPose) {
+      // As far forward along the handguard as the arm reaches.
+      const [uy, uz] = gun.userData.under, sh = this.arms[0].position;
+      for (let k = 0; k <= 1.0001; k += 0.1) {
+        toTorso(0, uy - 0.02, uz + (grip[1] - uz) * k, IK.t);
+        if (IK.t.distanceTo(sh) < UPPER + LOWER - 0.07) break;
+      }
+      reach(this.arms[0], IK.t, IK.poleL);
+    }
+  }
+
+  die(dir = 1) { this.dead = true; this.deathT = 0; this.deathDir = dir; this.deathSide = Math.random() < 0.5 ? -1 : 1; this.stopEmote(); }
+  revive() {
+    this.dead = false;
+    this.body.rotation.set(0, 0, 0); this.body.position.y = 0;
+    this.torso.rotation.set(0, 0, 0); this.head.rotation.set(0, 0, 0);
+    this.gunHolder.visible = true; this.lids.visible = false;
+  }
 
   dispose() {
     this.root.removeFromParent();

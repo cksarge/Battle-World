@@ -415,6 +415,7 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border: 1px s
 @media (max-width: 900px) { .buy-body { grid-template-columns: 1fr; } .buy-gear, .buy-gear.buy-nades { padding: 0; border: 0; } }
 .buy-item.sell { border-style: dashed; }
 .clan-tag { font-style: normal; opacity: .7; margin-right: 3px; font-size: .9em; }
+.bot-tag { font-style: normal; font-size: .62em; font-weight: 700; letter-spacing: 1px; padding: 1px 4px; margin-right: 5px; border: 1px solid currentColor; border-radius: 3px; opacity: .55; vertical-align: middle; }
 .buy-att { font-style: normal; font-size: 10px; opacity: .65; margin-left: 4px; }
 .buy-item.sell b { color: var(--accent); }
 .buy-cat h3 { font-size: 13px; }

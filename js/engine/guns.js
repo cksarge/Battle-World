@@ -367,7 +367,12 @@ function skinMaterial(skinId, key) {
 // ───────────── modelling kit ─────────────
 // While a gun is built, every part lands in `parts` (material key → geometries) with its transform
 // baked in; finish() merges each list into one mesh.
-let parts = null, EXT = false;
+let parts = null, EXT = false, gripAt = null, tag = null;
+// Parts built inside tagged() (slide, bolt, pump, mag) become their own child group of the gun so
+// the first-person view can move them when firing and reloading.
+// For guns whose pistol grip is part of the stock: where the shooting hand goes, as [y, z].
+const gripHere = (y, z) => { gripAt = [y, z]; };
+function tagged(t, fn) { const prev = tag; tag = t; try { fn(); } finally { tag = prev; } }
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
 
 function put(geo, key, x = 0, y = 0, z = 0, o = {}) {
@@ -378,6 +383,7 @@ function put(geo, key, x = 0, y = 0, z = 0, o = {}) {
   _s.set(o.sx ?? 1, o.sy ?? 1, o.sz ?? 1);
   _m.compose(_p.set(x, y, z), _q.setFromEuler(_e.set(o.rx || 0, o.ry || 0, o.rz || 0, o.order || 'XYZ')), _s);
   gg.applyMatrix4(_m);
+  if (tag) key += '@' + tag;
   if (!parts.has(key)) parts.set(key, []);
   parts.get(key).push(gg);
 }
@@ -490,6 +496,8 @@ function pgrip(z, y, key, o = {}) {
     ? [[-f, 0.004], [-f - 0.002, -L * 0.5], [-f, -L], [b, -L], [b + 0.003, -L * 0.4], [b + 0.004, 0.004]]
     : [[-f, 0.004], [-f - 0.002, -0.022], [-f + 0.002, -0.032], [-f - 0.001, -0.046], [-f + 0.002, -0.058], [-f, -0.07], [-f, -L], [b, -L - 0.002], [b + 0.002, -L * 0.45], [b + 0.004, 0.004]];
   prof(pts, w, key, { y, z, rx: -(o.ang ?? 0.26) });
+  // Where the shooting hand closes on it (operators' hands are placed there): 40% down the grip.
+  if (!gripAt) { const a = o.ang ?? 0.26, d = L * 0.4; gripAt = [y - Math.cos(a) * d, z + Math.sin(a) * d]; }
 }
 
 // Trigger guard hanging below y between z (back) and z - len, with the trigger inside.
@@ -510,14 +518,17 @@ function mag(z, y, len, depth, w, key, o = {}) {
     front.push([z + dz, y - L * t]); back.push([z + depth + dz + (o.taper ?? 0) * t, y - L * t]);
   }
   key = bodyKey(key, true);
-  prof([...front, ...back.reverse()], w, key, { bevel: 0.002 });
-  // Ribs down the sides and a baseplate.
-  const end = front[n], endB = back[0];
-  prof([[end[0] - 0.003, end[1] + 0.008], [endB[0] + 0.003, endB[1] + 0.008], [endB[0] + 0.003, endB[1] - 0.004], [end[0] - 0.003, end[1] - 0.004]], w + 0.004, o.plate ?? key, { bevel: 0.0015 });
-  if (o.ribs !== false) for (const sx of [-1, 1]) for (let i = 1; i < 4; i++) {
-    const t = (i / 4) * 0.8, dz = -curve * t * t * (L / 0.15) + rake * t;
-    box(0.0015, L * 0.12, depth * 0.55, sx * (w / 2), y - L * t, z + dz + depth * 0.5, key, { r: 0 });
-  }
+  tagged('mag', () => {
+    // The top runs up into the magwell, so it doesn't leave a gap when it slides out.
+    prof([[front[0][0], y + 0.03], ...front, ...back.reverse(), [back[back.length - 1][0], y + 0.03]], w - 0.002, key, { bevel: 0.002 });
+    // Ribs down the sides and a baseplate.
+    const end = front[n], endB = back[0];
+    prof([[end[0] - 0.003, end[1] + 0.008], [endB[0] + 0.003, endB[1] + 0.008], [endB[0] + 0.003, endB[1] - 0.004], [end[0] - 0.003, end[1] - 0.004]], w + 0.004, o.plate ?? key, { bevel: 0.0015 });
+    if (o.ribs !== false) for (const sx of [-1, 1]) for (let i = 1; i < 4; i++) {
+      const t = (i / 4) * 0.8, dz = -curve * t * t * (L / 0.15) + rake * t;
+      box(0.0015, L * 0.12, depth * 0.55, sx * (w / 2 - 0.001), y - L * t, z + dz + depth * 0.5, key, { r: 0 });
+    }
+  });
 }
 
 function boltCatch(z, y) { box(0.003, 0.008, 0.016, -0.023, y, z, 'metal', { r: 0.001 }); }
@@ -664,6 +675,7 @@ const GUNS = {
   magnum: () => {
     const y = 0.066, rear = 0.04, zf = -0.235;
     // Long slide with the barrel's triangular port, top rib, exposed hammer.
+    tag = 'slide';
     prof([[zf, y - 0.024], [rear, y - 0.024], [rear, y + 0.018], [rear - 0.01, y + 0.024], [zf + 0.006, y + 0.024], [zf, y + 0.016]], 0.038, 'metal', { bevel: 0.004 });
     box(0.014, 0.007, 0.25, 0, y + 0.028, -0.095, 'steel', { r: 0.0015 });
     for (let i = 0; i < 24; i++) box(0.012, 0.001, 0.0015, 0, y + 0.032, -0.21 + i * 0.01, 'bore', { r: 0 });
@@ -673,13 +685,17 @@ const GUNS = {
     cyl(0.006, 0.002, 0, y - 0.002, zf - 0.003, 'bore');
     box(0.004, 0.014, 0.01, 0, y + 0.033, zf + 0.012, 'metal', { r: 0.001 });
     for (const sx of [-1, 1]) box(0.004, 0.01, 0.008, sx * 0.006, y + 0.033, rear - 0.012, 'metal', { r: 0.001 });
+    tag = null;
     // Frame, trigger guard, grip with wraparound rubber, hammer.
     const yb = y - 0.024;
     prof([[-0.2, yb], [rear, yb], [rear, yb - 0.02], [0.0, yb - 0.022], [-0.05, yb - 0.02], [-0.2, yb - 0.016]], 0.034, 'metal', { bevel: 0.003 });
     tguard(-0.005, yb - 0.02, 0.055, 'metal', { d: 0.024 });
     pgrip(0.022, yb - 0.012, 'rubber', { len: 0.11, w: 0.036, front: 0.022, back: 0.022, ang: 0.24 });
     prof(strip([[rear + 0.002, y + 0.004], [rear + 0.012, y + 0.016], [rear + 0.016, y + 0.024]], 0.008), 0.012, 'steel');
-    box(0.03, 0.012, 0.035, 0, yb - 0.12 * (EXT ? 1.3 : 1), 0.05, 'metal', { rx: -0.24, r: 0.003 });
+    tagged('mag', () => {
+      prof([[-0.014, 0.0], [-0.014, -0.11 * (EXT ? 1.3 : 1)], [0.016, -0.11 * (EXT ? 1.3 : 1)], [0.016, 0.0]], 0.026, 'metal', { y: yb - 0.012, z: 0.022, rx: -0.24, bevel: 0.001 });
+      box(0.03, 0.012, 0.035, 0, yb - 0.12 * (EXT ? 1.3 : 1), 0.05, 'metal', { rx: -0.24, r: 0.003 });
+    });
     return { muzzle: new THREE.Vector3(0, 0.066, -0.245), under: [yb - 0.016, -0.15] };
   },
 
@@ -734,6 +750,7 @@ const GUNS = {
   },
   kestrel: () => {
     const y = 0.04;
+    gripHere(y - 0.07, -0.085);
     // Bullpup PDW: one sculpted shell with the thumb hole, translucent mag across the top.
     prof([[-0.3, y + 0.03], [-0.3, y - 0.01], [-0.25, y - 0.05], [-0.21, y - 0.12], [-0.15, y - 0.13], [0.0, y - 0.07], [0.12, y - 0.06], [0.16, y - 0.04], [0.17, y + 0.035], [0.15, y + 0.045], [-0.25, y + 0.045]], 0.058, 'polymer', {
       holes: [[[-0.2, y - 0.03], [-0.175, y - 0.1], [-0.15, y - 0.105], [-0.095, y - 0.045], [-0.12, y - 0.03]], [[-0.07, y - 0.05], [-0.01, y - 0.055], [-0.03, y - 0.03], [-0.06, y - 0.03]]], bevel: 0.008,
@@ -752,6 +769,7 @@ const GUNS = {
   // ───── shotguns ─────
   coach: () => {
     const y = 0.05;
+    gripHere(y - 0.035, 0.07);
     // Side-by-side barrels with a rib, engraved steel action, exposed hammers, walnut.
     for (const sx of [-1, 1]) { cyl(0.0165, 0.6, sx * 0.0168, y, -0.43, 'metal', { r2: 0.0155 }); cyl(0.011, 0.002, sx * 0.0168, y, -0.731, 'bore'); }
     box(0.006, 0.008, 0.6, 0, y + 0.017, -0.43, 'metal', { r: 0.002 });
@@ -775,8 +793,10 @@ const GUNS = {
     barrel(0.0155, -0.15, -0.74, y);
     cyl(0.015, EXT ? 0.58 : 0.5, 0, y - 0.034, -0.15 - (EXT ? 0.29 : 0.25), 'metal');
     cyl(0.016, 0.012, 0, y - 0.034, -0.15 - (EXT ? 0.58 : 0.5), 'metal');
-    lathe([[0.022, -0.5], [0.026, -0.495], [0.026, -0.3], [0.022, -0.295]], 0, y - 0.03, 0, 'polymer', { seg: 20, sy: 1.1 });
-    for (let i = 0; i < 9; i++) torus(0.026, 0.0025, 0, y - 0.03, -0.32 - i * 0.02, 'polymer', { ts: 18, rs: 5 });
+    tagged('pump', () => {
+      lathe([[0.022, -0.5], [0.026, -0.495], [0.026, -0.3], [0.022, -0.295]], 0, y - 0.03, 0, 'polymer', { seg: 20, sy: 1.1 });
+      for (let i = 0; i < 9; i++) torus(0.026, 0.0025, 0, y - 0.03, -0.32 - i * 0.02, 'polymer', { ts: 18, rs: 5 });
+    });
     sphere(0.0028, 0, y + 0.018, -0.73, 'tritium', { seg: 6 });
     ironRear(0.03, y + 0.022);
     tguard(0.012, y - 0.042, 0.05, 'metal');
@@ -892,7 +912,7 @@ const GUNS = {
     for (let i = 0; i < 4; i++) box(0.04, 0.002, 0.004, 0, y + 0.031, -0.12 + i * 0.05, 'metal', { r: 0.001 });
     box(0.003, 0.012, 0.11, 0.0232, y - 0.004, -0.06, 'metal', { r: 0.001 }); // selector lever
     box(0.001, 0.012, 0.06, 0.0232, y + 0.016, -0.05, 'bore', { r: 0 });
-    cyl(0.004, 0.02, 0.026, y + 0.016, -0.02, 'steel', { ry: Math.PI / 2, seg: 8 });
+    tagged('bolt', () => cyl(0.004, 0.02, 0.026, y + 0.016, -0.02, 'steel', { ry: Math.PI / 2, seg: 8 }));
     // Rear sight leaf and block.
     prof([[-0.2, y + 0.016], [-0.26, y + 0.016], [-0.26, y + 0.034], [-0.21, y + 0.034]], 0.024, 'metal');
     box(0.018, 0.004, 0.05, 0, y + 0.038, -0.235, 'metal', { r: 0.001 });
@@ -1003,6 +1023,7 @@ const GUNS = {
   sparrow: () => boltRifle({ y: 0.05, muz: -0.83, wood: 'tan', fore: -0.33, scope: [0.26, 0.022], dev: 'comp', thin: true }),
   longshot: () => {
     const y = 0.055;
+    gripHere(y - 0.08, 0.13);
     // Chassis rifle: olive thumbhole stock with cheek rest, fat scope, big brake, bipod.
     cyl(0.019, 0.26, 0, y + 0.005, -0.06, 'metal', { seg: 20 });
     boltHandle(0.04, y + 0.005);
@@ -1046,6 +1067,7 @@ const GUNS = {
   },
   crossbow: () => {
     const y = 0.06;
+    gripHere(y - 0.04, 0.105);
     // Wood stock and barrel rail, recurve limbs, string, a loaded bolt and a short scope.
     prof([[-0.4, y], [-0.4, y - 0.026], [-0.1, y - 0.03], [0.04, y - 0.03], [0.07, y - 0.08], [0.11, y - 0.08], [0.1, y - 0.03], [0.4, y - 0.08], [0.42, y - 0.08], [0.42, y + 0.035], [0.32, y + 0.03], [0.1, y + 0.01], [0.04, y]], 0.044, 'wood', { bevel: 0.006, holes: [[[0.045, y - 0.008], [0.1, y - 0.008], [0.095, y - 0.06], [0.075, y - 0.062]]] });
     box(0.03, 0.008, 0.46, 0, y + 0.004, -0.17, 'metal', { r: 0.002 });
@@ -1167,6 +1189,7 @@ const GUNS = {
 // Pistol: slide over a frame with a raked grip. o.mag: extra mag length below the grip.
 function pistol(o) {
   const { L, rear, w, y, slideH = 0.034, frame, slide } = o, zf = rear - L, top = y + slideH / 2, bot = y - slideH / 2;
+  tag = 'slide';
   prof([[zf, bot], [rear, bot], [rear, top - 0.006], [rear - 0.008, top], [zf + 0.014, top], [zf, top - 0.01]], w, slide, { bevel: 0.0035 });
   for (let i = 0; i < 7; i++) box(w + 0.001, slideH * 0.6, 0.0016, 0, y - 0.001, rear - 0.008 - i * 0.0045, 'bore', { r: 0 });
   box(0.0006, 0.012, 0.034, w / 2 + 0.0002, top - 0.008, rear - 0.075, 'bore', { r: 0 });
@@ -1178,6 +1201,7 @@ function pistol(o) {
   sphere(0.0013, 0, top + 0.004, zf + 0.0088, 'tritium', { seg: 5 });
   box(0.018, 0.007, 0.008, 0, top + 0.0035, rear - 0.008, 'metal', { r: 0.0015 });
   for (const sx of [-1, 1]) sphere(0.0012, sx * 0.005, top + 0.005, rear - 0.0122, 'tritium', { seg: 5 });
+  tag = null;
   // Frame with an accessory rail on the dust cover.
   const fb = bot - 0.02;
   prof([[zf + 0.012, bot], [rear + 0.004, bot], [rear + 0.004, fb + 0.006], [rear - 0.03, fb], [zf + 0.05, fb], [zf + 0.012, fb + 0.004]], w - 0.002, frame, { bevel: 0.003 });
@@ -1189,20 +1213,26 @@ function pistol(o) {
   if (o.gripPanel) for (const sx of [-1, 1]) prof([[-0.014, -0.01], [-0.016, -0.075], [0.016, -0.077], [0.018, -0.01]], 0.003, o.gripPanel, { x: sx * (w / 2 + 0.001), y: gy, z: gz, rx: -0.24, bevel: 0.001 });
   // Magazine base (longer when extended).
   const ml = (o.mag ?? 0) + (EXT ? 0.035 : 0), gl = o.grip?.len ?? 0.1;
+  tag = 'mag';
+  prof([[-0.013, 0.0], [-0.013, -gl], [0.014, -gl], [0.014, 0.0]], w - 0.01, 'metal', { y: gy, z: gz, rx: -0.24, bevel: 0.001 });
   if (ml) prof([[-0.016, -gl], [-0.016, -gl - ml], [0.017, -gl - ml], [0.017, -gl]], w - 0.006, 'metal', { y: gy, z: gz, rx: -0.24, bevel: 0.002 });
   prof([[-0.018, -gl - ml], [-0.018, -gl - ml - 0.006], [0.02, -gl - ml - 0.006], [0.02, -gl - ml]], w + 0.002, 'polymer', { y: gy, z: gz, rx: -0.24, bevel: 0.002 });
+  tag = null;
   if (o.hammer) prof(strip([[rear + 0.002, top - 0.012], [rear + 0.01, top - 0.004], [rear + 0.012, top + 0.002]], 0.007), 0.008, 'steel');
   return { muzzle: new THREE.Vector3(0, y, zf), under: [fb, zf + 0.04], pistol: true };
 }
 
 function boltHandle(z, y) {
-  rod([0.012, y, z], [0.045, y - 0.025, z + 0.015], 0.0035, 'steel');
-  sphere(0.008, 0.047, y - 0.027, z + 0.016, 'steel', { seg: 12 });
+  tagged('bolt', () => {
+    rod([0.012, y, z], [0.045, y - 0.025, z + 0.015], 0.0035, 'steel');
+    sphere(0.008, 0.047, y - 0.027, z + 0.016, 'steel', { seg: 12 });
+  });
 }
 
 // Bolt-action rifle on a one-piece stock with a pistol-grip wrist.
 function boltRifle(o) {
   const { y, muz, wood, fore } = o, t = o.thin ? 0.044 : 0.05;
+  gripHere(y - 0.075, 0.072);
   cyl(0.017, 0.24, 0, y, -0.05, 'metal', { seg: 20 });
   box(0.001, 0.01, 0.05, 0.0172, y + 0.006, 0.0, 'bore', { r: 0 });
   boltHandle(0.035, y);
@@ -1497,6 +1527,7 @@ function gunGeometry(id, att) {
   if (built.has(key)) return built.get(key);
   parts = new Map();
   EXT = att === 'extmag';
+  gripAt = null; tag = null;
   let info;
   try {
     info = GUNS[id] ? GUNS[id]() : (box(0.04, 0.06, 0.3, 0, 0, -0.1, 'metal'), { muzzle: new THREE.Vector3(0, 0.03, -0.3), generic: true });
@@ -1508,6 +1539,7 @@ function gunGeometry(id, att) {
       geos.forEach((geo) => geo.dispose());
     }
     info.meshes = meshes;
+    info.grip = gripAt || [0, 0];
   } finally { parts = null; EXT = false; }
   built.set(key, info);
   return info;
@@ -1539,12 +1571,19 @@ export function buildGun(id, skin = null, attachment = null) {
   if (NADES.has(id)) { buildNade(g, id); g.userData.muzzle = new THREE.Vector3(0, 0.03, -0.3); return g; }
   const info = gunGeometry(id, attachment);
   const sk = skin && skin !== 'factory' && WEAPON_SKINS[skin] && !(WEAPON_SKINS[skin].pattern === 'solid' && !WEAPON_SKINS[skin].palette.length) ? skin : null;
-  for (const [k, geo] of info.meshes) {
+  const moving = {};
+  for (const [key, geo] of info.meshes) {
+    const [k, t] = key.split('@');
     const m = new THREE.Mesh(geo, sk && SKINNABLE.has(k) ? skinMaterial(sk, k) : gm(k));
     m.castShadow = true;
-    g.add(m);
+    if (t) { if (!moving[t]) g.add(moving[t] = new THREE.Group()); moving[t].add(m); } else g.add(m);
   }
+  // Moving parts by name (slide, bolt, pump, mag) for the first-person view.
+  g.userData.parts = moving;
   g.userData.muzzle = info.muzzle.clone();
+  // Hand positions as [y, z]: the pistol grip and, for long guns, the foregrip / handguard.
+  g.userData.grip = info.grip;
+  g.userData.under = info.under || null;
   if (info.generic) g.userData.generic = true;
   return g;
 }

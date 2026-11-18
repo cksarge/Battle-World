@@ -75,6 +75,7 @@ export class Viewmodel {
       gun.add(left);
     }
     this.gun = gun;
+    this.cycleT = 9;
     this.flash.position.copy(gun.userData.muzzle).add(new THREE.Vector3(0, 0, -0.03));
     gun.add(this.flash);
     this.holder = new THREE.Group();
@@ -87,6 +88,7 @@ export class Viewmodel {
 
   fire(strength = 1, flash = true) {
     this.inspectT = -1;
+    this.cycleT = 0;
     this.kick = Math.min(0.08, this.kick + 0.035 * strength);
     this.kickRot = Math.min(0.25, this.kickRot + 0.08 * strength);
     if (flash && typeOf(this.id) !== 'knife') {
@@ -119,6 +121,29 @@ export class Viewmodel {
     let spin = 0;
     if (knife) spin = seg(0.42, 0.66) * Math.PI * 2 * k; // a full flip around the blade
     return { rx, ry, rz: rz + spin, pos };
+  }
+
+  // Moving parts (see tagged() in guns.js): the slide kicks back on each shot, bolts and pumps cycle
+  // after it, and the magazine drops out and goes back in during a reload.
+  animateParts(dt, reload) {
+    const P = this.gun?.userData.parts;
+    if (!P) return;
+    const t = (this.cycleT += dt);
+    const hump = (a, b) => { const k = THREE.MathUtils.clamp((t - a) / (b - a), 0, 1); return Math.sin(k * Math.PI); };
+    if (P.slide) P.slide.position.z = 0.028 * Math.max(0, 1 - t / 0.08);
+    // Bolt-action guns work the bolt after each shot; automatics just snap the handle back.
+    if (P.bolt) {
+      const k = (WEAPONS[this.id]?.fireRate || 0) >= 0.6 ? hump(0.18, 0.62) : Math.max(0, 1 - t / 0.06);
+      P.bolt.position.set(0, k * 0.012, k * 0.075);
+    }
+    if (P.pump) P.pump.position.z = hump(0.12, 0.5) * 0.08;
+    if (P.mag) {
+      const r = reload ?? -1, ease = (a, b) => THREE.MathUtils.smoothstep(r, a, b);
+      const out = r < 0 ? 0 : ease(0.08, 0.3) * (1 - ease(0.52, 0.78));
+      // Pistol mags come out along the raked grip.
+      P.mag.position.set(0, -0.32 * out, isPistol(this.id) ? 0.32 * out * Math.tan(0.24) : 0);
+      P.mag.visible = out < 0.97;
+    }
   }
 
   // st: {speed, onGround, lookDX, lookDY, reload (0..1 or -1), scoped, crouch, calm, dt}
@@ -168,6 +193,7 @@ export class Viewmodel {
       }
     }
     this.holder.rotation.set(rx, ry, rz);
+    this.animateParts(dt, st.reload);
     if (this.flashT > 0) { this.flashT -= dt; if (this.flashT <= 0) this.flash.visible = false; }
   }
 }
