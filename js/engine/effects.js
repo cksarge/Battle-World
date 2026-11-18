@@ -32,7 +32,7 @@ function smokeTexture(seed = 1) {
       const x = s / 2 + Math.cos(a) * d, y = s / 2 + Math.sin(a) * d, r = s * (0.09 + rnd() * 0.17);
       const grad = g.createRadialGradient(x, y, 0, x, y, r);
       const v = i % 5 === 0 ? 205 : 255;
-      grad.addColorStop(0, `rgba(${v},${v},${v},0.34)`); grad.addColorStop(0.6, `rgba(${v},${v},${v},0.16)`); grad.addColorStop(1, `rgba(${v},${v},${v},0)`);
+      grad.addColorStop(0, `rgba(${v},${v},${v},0.42)`); grad.addColorStop(0.6, `rgba(${v},${v},${v},0.2)`); grad.addColorStop(1, `rgba(${v},${v},${v},0)`);
       g.fillStyle = grad; g.fillRect(0, 0, s, s);
     }
     // Soft round edge so no puff shows a square corner.
@@ -40,6 +40,22 @@ function smokeTexture(seed = 1) {
     const m = g.createRadialGradient(s / 2, s / 2, s * 0.2, s / 2, s / 2, s / 2);
     m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = m; g.fillRect(0, 0, s, s);
+  });
+}
+
+// Solid middle of a smoke cloud. Faces seen head-on are near opaque and the rim fades out,
+// so the puffs around it hide its edge but nothing shows through the gaps between them.
+function smokeCoreMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(0xb6babe) }, uOpacity: { value: 0 } },
+    vertexShader: `varying vec3 vN; varying vec3 vV;
+      void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalMatrix * normal; vV = -mv.xyz; gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform vec3 uColor; uniform float uOpacity; varying vec3 vN; varying vec3 vV;
+      void main() { float f = abs(dot(normalize(vN), normalize(vV))); gl_FragColor = vec4(uColor, uOpacity * smoothstep(0.05, 0.6, f));
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+      }`,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
   });
 }
 
@@ -123,6 +139,11 @@ export class Effects {
     this.whiteTex = radialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)', 64);
     this.glowTex = radialTexture('rgba(255,150,60,0.9)', 'rgba(255,60,0,0)', 64);
     this.puffTex = [1, 2, 3].map(smokeTexture);
+    this.coreGeo = new THREE.SphereGeometry(1, 24, 16);
+    // Grey-out drawn around the camera while it's inside a smoke cloud.
+    this.veil = new THREE.Mesh(new THREE.SphereGeometry(0.5, 12, 8), new THREE.MeshBasicMaterial({ color: 0xaeb2b6, transparent: true, opacity: 0, side: THREE.BackSide, depthTest: false, depthWrite: false, fog: false }));
+    this.veil.renderOrder = 1000; this.veil.visible = false; this.veil.frustumCulled = false;
+    scene.add(this.veil);
     this.smokeTex = this.puffTex[0];
     this.flameTex = flameTexture();
     this.ringTex = ringTexture();
@@ -462,14 +483,18 @@ export class Effects {
   smoke(pos, radius, duration, owner = null) {
     const group = new THREE.Group();
     const parts = [];
-    for (let i = 0; i < 46; i++) {
+    const core = new THREE.Mesh(this.coreGeo, smokeCoreMaterial());
+    core.position.y = 1.7; core.renderOrder = -1; core.scale.setScalar(0.01);
+    group.add(core);
+    const N = 60;
+    for (let i = 0; i < N; i++) {
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * radius * 0.8;
       const target = new THREE.Vector3(Math.cos(a) * r, 0.4 + Math.random() * 2.8, Math.sin(a) * r);
       // Lower puffs sit in their own shadow; the tops catch the light.
       const shade = 0.8 + (target.y / 3.2) * 0.2;
       const m = new THREE.SpriteMaterial({ map: pick(this.puffTex), transparent: true, depthWrite: false, color: new THREE.Color(pick(SMOKE_GREYS)).multiplyScalar(shade), opacity: 0, rotation: Math.random() * 6 });
       const s = new THREE.Sprite(m);
-      s.userData = { target, delay: (i / 46) * 1.1, spin: rand(-0.12, 0.12), ph: Math.random() * 6, size: 3.2 + Math.random() * 1.6 };
+      s.userData = { target, delay: (i / N) * 1.1, spin: rand(-0.12, 0.12), ph: Math.random() * 6, size: 3.2 + Math.random() * 1.6 };
       s.position.set(0, 0.3, 0);
       s.scale.setScalar(s.userData.size * 0.4);
       group.add(s); parts.push(s);
@@ -480,7 +505,7 @@ export class Effects {
     group.add(can);
     group.position.copy(pos);
     this.scene.add(group);
-    const cloud = { pos: pos.clone().setY(pos.y + 1.6), radius, t: 0, duration, group, parts, base: pos.clone(), jetT: 0, owner };
+    const cloud = { pos: pos.clone().setY(pos.y + 1.6), radius, t: 0, duration, group, parts, core, base: pos.clone(), jetT: 0, owner };
     this.smokes.push(cloud);
     return cloud;
   }
@@ -499,7 +524,8 @@ export class Effects {
   }
 
 
-  update(dt) {
+  // `camera` (optional) gets the grey-out when it's inside a cloud.
+  update(dt, camera = null) {
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       it.life -= dt;
@@ -564,6 +590,11 @@ export class Effects {
         p.material.opacity = 0.85 * Math.min(fadeIn, fadeOut);
         p.material.rotation += dt * u.spin;
       }
+      // The core swells with the puffs and thins out with them at the end.
+      const k = Math.min(1, s.t / 1.4);
+      s.core.scale.set(s.radius * 0.72 * k, 1.8 * k, s.radius * 0.72 * k);
+      s.core.material.uniforms.uOpacity.value = 0.85 * Math.min(k, fadeOut);
+      s.strength = Math.min(1, s.t / 1.0) * fadeOut;
       // Jet of fresh smoke from the canister while it's still pouring out.
       if (s.t < 3) {
         s.jetT -= dt;
@@ -575,15 +606,33 @@ export class Effects {
       }
       if (s.t >= s.duration) {
         s.group.removeFromParent();
-        s.parts.forEach((p) => p.material.dispose());
+        s.parts.forEach((p) => p.material.dispose()); s.core.material.dispose();
         this.smokes.splice(i, 1);
       }
     }
+    this.updateVeil(camera);
+  }
+
+  // How deep the camera is inside the thickest cloud (0 outside, 1 well inside) sets the grey-out.
+  updateVeil(camera) {
+    let v = 0;
+    if (camera) {
+      const c = camera.position;
+      for (const s of this.smokes) {
+        const h = s.radius * 0.85;
+        const d = Math.hypot((c.x - s.base.x) / h, (c.y - s.base.y - 1.7) / 2.6, (c.z - s.base.z) / h);
+        if (d < 1) v = Math.max(v, Math.min(1, (1 - d) * 3.5) * (s.strength || 0));
+      }
+      this.veil.position.copy(c);
+    }
+    this.veil.visible = v > 0.01;
+    this.veil.material.opacity = 0.96 * v;
   }
 
   clearRound() {
-    for (const s of this.smokes) { s.group.removeFromParent(); s.parts.forEach((p) => p.material.dispose()); }
+    for (const s of this.smokes) { s.group.removeFromParent(); s.parts.forEach((p) => p.material.dispose()); s.core.material.dispose(); }
     this.smokes = [];
+    this.veil.visible = false;
     for (let i = this.items.length - 1; i >= 0; i--) {
       const it = this.items[i];
       if (!it.round) continue;

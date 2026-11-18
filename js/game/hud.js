@@ -791,7 +791,7 @@ export class Hud {
         o._radarT = (o._radarT || 0) - 1 / 30;
         // Suppressed guns don't give the shooter away.
         if (o.firingT > 0 && o.pos.distanceTo(p.pos) < 30 && !o.gun(o.remoteWeapon || o.weaponId)?.suppressed) o._radarT = 1.5;
-        if (Math.random() < 0.2 && g.world.lineOfSight(eye, o.eye())) o._radarT = 1;
+        if (Math.random() < 0.2 && g.world.lineOfSight(eye, o.eye()) && !g.effects.smokeBlocks(eye, o.eye())) o._radarT = 1;
         visible = o._radarT > 0;
       }
       if (!visible) continue;

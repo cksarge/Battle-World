@@ -1,6 +1,12 @@
 # Changelog
 
-#### 4.7.2 · 2026-11-17
+#### 4.7.3 · 2026-11-17
+
+- Smokes are solid now: you can't see through the gaps in the cloud anymore, and standing inside one greys out your view
+- Enemies seen through a smoke no longer show up on your radar
+- The P9 Sidearm no longer kills with one headshot (95 damage at most, down from 112), so it always takes two
+
+#### 4.7.2 · 2026-11-17 · [6c47f94](https://github.com/cksarge/John-Paul-Simulator/commit/6c47f94)
 
 - Fixed starting a round on top of a box instead of at your spawn: if you were climbing onto a ledge (jumping at a box) when the round ended, the climb carried on after you respawned and pulled you back to the box once buy time ended
 

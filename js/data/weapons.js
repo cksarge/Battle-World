@@ -13,7 +13,7 @@ export const WEAPONS = {
   // ───────── pistols ─────────
   p9: {
     id: 'p9', name: 'P9 Sidearm', slot: 'secondary', type: 'pistol',
-    damage: 28, hsMult: 4, legMult: 0.75, armorPen: 0.5, rangeMod: 0.86,
+    damage: 28, hsMult: 3.4, legMult: 0.75, armorPen: 0.5, rangeMod: 0.86,
     fireRate: 0.15, auto: false, mag: 12, reserve: 48, reload: 2.1, draw: 0.6,
     spread: 0.004, moveSpread: 0.03, airSpread: 0.12, spreadPerShot: 0.012, spreadRecover: 0.25,
     recoil: 0.018, recoilYaw: 0.006, moveSpeed: 0.98, price: 200, killReward: 300,

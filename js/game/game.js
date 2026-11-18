@@ -326,7 +326,7 @@ export class Game {
     this.world.update(dt);
     if (this.isHost && RESPAWN_KINDS.has(this.mode.kind)) this.tickPropRespawn(dt);
     if (this.pendingLeave.size) this.tickPendingLeaves(dt);
-    this.effects.update(dt);
+    this.effects.update(dt, this.engine.camera);
     if (this.online) this.netSend(dt);
     this.hud.update(dt);
   }
