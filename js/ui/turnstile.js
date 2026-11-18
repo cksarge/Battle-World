@@ -1,8 +1,14 @@
 import { TURNSTILE_SITE_KEY } from '../config.js';
 
 // Cloudflare Turnstile widget. Supabase verifies the token server-side (Auth → Attack Protection).
-// The script is loaded with ?render=explicit in the page <head>.
+// The script is only loaded the first time a widget is needed, so it stays off the page while disabled.
+const SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
 function ready(timeout = 10000) {
+  if (!document.querySelector(`script[src="${SCRIPT_URL}"]`)) {
+    const s = document.createElement('script');
+    s.src = SCRIPT_URL; s.async = true;
+    document.head.appendChild(s);
+  }
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const tick = () => {

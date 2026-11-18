@@ -1,5 +1,9 @@
 # Changelog
 
+#### 4.7.5 · 2026-11-18
+
+- The Cloudflare security check on sign-in, sign-up and password reset is turned off for now, since it was blocking some players. It can be switched back on later
+
 #### 4.7.4 · 2026-11-17
 
 - Outpost: the gate switches are now on the spawn side of their gates, so you can open the gate from your own side

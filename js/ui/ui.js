@@ -6,6 +6,7 @@ import { MAPS, variantName } from '../data/maps.js';
 import { sfx } from '../engine/audio.js';
 import { PASSWORD_RULES, OTP_LENGTH, assertPassword } from '../data/auth.js';
 import { mountTurnstile } from './turnstile.js';
+import { TURNSTILE_ENABLED } from '../config.js';
 import { cardImage, itemSwatch } from './cards.js';
 import { renderSeason } from './season.js';
 import { renderClan, clanLeaderboardHTML, clanModal } from './clans.js';
@@ -190,9 +191,12 @@ export class UI {
     const say = (msg, good = false) => { err.style.color = good ? 'var(--good)' : ''; err.textContent = msg; };
     if (notice) say(notice.text, notice.good);
     this.captcha?.remove();
-    this.captcha = hasApi && $('#a-ts') ? mountTurnstile($('#a-ts'), { action: mode }) : null;
+    if (!TURNSTILE_ENABLED) $('#a-ts')?.remove();
+    this.captcha = TURNSTILE_ENABLED && hasApi && $('#a-ts') ? mountTurnstile($('#a-ts'), { action: mode }) : null;
     // Runs an auth request with a fresh Turnstile token, then resets the single-use widget.
+    // With Turnstile off there is no widget and no token is sent.
     const withCaptcha = async (fn) => {
+      if (!this.captcha) return fn(undefined);
       const t = await this.captcha.token();
       try { return await fn(t); } finally { this.captcha?.reset(); }
     };
