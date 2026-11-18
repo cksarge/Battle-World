@@ -594,6 +594,13 @@ export class Hud {
     const g = this.g, el = this.el, s = g.state;
     // However the ready-up screen goes away (click, controller, another menu), that player is ready.
     if (this.startShown && this.overlay !== 'start' && !g.readySent) g.markReady();
+    // Online, the match doesn't wait for you: if the countdown ran out with the ready-up screen still
+    // up, you're readied automatically. The browser only hands over the mouse on a click, so that
+    // swaps in the light click-anywhere prompt.
+    if (this.overlay === 'start' && g.online && s.phase !== 'warmup') {
+      g.markReady();
+      if (pad.active) this.closeOverlay(true); else this.showResume('The match has started');
+    }
     // The buy menu closes itself once buying ends: when the round starts, or in bomb and hostage
     // modes when the short buy window after the start runs out or you leave spawn. Modes that let
     // you buy all round (deathmatch, the objective modes, the range) keep it open.
@@ -651,7 +658,7 @@ export class Hud {
     const bomb = s.bomb || {};
     const planted = bomb.state === 'planted';
     const timer = planted ? bomb.time : s.time;
-    const phaseLabel = { warmup: g.waitingForPlayers() ? 'WAITING' : s.readyWait ? 'READY UP' : 'WARMUP', buy: 'BUY', live: planted ? 'CHARGE' : '', post: '', over: 'FINAL' }[s.phase] ?? '';
+    const phaseLabel = { warmup: g.waitingForPlayers() ? 'WAITING' : s.readyWait || (g.online && !g.readySent) ? 'READY UP' : 'WARMUP', buy: 'BUY', live: planted ? 'CHARGE' : '', post: '', over: 'FINAL' }[s.phase] ?? '';
     const kind = g.mode.kind;
     let goal = goalText(g.mode);
     if (kind === 'rounds' || SIDED_KINDS.has(kind)) goal += ` · Round ${Math.max(1, s.round)}`;

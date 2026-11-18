@@ -251,7 +251,7 @@ export class ZombieMode {
   begin() {
     const g = this.g, s = g.state;
     s.z = this.initialState();
-    s.phase = 'warmup'; s.time = g.online ? 6 : 3; s.round = 0; s.scores = [0, 0];
+    s.phase = 'warmup'; s.time = g.online ? 20 : 3; s.round = 0; s.scores = [0, 0];
     for (const p of g.players.values()) p.money = p.zombie ? 0 : Z.START_POINTS;
     g.broadcast('phase', { phase: s.phase, time: s.time });
   }

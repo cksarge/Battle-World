@@ -20,7 +20,8 @@ export class Rules {
     if (this.mode.kind === 'zombies') return this.g.zombies.begin();
     const s = this.s;
     s.phase = 'warmup';
-    s.time = this.g.online ? 6 : 3;
+    // Online this is the ready-up countdown: it cuts short once everyone is ready.
+    s.time = this.g.online ? 20 : 3;
     s.round = 0;
     s.scores = [0, 0];
     s.lossStreak = [0, 0];
@@ -37,9 +38,13 @@ export class Rules {
 
     if (s.phase === 'warmup') {
       if (g.waitingForPlayers() && s.time > -12) return;
-      // Give everyone time to read the ready-up lineup: the first round waits until each player has
-      // clicked to play (online, at most 20 s more, so one AFK player can't hold up the match).
-      if (s.time <= 0 && g.waitingForReady() && (this.readyHold = (this.readyHold || 0) + dt) < (g.online ? 20 : Infinity)) {
+      // Online the countdown is the time to read the ready-up lineup: once everyone has clicked to
+      // play it drops to a few seconds, and when it runs out anyone still not ready is readied
+      // automatically (their screen does that itself when the round starts).
+      if (g.online) {
+        if (s.time > 3 && !g.waitingForReady()) { s.time = 3; this.syncT = 0; }
+      } else if (s.time <= 0 && g.waitingForReady()) {
+        // Offline the first round waits for you to click to play.
         if (!s.readyWait) { s.readyWait = true; this.syncT = 0; }
         return;
       }

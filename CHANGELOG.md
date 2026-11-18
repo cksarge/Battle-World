@@ -1,5 +1,10 @@
 # Changelog
 
+#### 4.7.6 · 2026-11-18
+
+- Online matches no longer wait on players who don't ready up. The ready-up countdown is now 20 seconds and is shown at the top of the screen; it skips ahead to the last 3 seconds once everyone is ready
+  - If you haven't readied up when it runs out, you're readied automatically and the match starts. Click anywhere to jump in
+
 #### 4.7.5 · 2026-11-18
 
 - The Cloudflare security check on sign-in, sign-up and password reset is turned off for now, since it was blocking some players. It can be switched back on later
