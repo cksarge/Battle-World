@@ -7,6 +7,6 @@ export const TURNSTILE_SITE_KEY = '0x4AAAAAAF8-kZzPxxkUI0iP';
 // Off while Supabase's CAPTCHA protection is off. Turn both back on together, or sign-in breaks.
 export const TURNSTILE_ENABLED = false;
 // MAJOR.Minor.patch, bumped with every change; each version is listed in CHANGELOG.md.
-export const GAME_VERSION = '4.7.6';
+export const GAME_VERSION = '4.7.7';
 // GitHub repository, for the latest-commit link in the menu footer.
 export const GITHUB_REPO = 'cksarge/John-Paul-Simulator';

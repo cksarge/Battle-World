@@ -1,5 +1,17 @@
 # Changelog
 
+#### 4.7.7 · 2026-11-18
+
+- Admin panel is easier to use:
+  - A side menu grouped into To do, Players, Game and History, with red counts on Reports, Appeals and Feedback so you can see what's waiting
+  - "Jump to a player" search at the top of every page: type part of a name, pick from the list or press Enter
+  - The Overview starts with a "Needs your attention" list, and every number tile opens its page
+  - Players have their own page with a Back button. Actions are grouped into Moderation, Account and Items, and their history folds away into sections with counts
+  - Player search shows results as you type, and an empty search lists everyone
+  - Ban and mute have one-click reasons (Cheating, Harassment and so on). Give item is grouped by type and leaves out what they already own; Remove item lists only what they own
+  - Dialogs: Enter confirms, Esc cancels
+  - The panel reopens on the last page you used, and has a Refresh button
+
 #### 4.7.6 · 2026-11-18
 
 - Online matches no longer wait on players who don't ready up. The ready-up countdown is now 20 seconds and is shown at the top of the screen; it skips ahead to the last 3 seconds once everyone is ready
