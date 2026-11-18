@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.7.3 · 2026-11-17
+#### 4.7.4 · 2026-11-17
+
+- Outpost: the gate switches are now on the spawn side of their gates, so you can open the gate from your own side
+
+#### 4.7.3 · 2026-11-17 · [f02ea9b](https://github.com/cksarge/John-Paul-Simulator/commit/f02ea9b)
 
 - Smokes are solid now: you can't see through the gaps in the cloud anymore, and standing inside one greys out your view
 - Enemies seen through a smoke no longer show up on your radar
