@@ -1,6 +1,6 @@
 # Changelog
 
-#### 4.7.7 · 2026-11-18
+#### 4.7.7 · 2026-11-18 · [2ffd45f](https://github.com/cksarge/John-Paul-Simulator/commit/2ffd45f)
 
 - Admin panel is easier to use:
   - A side menu grouped into To do, Players, Game and History, with red counts on Reports, Appeals and Feedback so you can see what's waiting
@@ -12,16 +12,16 @@
   - Dialogs: Enter confirms, Esc cancels
   - The panel reopens on the last page you used, and has a Refresh button
 
-#### 4.7.6 · 2026-11-18
+#### 4.7.6 · 2026-11-18 · [8c51742](https://github.com/cksarge/John-Paul-Simulator/commit/8c51742)
 
 - Online matches no longer wait on players who don't ready up. The ready-up countdown is now 20 seconds and is shown at the top of the screen; it skips ahead to the last 3 seconds once everyone is ready
   - If you haven't readied up when it runs out, you're readied automatically and the match starts. Click anywhere to jump in
 
-#### 4.7.5 · 2026-11-18
+#### 4.7.5 · 2026-11-18 · [e5b5f45](https://github.com/cksarge/John-Paul-Simulator/commit/e5b5f45)
 
 - The Cloudflare security check on sign-in, sign-up and password reset is turned off for now, since it was blocking some players. It can be switched back on later
 
-#### 4.7.4 · 2026-11-17
+#### 4.7.4 · 2026-11-17 · [abbe925](https://github.com/cksarge/John-Paul-Simulator/commit/abbe925)
 
 - Outpost: the gate switches are now on the spawn side of their gates, so you can open the gate from your own side
 
