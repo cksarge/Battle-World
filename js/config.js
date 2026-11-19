@@ -12,4 +12,4 @@ export const GAME_VERSION = '4.8.0';
 // player is told once (see ui/legal.js).
 export const LEGAL_VERSION = '2026-11-18';
 // GitHub repository, for the latest-commit link in the menu footer.
-export const GITHUB_REPO = 'cksarge/John-Paul-Simulator';
+export const GITHUB_REPO = 'cksarge/Battle-World';

@@ -2,7 +2,7 @@
 
 **Effective November 18, 2026**
 
-These Terms of Service ("Terms") are an agreement between you and Carter K ("we", "us"), who makes and runs John-Paul Simulator (the "Game"), including the website at jpsim.carterscoding.com, player accounts, online matches and every other feature the Game offers. By creating an account, or by playing or otherwise using the Game, you agree to these Terms and to the [Privacy Policy](PRIVACY.md). If you don't agree, don't use the Game.
+These Terms of Service ("Terms") are an agreement between you and Carter K ("we", "us"), who makes and runs Battle World (the "Game"), including the website at battleworld.carterscoding.com, player accounts, online matches and every other feature the Game offers. By creating an account, or by playing or otherwise using the Game, you agree to these Terms and to the [Privacy Policy](PRIVACY.md). If you don't agree, don't use the Game.
 
 ## 1. Who can play
 
@@ -56,7 +56,7 @@ Banned players can appeal from inside the Game. We'll consider appeals, but our 
 
 ## 7. The Game's code and content
 
-The Game's source code is published under the MIT License (see the LICENSE file in the Game's GitHub repository), and your use of the source code is governed by that license. These Terms govern your use of the hosted Game, its online services and accounts. The name "John-Paul Simulator" and the Game's services remain ours.
+The Game's source code is published under the MIT License (see the LICENSE file in the Game's GitHub repository), and your use of the source code is governed by that license. These Terms govern your use of the hosted Game, its online services and accounts. The name "Battle World" and the Game's services remain ours.
 
 ## 8. Changes and availability
 

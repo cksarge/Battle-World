@@ -1,4 +1,4 @@
-# John-Paul Simulator
+# Battle World
 
 A browser-based 3D tactical FPS. There is no build step: it is plain ES modules loaded straight from the folder, so it runs on GitHub Pages as-is.
 
@@ -45,22 +45,22 @@ A browser-based 3D tactical FPS. There is no build step: it is plain ES modules 
 **1. Database:** SQL Editor → New query → paste all of `supabase/schema.sql` → **Run**. (Safe to re-run; re-run it after updates, e.g. to add the `inventory` column for the Armory, or the friends, achievements and custom map tables.)
 
 **2. URLs:** Authentication → URL Configuration
-- **Site URL:** `https://jpsim.carterscoding.com/`
+- **Site URL:** `https://battleworld.carterscoding.com/`
 - **Redirect URLs:** add
-  - `https://jpsim.carterscoding.com/**`
+  - `https://battleworld.carterscoding.com/**`
   - `http://localhost:8765/**`
 
 **3. Email sending (Resend):** Authentication → Emails → SMTP Settings → enable custom SMTP
 - Host `smtp.resend.com`, port `465`, username `resend`, password = your Resend API key
-- Sender email: an address on your Resend-verified domain (e.g. `noreply@yourdomain.com`), sender name `John-Paul Simulator`
+- Sender email: an address on your Resend-verified domain (e.g. `noreply@yourdomain.com`), sender name `Battle World`
 - Leave **Confirm email** turned **on** (Authentication → Sign In / Providers → Email).
 
 **4. Email templates:** Authentication → Emails → Templates
 
 | Template | Subject | Body |
 |---|---|---|
-| Confirm signup | `Confirm your John-Paul Simulator account` | paste `supabase/email-templates/confirm-signup.html` |
-| Reset password | `Reset your John-Paul Simulator password` | paste `supabase/email-templates/reset-password.html` |
+| Confirm signup | `Confirm your Battle World account` | paste `supabase/email-templates/confirm-signup.html` |
+| Reset password | `Reset your Battle World password` | paste `supabase/email-templates/reset-password.html` |
 
 Each email contains both a button link and a 6-digit code (Email OTP length = 6). Players can click the link or type the code into the game.
 
@@ -71,7 +71,7 @@ Each email contains both a button link and a 6-digit code (Email OTP length = 6)
 The game enforces the same rules (`js/data/auth.js`), with a live checklist on sign-up and reset.
 
 **6. Cloudflare Turnstile:**
-- Cloudflare dashboard → Turnstile → your widget → **Hostnames**: add `jpsim.carterscoding.com` and `localhost`.
+- Cloudflare dashboard → Turnstile → your widget → **Hostnames**: add `battleworld.carterscoding.com` and `localhost`.
 - Supabase → Authentication → Attack Protection → **Enable CAPTCHA protection** → provider **Turnstile** → paste the Turnstile **secret key**.
 - The public site key is already in `js/config.js`.
 
@@ -92,7 +92,7 @@ python3 -m http.server 8765
 
 ## Deploy to GitHub Pages
 
-The code lives at https://github.com/cksarge/John-Paul-Simulator. In the repo, go to **Settings → Pages → Source: Deploy from a branch → `main` / `(root)`**. The game will be live at **https://jpsim.carterscoding.com/**, and every push to `main` redeploys it.
+The code lives at https://github.com/cksarge/Battle-World. In the repo, go to **Settings → Pages → Source: Deploy from a branch → `main` / `(root)`**. The game will be live at **https://battleworld.carterscoding.com/**, and every push to `main` redeploys it.
 
 ## Database updates
 

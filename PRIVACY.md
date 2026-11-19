@@ -2,7 +2,7 @@
 
 **Effective November 18, 2026**
 
-This Privacy Policy explains what information John-Paul Simulator (the "Game"), made and run by Carter K ("we", "us"), collects, how it's used and what choices you have. It applies to the website at jpsim.carterscoding.com and everything in the Game. By using the Game you agree to this policy and to the [Terms of Service](TERMS.md).
+This Privacy Policy explains what information Battle World (the "Game"), made and run by Carter K ("we", "us"), collects, how it's used and what choices you have. It applies to the website at battleworld.carterscoding.com and everything in the Game. By using the Game you agree to this policy and to the [Terms of Service](TERMS.md).
 
 ## 1. The short version
 

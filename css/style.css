@@ -56,7 +56,7 @@ a.btn.primary { color: #17110a; }
   background-size: 64px 64px; mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%); opacity: .5;
 }
 .menu-bg::after {
-  content: 'JP'; position: absolute; right: -40px; bottom: -120px; font-family: var(--display); font-weight: 700;
+  content: 'BW'; position: absolute; right: -40px; bottom: -120px; font-family: var(--display); font-weight: 700;
   font-size: 520px; color: rgba(255,255,255,.025); letter-spacing: -20px; line-height: 1;
 }
 

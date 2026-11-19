@@ -34,12 +34,12 @@ export function maybeLegal(ui, done) {
   const close = (m) => { acceptLegal(); ui.legalOpen = null; m.remove(); done?.(); };
   const links = `<a href="#" data-doc="TERMS.md">Terms of Service</a> and <a href="#" data-doc="PRIVACY.md">Privacy Policy</a>`;
   const m = fresh
-    ? ui.modal(`<h2 class="m-h2">Welcome to John-Paul Simulator</h2>
+    ? ui.modal(`<h2 class="m-h2">Welcome to Battle World</h2>
       <p class="m-sub">Before you play, please read and agree to the ${links}.</p>
       <label class="m-check"><input type="checkbox" data-agree><span>${AGREE_LABEL}</span></label>
       <div class="row"><button class="btn primary" data-ok disabled>Continue</button></div>`)
     : ui.modal(`<h2 class="m-h2">${updated ? 'Updated terms' : 'Terms and privacy'}</h2>
-      <p class="m-sub">John-Paul Simulator ${updated ? 'has updated its' : 'now has a'} ${links}. By continuing to use the game, you agree to and acknowledge them.</p>
+      <p class="m-sub">Battle World ${updated ? 'has updated its' : 'now has a'} ${links}. By continuing to use the game, you agree to and acknowledge them.</p>
       <div class="row"><button class="btn primary" data-ok>Continue</button></div>`);
   m.dataset.locked = '1';
   ui.legalOpen = m;

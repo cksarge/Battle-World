@@ -100,7 +100,7 @@ class App {
         if (/fetch|network|load failed/i.test(e.message)) return this.offlineGuest();
         this.ui.showAuth(); this.ui.toast(e.message, 'bad');
       });
-      if (confirmed) this.ui.toast('Email confirmed — welcome to John-Paul Simulator!', 'good');
+      if (confirmed) this.ui.toast('Email confirmed — welcome to Battle World!', 'good');
     } else if (linkError) this.ui.showAuth('login', { text: linkError });
     else if (confirmed) this.ui.showAuth('login', { text: 'Email confirmed. Sign in to continue.', good: true });
     else this.ui.showAuth();
@@ -140,7 +140,7 @@ class App {
     el.innerHTML = `<div class="pad-gate-card">
       <svg class="pad-gate-icon" viewBox="0 0 120 72" aria-hidden="true"><path d="M30 10h60c14 0 22 10 26 30s-2 30-12 30c-8 0-12-6-18-14H34c-6 8-10 14-18 14C6 70 0 60 4 40S16 10 30 10z" fill="none" stroke="currentColor" stroke-width="4"/><path d="M30 28v20M20 38h20" stroke="currentColor" stroke-width="5" stroke-linecap="round"/><circle cx="84" cy="30" r="4.5" fill="currentColor"/><circle cx="96" cy="40" r="4.5" fill="currentColor"/><circle cx="72" cy="40" r="4.5" fill="currentColor"/><circle cx="84" cy="50" r="4.5" fill="currentColor"/></svg>
       <h1>Connect a controller</h1>
-      <p>John-Paul Simulator can't be played with touch controls. Pair a Bluetooth controller (Xbox, PlayStation, Switch Pro or similar) or plug one in, then <b>press any button on it</b>.</p>
+      <p>Battle World can't be played with touch controls. Pair a Bluetooth controller (Xbox, PlayStation, Switch Pro or similar) or plug one in, then <b>press any button on it</b>.</p>
       <p class="pad-gate-status" aria-live="polite">Waiting for a controller…</p>
       <button class="btn primary big hidden" data-gate-go>Tap to continue</button>
       <p class="pad-gate-help">${padHelp()}</p>

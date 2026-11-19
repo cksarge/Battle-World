@@ -176,9 +176,9 @@ export class UI {
     const tabs = mode === 'login' || mode === 'signup'
       ? `<div class="m-switch"><button data-m="login" class="${mode === 'login' ? 'on' : ''}">Sign in</button><button data-m="signup" class="${mode === 'signup' ? 'on' : ''}">Create account</button></div>` : '';
     this.root.innerHTML = `<div class="m-shell auth" data-tab="auth">
-      <header class="m-top"><div class="m-brand"><span class="m-mark">JP</span><span class="m-title">John-Paul Simulator</span></div></header>
+      <header class="m-top"><div class="m-brand"><span class="m-mark">BW</span><span class="m-title">Battle World</span></div></header>
       <div class="auth-hero">
-        <h1 class="m-hero">John-Paul<br>Simulator</h1>
+        <h1 class="m-hero">Battle<br>World</h1>
         <p>Five-a-side bomb defusal, ranked duels, wingman and free-for-all. Build your operator, bring your friends, climb the ladder.</p>
         <div class="ranks">${RANKS.map((r) => `<span class="rank-badge" style="--rc:${r.color}" title="${r.name}, ${r.min}+ rating"><i></i></span>`).join('')}</div>
       </div>
@@ -275,7 +275,7 @@ export class UI {
       verify: async () => {
         await api.verifyEmailCode(this.lastEmail, getCode());
         await this.app.onSignedIn();
-        this.toast('Email confirmed — welcome to John-Paul Simulator!', 'good');
+        this.toast('Email confirmed — welcome to Battle World!', 'good');
       },
       forgot: async () => {
         const em = $('#a-email').value.trim();
@@ -329,7 +329,7 @@ export class UI {
     const app = this.app, me = app.me();
     this.root.innerHTML = `<div class="m-shell ${WIDE.has(tab) ? 'wide' : ''}" data-tab="${tab}">
       <header class="m-top">
-        <div class="m-brand"><span class="m-mark">JP</span><span class="m-title">John-Paul Simulator</span></div>
+        <div class="m-brand"><span class="m-mark">BW</span><span class="m-title">Battle World</span></div>
         <div class="m-party" id="party"></div>
         <button class="m-me" id="me-chip" style="background-image:linear-gradient(90deg, rgba(14,18,13,.92), rgba(14,18,13,.5)), url(${cardImage(me.char?.card || 'standard', 360, 90)})">
           <span class="m-me-name">${esc(me.name)}</span>

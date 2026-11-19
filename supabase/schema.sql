@@ -1,4 +1,4 @@
--- John-Paul Simulator — Supabase schema
+-- Battle World — Supabase schema
 -- Paste this whole file into Supabase Dashboard → SQL Editor → New query → Run.
 -- Safe to re-run.
 
