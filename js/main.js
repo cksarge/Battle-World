@@ -19,6 +19,7 @@ import { loadLocalMaps, setFeatured, registerRow, isCustom } from './data/custom
 import { normalizeAchievements, mergeAchievements, applyMatchAchievements, checkUnlocks } from './data/achievements.js';
 import { addMastery } from './data/mastery.js';
 import { deviceId } from './net/device.js';
+import { markNewDevice } from './ui/legal.js';
 
 const boot = document.getElementById('boot');
 const bootBar = boot.querySelector('.boot-bar div');
@@ -30,6 +31,8 @@ class App {
     step(10, 'Loading settings');
     // Nothing saved yet means the game has never run on this device: graphics get auto-detected.
     try { this.firstRun = !localStorage.getItem('jps_settings'); } catch { this.firstRun = false; }
+    // A device that has never run the game asks new players to agree to the terms (see ui/legal.js).
+    if (this.firstRun) markNewDevice();
     this.settings = loadSettings();
     applyAccess(this.settings);
     // Community maps saved on this device (downloads and the last known featured maps).

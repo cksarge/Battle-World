@@ -17,7 +17,8 @@ import { seasonById, fmtDate } from '../data/seasons.js';
 import { censor } from '../data/profanity.js';
 import { masteryInfo, masteryLevel } from '../data/mastery.js';
 import { ATTACHMENTS, attachmentsFor, FIRST_ATTACHMENT_LEVEL } from '../data/attachments.js';
-import { versionHTML, bindVersion } from './changelog.js';
+import { versionHTML, bindVersion, bindDocLinks } from './changelog.js';
+import { maybeLegal, acceptLegal, AGREE_LABEL } from './legal.js';
 import { esc, kd, pct, ago, NAV, FOCUS, WIDE, ADMIN_NAV, ARMORY_KINDS, WHEEL, emailCooldownLeft, markEmailSent } from './ui-shared.js';
 import { PlayScreens } from './ui-play.js';
 import { StatsScreens } from './ui-stats.js';
@@ -131,6 +132,7 @@ export class UI {
           ${emailField}
           <label class="field"><span>Password</span><input type="password" id="a-pass" autocomplete="new-password"></label>
           ${rules}
+          <label class="m-check small"><input type="checkbox" id="a-terms"><span>${AGREE_LABEL}</span></label>
           <div class="cf-ts" id="a-ts"></div>
           <div class="err" id="a-err">${hasApi ? '' : 'Online services unavailable — you can still play offline.'}</div>
           <button class="btn primary" id="a-go" ${hasApi ? '' : 'disabled'}>Create account</button>
@@ -202,6 +204,7 @@ export class UI {
     };
     const on = (sel, fn) => { const e = $(sel); if (e) e.onclick = (ev) => { ev.preventDefault(); fn(); }; };
     this.root.querySelectorAll('.m-switch button').forEach((b) => { b.onclick = () => this.showAuth(b.dataset.m); });
+    bindDocLinks(this.root, this);
     // Only real emails are remembered for the reset and verify screens (sign-in also takes a username).
     $('#a-email')?.addEventListener('input', (e) => { const v = e.target.value.trim(); if (v.includes('@')) this.lastEmail = v; });
     on('#a-guest', () => this.app.loginGuest());
@@ -262,7 +265,9 @@ export class UI {
         const em = $('#a-email').value.trim();
         if (!em) throw new Error('Enter your email.');
         assertPassword(pass.value);
+        if (!$('#a-terms').checked) throw new Error('Tick the box to agree to the Terms of Service and Privacy Policy.');
         const r = await withCaptcha((t) => api.signUp(em, pass.value, $('#a-user').value.trim(), t));
+        acceptLegal();
         if (r.session) return this.app.onSignedIn();
         markEmailSent();
         this.showAuth('verify', { text: 'Account created — check your inbox.', good: true });
@@ -359,7 +364,8 @@ export class UI {
       play: () => this.renderPlay(el), season: () => renderSeason(this, el), admin: () => (this.adminPanel ||= new AdminPanel(this)).render(el), operators: () => this.renderOperators(el), armory: () => this.renderArmory(el),
       stats: () => this.renderStats(el), workshop: () => (this.workshop ||= new Workshop(this)).render(el), clan: () => renderClan(this, el), leaderboard: () => this.renderLeaderboard(el), settings: () => this.renderSettings(el),
     })[tab]();
-    if (tab === 'play') this.maybeOfferTutorial();
+    // The terms notice comes first; the tutorial offer waits until it's closed.
+    if (!maybeLegal(this, () => { if (this.tab === 'play') this.maybeOfferTutorial(); }) && tab === 'play') this.maybeOfferTutorial();
   }
 
   // First launch: offer the tutorial once to players who haven't played a match yet. Waits for a

@@ -93,6 +93,10 @@
 .changelog .cl-ver a { color: var(--m-dim); font-family: var(--mono); font-size: 12px; }
 .changelog ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
 .changelog code { font-family: var(--mono); font-size: 12px; }
+.changelog.legal .cl-major { margin-top: 18px; padding-top: 10px; font-size: 16px; }
+.changelog.legal ul { margin-bottom: 6px; }
+.m-check.small { font-size: 12px; color: var(--m-dim); }
+.m-check a { color: var(--m-amber); }
 
 /* type */
 .m-h1 { font-family: var(--m-stencil); font-weight: 800; font-size: 40px; line-height: 1; margin: 0; letter-spacing: 0.5px; text-transform: none; }

@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { SUPABASE_URL, SUPABASE_KEY } from '../config.js';
+import { SUPABASE_URL, SUPABASE_KEY, LEGAL_VERSION } from '../config.js';
 import { assertPassword } from '../data/auth.js';
 
 export { PASSWORD_RULES, OTP_LENGTH, passwordProblems, assertPassword } from '../data/auth.js';
@@ -65,6 +65,7 @@ export class Api {
     if (error) throw new Error(/expired|invalid|not found/i.test(error.message) ? 'That email link has expired or was already used. Request a new one.' : friendly(error).message);
   }
 
+  // Records which version of the Terms of Service and Privacy Policy the player agreed to.
   async signUp(email, password, username, captchaToken) {
     if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) throw new Error('Username must be 3-16 letters, numbers or _.');
     assertPassword(password);
@@ -72,7 +73,7 @@ export class Api {
     if (e1) throw friendly(e1);
     if (taken?.length) throw new Error('That username is taken.');
     const { data, error } = await this.sb.auth.signUp({
-      email, password, options: { data: { username }, emailRedirectTo: siteUrl('index.html?confirmed=1'), captchaToken },
+      email, password, options: { data: { username, terms_accepted: LEGAL_VERSION }, emailRedirectTo: siteUrl('index.html?confirmed=1'), captchaToken },
     });
     if (error) throw friendly(error);
     return data;
