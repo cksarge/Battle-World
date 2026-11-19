@@ -1,6 +1,6 @@
 # Changelog
 
-### 4.8.0 · 2026-11-18
+### 4.8.0 · 2026-11-18 · [2ec4b89](https://github.com/cksarge/John-Paul-Simulator/commit/2ec4b89)
 
 - Terms of Service and Privacy Policy, readable in game from the Terms and Privacy links in the menu footer (and on GitHub as TERMS.md and PRIVACY.md)
   - New players tick a box agreeing to them: on the Create account form, or before their first game as a guest on a new device
