@@ -12,7 +12,7 @@ import { renderSeason } from './season.js';
 import { renderClan, clanLeaderboardHTML, clanModal } from './clans.js';
 import { AdminPanel } from './admin.js';
 import { Workshop } from './workshop.js';
-import { commendDialog, reportDialog, feedbackDialog, showBanned, showMaintenance, showWarnings, bannerHTML } from './social.js';
+import { commendDialog, reportDialog, feedbackDialog, showBanned, showMaintenance, showWarnings, bannerHTML, pollDialog } from './social.js';
 import { seasonById, fmtDate } from '../data/seasons.js';
 import { censor } from '../data/profanity.js';
 import { masteryInfo, masteryLevel } from '../data/mastery.js';
@@ -337,13 +337,14 @@ export class UI {
         </button>
       </header>
       <nav class="m-nav">${this.navHTML(tab)}</nav>
-      <div class="m-banners" id="banners">${bannerHTML(app)}</div>
+      <div class="m-banners" id="banners"></div>
       <div class="m-stage" id="stage" title="Drag to turn your operator, click to wave"></div>
       <section class="m-panel" id="tab"></section>
       <footer class="m-foot"><span id="foot-hint">${versionHTML()}</span><span class="spacer"></span><span id="foot-map"></span></footer>
     </div>`;
     this.root.querySelectorAll('.m-nav button').forEach((b) => { b.onclick = () => this.showMenu(b.dataset.t); });
     this.root.querySelector('#me-chip').onclick = () => (app.profile ? this.showMenu('stats') : this.showAuth());
+    this.renderBanner();
     this.bindStage();
     bindVersion(this.root.querySelector('.m-foot'), this);
     this.stage(tab === 'play' && this.source === 'offline' ? this.offline.map : null, FOCUS[tab]);
@@ -402,7 +403,12 @@ export class UI {
     }
   }
 
-  renderBanner() { const b = this.root.querySelector('#banners'); if (b) b.innerHTML = bannerHTML(this.app); }
+  renderBanner() {
+    const b = this.root.querySelector('#banners');
+    if (!b) return;
+    b.innerHTML = bannerHTML(this.app);
+    b.onclick = (e) => { const p = e.target.closest('[data-poll]'); if (p) pollDialog(this, +p.dataset.poll); };
+  }
   showBanned(ban) { showBanned(this, ban); }
   showMaintenance(mt) { showMaintenance(this, mt); }
   showWarnings(list) { showWarnings(this, list); }

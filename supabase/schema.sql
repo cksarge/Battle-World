@@ -325,6 +325,32 @@ grant select on public.announcements to anon, authenticated;
 drop policy if exists "live announcements are public" on public.announcements;
 create policy "live announcements are public" on public.announcements for select using (now() >= starts_at and now() < ends_at);
 
+-- Polls (4.10.0). Players read and vote only through polls_list() and poll_vote(); admins make them with
+-- admin_create_poll(). cutoff: only accounts created before it may vote (null = anyone with an account).
+create table if not exists public.polls (
+  id          bigint generated always as identity primary key,
+  question    text not null check (char_length(question) between 1 and 200),
+  options     jsonb not null check (jsonb_typeof(options) = 'array' and jsonb_array_length(options) between 2 and 10),
+  eligibility text not null default 'anyone' check (eligibility in ('anyone', 'before_start', 'before_date')),
+  cutoff      timestamptz,
+  starts_at   timestamptz not null default now(),
+  ends_at     timestamptz not null,
+  created_by  uuid references public.profiles(id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+alter table public.polls enable row level security;
+revoke all on public.polls from anon, authenticated;
+
+create table if not exists public.poll_votes (
+  poll_id    bigint not null references public.polls(id) on delete cascade,
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  choice     int not null,
+  created_at timestamptz not null default now(),
+  primary key (poll_id, user_id)
+);
+alter table public.poll_votes enable row level security;
+revoke all on public.poll_votes from anon, authenticated;
+
 -- Global switches such as maintenance mode: {"maintenance": {"on": true, "message": "..."}}.
 create table if not exists public.app_settings (key text primary key, value jsonb not null, updated_at timestamptz not null default now());
 alter table public.app_settings enable row level security;
@@ -1363,6 +1389,115 @@ begin
 end;
 $$;
 
+-- ───────────── polls ─────────────
+-- Vote counts per option for a poll, as a JSON array the same length as its options.
+create or replace function public.poll_counts(p_id bigint)
+returns json language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(coalesce(v.n, 0) order by i.i), '[]')
+  from polls p cross join lateral generate_series(0, jsonb_array_length(p.options) - 1) as i(i)
+  left join (select choice, count(*) n from poll_votes where poll_id = p_id group by choice) v on v.choice = i.i
+  where p.id = p_id;
+$$;
+
+-- Live polls, plus ones that ended in the last 3 days (with their results). Counts are only included
+-- once you've voted or the poll has ended, so early results don't sway anyone.
+create or replace function public.polls_list()
+returns json language plpgsql stable security definer set search_path = public as $$
+declare uid uuid := auth.uid(); made timestamptz;
+begin
+  select created_at into made from profiles where id = uid;
+  return (select coalesce(json_agg(r order by r.live desc, r.ends_at), '[]') from (
+    select p.id, p.question, p.options, p.eligibility, p.cutoff, p.starts_at, p.ends_at, now() < p.ends_at as live,
+      v.choice as my_vote,
+      (made is not null and (p.cutoff is null or made < p.cutoff)) as eligible,
+      case when v.choice is not null or now() >= p.ends_at then poll_counts(p.id) end as counts
+    from polls p left join poll_votes v on v.poll_id = p.id and v.user_id = uid
+    where p.starts_at <= now() and p.ends_at > now() - interval '3 days'
+    order by p.id desc limit 10) r);
+end;
+$$;
+
+create or replace function public.poll_vote(p_poll bigint, p_choice int)
+returns json language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); p polls%rowtype; made timestamptz;
+begin
+  if uid is null then raise exception 'Sign in to vote'; end if;
+  if is_banned(uid) then raise exception 'Banned accounts can''t vote'; end if;
+  select * into p from polls where id = p_poll;
+  if not found or now() < p.starts_at then raise exception 'That poll doesn''t exist'; end if;
+  if now() >= p.ends_at then raise exception 'This poll has closed'; end if;
+  if p_choice is null or p_choice < 0 or p_choice >= jsonb_array_length(p.options) then raise exception 'Pick one of the options'; end if;
+  select created_at into made from profiles where id = uid;
+  if p.cutoff is not null and made >= p.cutoff then
+    raise exception 'Only accounts made before % can vote in this poll', to_char(p.cutoff at time zone 'UTC', 'Mon DD, YYYY HH24:MI "UTC"');
+  end if;
+  insert into poll_votes (poll_id, user_id, choice) values (p_poll, uid, p_choice) on conflict do nothing;
+  if not found then raise exception 'You''ve already voted in this poll'; end if;
+  return poll_counts(p_poll);
+end;
+$$;
+
+-- p_eligibility: 'anyone' (any account), 'before_start' (accounts made before the poll starts) or
+-- 'before_date' (accounts made before p_cutoff). p_starts schedules it for later (null = now).
+create or replace function public.admin_create_poll(p_question text, p_options text[], p_hours numeric, p_eligibility text default 'anyone',
+  p_cutoff timestamptz default null, p_starts timestamptz default null)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare
+  starts timestamptz := greatest(coalesce(p_starts, now()), now());
+  opts jsonb;
+  cut timestamptz;
+  new_id bigint;
+begin
+  perform admin_guard();
+  select coalesce(jsonb_agg(left(btrim(o), 80) order by n), '[]') into opts from unnest(p_options) with ordinality as t(o, n) where btrim(coalesce(o, '')) <> '';
+  if jsonb_array_length(opts) not between 2 and 10 then raise exception 'A poll needs 2 to 10 options'; end if;
+  if btrim(coalesce(p_question, '')) = '' then raise exception 'Write a question'; end if;
+  cut := case p_eligibility when 'anyone' then null when 'before_start' then starts when 'before_date' then p_cutoff end;
+  if p_eligibility = 'before_date' and cut is null then raise exception 'Pick the date accounts must be made before'; end if;
+  if p_eligibility not in ('anyone', 'before_start', 'before_date') then raise exception 'unknown eligibility'; end if;
+  insert into polls (question, options, eligibility, cutoff, starts_at, ends_at, created_by)
+  values (left(btrim(p_question), 200), opts, p_eligibility, cut, starts,
+    starts + make_interval(secs => (greatest(0.1, p_hours) * 3600)::double precision), auth.uid())
+  returning id into new_id;
+  perform admin_log('create_poll', new_id::text, json_build_object('question', p_question, 'options', opts, 'hours', p_hours,
+    'eligibility', p_eligibility, 'cutoff', cut, 'starts', starts)::jsonb);
+  return new_id;
+end;
+$$;
+
+-- Ends a live poll now (its results stay), or cancels a scheduled one.
+create or replace function public.admin_end_poll(p_id bigint)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  if exists (select 1 from polls where id = p_id and starts_at > now()) then
+    delete from polls where id = p_id;
+    perform admin_log('cancel_poll', p_id::text, null);
+    return;
+  end if;
+  update polls set ends_at = now() where id = p_id and ends_at > now();
+  perform admin_log('end_poll', p_id::text, null);
+end;
+$$;
+
+create or replace function public.admin_delete_poll(p_id bigint)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  perform admin_log('delete_poll', p_id::text, (select json_build_object('question', question, 'counts', poll_counts(id)) from polls where id = p_id)::jsonb);
+  delete from polls where id = p_id;
+end;
+$$;
+
+create or replace function public.admin_polls()
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  return (select coalesce(json_agg(r order by r.id desc), '[]') from (
+    select p.*, poll_counts(p.id) as counts from polls p order by p.id desc limit 50) r);
+end;
+$$;
+
 create or replace function public.admin_set_setting(p_key text, p_value jsonb)
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -1640,6 +1775,7 @@ revoke all on function public.admin_guard() from public, anon, authenticated;
 revoke all on function public.admin_log(text, text, jsonb) from public, anon, authenticated;
 revoke all on function public.admin_target(uuid) from public, anon, authenticated;
 revoke all on function public.is_banned(uuid) from public, anon, authenticated;
+revoke all on function public.poll_counts(bigint) from public, anon, authenticated;
 -- The sign-up trigger only ever runs as a trigger, never through the API.
 revoke all on function public.handle_new_user() from public, anon, authenticated;
 
@@ -1660,6 +1796,8 @@ revoke all on function public.clan_info(bigint) from public;
 grant execute on function public.clan_info(bigint) to anon, authenticated;
 revoke all on function public.clan_leaderboard(int) from public;
 grant execute on function public.clan_leaderboard(int) to anon, authenticated;
+revoke all on function public.polls_list() from public;
+grant execute on function public.polls_list() to anon, authenticated;
 do $$
 declare f text;
 begin
@@ -1686,7 +1824,8 @@ begin
     'admin_moderated(int)', 'admin_announce(text, numeric, text, timestamptz)', 'admin_end_announcement(bigint)',
     'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int)', 'admin_flags(text, int)',
     'admin_resolve_flag(bigint, text, text, boolean)', 'admin_notify(uuid, text)', 'admin_settle_dispute(bigint, boolean, text, text)',
-    'admin_stat_outliers(int)'
+    'admin_stat_outliers(int)', 'poll_vote(bigint, int)', 'admin_create_poll(text, text[], numeric, text, timestamptz, timestamptz)',
+    'admin_end_poll(bigint)', 'admin_delete_poll(bigint)', 'admin_polls()'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

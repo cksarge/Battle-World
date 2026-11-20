@@ -321,6 +321,17 @@
 .m-banner { pointer-events: auto; display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; background: var(--m-glass); border-left: 3px solid var(--m-teal); font-size: 13px; }
 .m-banner b { font-family: var(--m-stencil); font-size: 15px; letter-spacing: .04em; text-transform: uppercase; flex: none; }
 .m-banner.warn { border-color: var(--m-red); } .m-banner.event { border-color: var(--m-amber); }
+.m-banner.poll { border-color: var(--m-amber); align-items: center; }
+.m-banner.poll span { flex: 1; min-width: 0; }
+.poll-opts { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
+.poll-res { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 4px; }
+.poll-bar { position: relative; display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--m-faint); overflow: hidden; }
+.poll-bar i { position: absolute; inset: 0 auto 0 0; background: rgba(95, 179, 168, 0.18); }
+.poll-bar.top i { background: rgba(242, 163, 58, 0.24); }
+.poll-bar span, .poll-bar b { position: relative; }
+.poll-bar span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.poll-bar em { font-style: normal; font-size: 12px; color: var(--m-amber); }
+.poll-bar b { font-size: 12px; color: var(--m-dim); white-space: nowrap; }
 .m-train { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; margin-bottom: 8px; padding: 12px 14px; cursor: pointer; color: var(--m-bone); border: 1px solid var(--m-faint); background: linear-gradient(90deg, rgba(95, 179, 168, 0.16), rgba(95, 179, 168, 0.03)); }
 .m-train b { font-family: var(--m-stencil); font-size: 22px; line-height: 1.05; }
 .m-train span { font-size: 13px; color: var(--m-dim); }

@@ -1,5 +1,13 @@
 # Changelog
 
+### 4.10.0 · 2026-11-20
+
+- Polls! When one is running it shows at the top of the menu: press **Vote**, pick an option and see how everyone else voted
+  - You get one vote per poll, and it can't be changed
+  - Some polls are only for players whose accounts were made before a certain date (or before the poll started). You can still see those polls, but not vote
+  - After a poll closes, everyone who voted can see the final results for 3 days
+  - You need an account to vote; guests can look but not vote
+
 #### 4.9.1 · 2026-11-20 · [64b053e](https://github.com/cksarge/Battle-World/commit/64b053e)
 
 - Moderators can now send you a notice: a message that's just information, not a warning

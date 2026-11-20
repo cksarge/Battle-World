@@ -1,4 +1,4 @@
-// Commends, reports, the ban screen, admin warnings and the announcement banner.
+// Commends, reports, the ban screen, admin warnings, the announcement banner and polls.
 import { GAME_VERSION } from '../config.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -173,5 +173,60 @@ export function bannerHTML(app) {
     items.push({ kind: 'event', message: soon ? `${boost.multiplier}× XP event — starts ${new Date(boost.from).toLocaleString()}` : `${boost.multiplier}× XP event — ends ${new Date(boost.until).toLocaleString()}` });
   }
   for (const a of app.announcementsList || []) items.push(a);
-  return items.slice(0, 3).map((a) => `<div class="m-banner ${esc(a.kind || 'info')}"><b>${a.kind === 'warn' ? 'Notice' : a.kind === 'event' ? 'Event' : 'News'}</b><span>${esc(a.message)}</span></div>`).join('');
+  const html = items.slice(0, 3).map((a) => `<div class="m-banner ${esc(a.kind || 'info')}"><b>${a.kind === 'warn' ? 'Notice' : a.kind === 'event' ? 'Event' : 'News'}</b><span>${esc(a.message)}</span></div>`);
+  // Polls get their own lines (up to 2): live ones, then results of ended ones you voted in.
+  const polls = (app.polls || []).filter((p) => p.live || p.my_vote != null).slice(0, 2);
+  for (const p of polls) {
+    const action = p.my_vote != null || !p.live ? 'Results' : p.eligible ? 'Vote' : 'View';
+    html.push(`<div class="m-banner poll"><b>${p.live ? 'Poll' : 'Poll ended'}</b><span>${esc(p.question)}</span><button class="btn tiny ${action === 'Vote' ? 'primary' : 'ghost'}" data-poll="${p.id}">${action}</button></div>`);
+  }
+  return html.join('');
+}
+
+// Who may vote, in words. cutoff is the account-creation deadline (null = any account).
+function pollWho(p) {
+  if (!p.cutoff) return 'Anyone with an account can vote.';
+  const d = new Date(p.cutoff).toLocaleString();
+  return p.eligibility === 'before_start' ? `Only accounts made before the poll began (${d}) can vote.` : `Only accounts made before ${d} can vote.`;
+}
+
+// Bars for each option: share of the vote, your pick marked.
+export function pollResultsHTML(options, counts, mine = null) {
+  const total = counts.reduce((a, b) => a + b, 0), top = Math.max(...counts);
+  return `<div class="poll-res">${options.map((o, i) => {
+    const pct = total ? Math.round((counts[i] / total) * 100) : 0;
+    return `<div class="poll-bar ${counts[i] === top && top > 0 ? 'top' : ''}"><i style="width:${pct}%"></i><span>${esc(o)}${i === mine ? ' <em>✓ your vote</em>' : ''}</span><b>${pct}% · ${counts[i]}</b></div>`;
+  }).join('')}<p class="m-sub">${total} vote${total === 1 ? '' : 's'}</p></div>`;
+}
+
+// One poll: pick an option and vote, or see the results once you've voted (or it has ended).
+export function pollDialog(ui, id) {
+  const app = ui.app, p = (app.polls || []).find((x) => x.id === id);
+  if (!p) return;
+  const ends = new Date(p.ends_at).toLocaleString();
+  const showResults = p.counts && (p.my_vote != null || !p.live);
+  const reason = !app.user ? 'Sign in to vote.' : !p.eligible ? pollWho(p).replace(' can vote.', ' can vote, so you can’t vote in this one.') : '';
+  const m = ui.modal(`<h2 class="m-h2">${esc(p.question)}</h2>
+    <p class="m-sub">${p.live ? `Closes ${ends}` : `Closed ${ends}`} · ${esc(pollWho(p))}</p>
+    ${showResults ? pollResultsHTML(p.options, p.counts, p.my_vote)
+      : `<div class="poll-opts">${p.options.map((o, i) => `<label class="m-check"><input type="radio" name="poll-opt" value="${i}" ${reason ? 'disabled' : ''}><span>${esc(o)}</span></label>`).join('')}</div>
+        ${reason ? `<p class="m-sub">${esc(reason)}</p>` : '<p class="m-sub">You get one vote and can’t change it. Results show once you’ve voted.</p>'}`}
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn small ghost" data-x>Close</button>${!showResults && !reason && p.live ? '<button class="btn small primary" data-vote>Vote</button>' : ''}</div>`);
+  m.querySelector('[data-x]').onclick = () => m.remove();
+  m.querySelector('[data-vote]')?.addEventListener('click', async (e) => {
+    const pick = m.querySelector('input[name="poll-opt"]:checked');
+    if (!pick) return ui.toast('Pick an option first', 'bad');
+    e.target.disabled = true;
+    try {
+      p.counts = await app.api.votePoll(p.id, +pick.value);
+      p.my_vote = +pick.value;
+      ui.toast('Vote counted', 'good');
+      m.remove();
+      ui.renderBanner();
+      pollDialog(ui, id);
+    } catch (err) {
+      e.target.disabled = false;
+      ui.toast(err.missing ? 'Polls aren’t available yet' : err.message, 'bad');
+    }
+  });
 }

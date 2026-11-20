@@ -286,7 +286,7 @@ class App {
     this.checkAchievements();
   }
 
-  // ───────────── account status: moderation, admin gifts, announcements ─────────────
+  // ───────────── account status: moderation, admin gifts, announcements, polls ─────────────
   // Polled every 30 s while signed in. Bans, kicks and warnings come from the database, never from
   // other players' messages, so nobody can fake them.
   async pollStatus() {
@@ -294,8 +294,8 @@ class App {
     clearInterval(this.statusTimer);
     // Checked more often while the maintenance screen is up, so players get back in quickly.
     this.statusTimer = setInterval(() => this.pollStatus(), this.maintenanceShown ? 10000 : 30000);
-    const [ann, settings] = await Promise.all([this.api.announcements(), this.api.appSettings()]);
-    this.announcementsList = ann; this.appSettings = settings;
+    const [ann, settings, polls] = await Promise.all([this.api.announcements(), this.api.appSettings(), this.api.polls()]);
+    this.announcementsList = ann; this.appSettings = settings; this.polls = polls;
     this.ui.renderBanner?.();
     if (!this.user) { this.applyMaintenance(); return; }
     let st;

@@ -6,7 +6,7 @@ import { KINDS, CALLING_CARDS } from '../data/skins.js';
 import { MODES, rankBadge } from '../data/modes.js';
 import { MAPS } from '../data/maps.js';
 import { FEATURED_SLOTS, registerRow } from '../data/custommaps.js';
-import { REPORT_REASONS, COMMENDS, FEEDBACK_KINDS, esc, banUntil, isActive } from './social.js';
+import { REPORT_REASONS, COMMENDS, FEEDBACK_KINDS, esc, banUntil, isActive, pollResultsHTML } from './social.js';
 
 // Calling cards admins hand out by hand (Contributor, Developer), with a button each on a player's page.
 const AWARDED = Object.entries(CALLING_CARDS).filter(([, d]) => d.awarded);
@@ -29,7 +29,7 @@ const DURATIONS = [[60, '1 hour'], [360, '6 hours'], [1440, '1 day'], [4320, '3 
 const NAV = [
   ['To do', [['overview', 'Overview'], ['reports', 'Reports'], ['appeals', 'Appeals'], ['flags', 'Cheat flags'], ['feedback', 'Feedback']]],
   ['Players', [['players', 'Find a player'], ['live', 'Online now'], ['moderated', 'Bans & mutes']]],
-  ['Game', [['announce', 'Announcements'], ['settings', 'Game switches'], ['maps', 'Community maps']]],
+  ['Game', [['announce', 'Announcements'], ['polls', 'Polls'], ['settings', 'Game switches'], ['maps', 'Community maps']]],
   ['History', [['audit', 'Audit log']]],
 ];
 const SECTION_KEYS = new Set(NAV.flatMap(([, s]) => s.map(([k]) => k)).concat('player'));
@@ -660,6 +660,76 @@ export class AdminPanel {
       this.refresh();
     };
     this.body.querySelectorAll('[data-end]').forEach((b) => { b.onclick = async () => { await this.call('end_announcement', { p_id: +b.dataset.end }, 'Announcement ended'); this.app.pollStatus(); this.refresh(); }; });
+  }
+
+  // ───────────── polls ─────────────
+  // Players vote from the menu banner (social.js pollDialog). Eligibility is decided by the database from
+  // each account's creation time, so it can't be faked from the browser.
+  async polls() {
+    const list = (await this.call('polls')) || [];
+    const now = Date.now(), state = (p) => (Date.parse(p.starts_at) > now ? 'scheduled' : Date.parse(p.ends_at) > now ? 'live' : 'ended');
+    const who = (p) => (!p.cutoff ? 'Anyone with an account' : `Accounts made before ${when(p.cutoff)}${p.eligibility === 'before_start' ? ' (when it began)' : ''}`);
+    const optRow = (v = '') => `<div class="row adm-poll-opt" style="gap:6px"><input type="text" maxlength="80" placeholder="Option" value="${esc(v)}" style="flex:1"><button type="button" class="btn tiny ghost" data-rm title="Remove this option">✕</button></div>`;
+    this.body.innerHTML = `<div class="adm-form">
+      <label class="field"><span>Question</span><input type="text" id="pl-q" maxlength="200" placeholder="e.g. Which map should come next?"></label>
+      <div class="field"><span>Options (2 to 10)</span><div id="pl-opts" class="adm-form">${optRow()}${optRow()}</div>
+        <button type="button" class="btn tiny" id="pl-add" style="align-self:flex-start;margin-top:6px">+ Add option</button></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <label class="field"><span>Open for</span><select id="pl-h"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24">1 day</option><option value="72" selected>3 days</option><option value="168">1 week</option><option value="336">2 weeks</option><option value="720">30 days</option></select></label>
+        ${startsField('pl-start')}
+        <label class="field"><span>Who can vote</span><select id="pl-who"><option value="anyone">Anyone with an account</option><option value="before_start">Accounts made before the poll starts</option><option value="before_date">Accounts made before a date…</option></select></label>
+        <label class="field hidden" id="pl-cut-f"><span>Accounts made before</span><input type="datetime-local" id="pl-cut"></label>
+      </div>
+      <p class="m-sub">Guests can't vote. Each account gets one vote and can't change it. Players see the results once they've voted, and everyone who voted sees the final results for 3 days after it closes.</p>
+      <button class="btn small primary" id="pl-post" style="align-self:flex-start">Start poll</button></div>
+      <h3 class="m-h3">Polls</h3>${list.length ? list.map((p) => {
+        const st = state(p);
+        return `<div class="adm-ann ${st === 'live' ? 'live' : ''}" style="flex-direction:column;align-items:stretch">
+          <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><span class="tag">${st === 'live' ? 'Live' : st === 'scheduled' ? 'Scheduled' : 'Ended'}</span><b>${esc(p.question)}</b><span class="spacer"></span>
+            ${st !== 'ended' ? `<button class="btn tiny ghost" data-endpoll="${p.id}">${st === 'scheduled' ? 'Cancel' : 'End now'}</button>` : ''}<button class="btn tiny danger" data-delpoll="${p.id}" data-q="${esc(p.question)}">Delete</button></div>
+          <span class="m-sub">${st === 'scheduled' ? `Opens ${when(p.starts_at)} · ` : ''}${st === 'ended' ? 'Closed' : 'Closes'} ${when(p.ends_at)} · ${esc(who(p))}</span>
+          ${pollResultsHTML(p.options, p.counts || p.options.map(() => 0))}</div>`;
+      }).join('') : '<p class="m-empty">No polls yet.</p>'}`;
+    const $ = (q) => this.body.querySelector(q), opts = $('#pl-opts');
+    const bindRm = () => opts.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = () => { if (opts.children.length > 2) b.parentElement.remove(); else this.ui.toast('A poll needs at least 2 options', 'bad'); }; });
+    bindRm();
+    $('#pl-add').onclick = () => {
+      if (opts.children.length >= 10) return this.ui.toast('10 options at most', 'bad');
+      opts.insertAdjacentHTML('beforeend', optRow());
+      bindRm();
+      opts.lastElementChild.querySelector('input').focus();
+    };
+    $('#pl-who').onchange = () => $('#pl-cut-f').classList.toggle('hidden', $('#pl-who').value !== 'before_date');
+    $('#pl-post').onclick = async () => {
+      const question = $('#pl-q').value.trim();
+      const options = [...opts.querySelectorAll('input')].map((i) => i.value.trim()).filter(Boolean);
+      if (!question) return this.ui.toast('Write a question first', 'bad');
+      if (options.length < 2) return this.ui.toast('Fill in at least 2 options', 'bad');
+      if (new Set(options.map((o) => o.toLowerCase())).size !== options.length) return this.ui.toast('Two options are the same', 'bad');
+      const starts = readStarts($('#pl-start'));
+      if (starts === false) return this.ui.toast('Pick a start time in the future, or leave it empty', 'bad');
+      const eligibility = $('#pl-who').value;
+      let cutoff = null;
+      if (eligibility === 'before_date') {
+        if (!$('#pl-cut').value) return this.ui.toast('Pick the date accounts must be made before', 'bad');
+        cutoff = new Date($('#pl-cut').value).toISOString();
+      }
+      const id = await this.call('create_poll', { p_question: question, p_options: options, p_hours: +$('#pl-h').value, p_eligibility: eligibility, p_cutoff: cutoff, p_starts: starts }, starts ? 'Poll scheduled' : 'Poll started');
+      if (id == null) return;
+      this.app.pollStatus();
+      this.refresh();
+    };
+    this.body.querySelectorAll('[data-endpoll]').forEach((b) => { b.onclick = async () => {
+      const cancel = b.textContent === 'Cancel';
+      await this.call('end_poll', { p_id: +b.dataset.endpoll }, cancel ? 'Poll cancelled' : 'Poll ended');
+      this.app.pollStatus(); this.refresh();
+    }; });
+    this.body.querySelectorAll('[data-delpoll]').forEach((b) => { b.onclick = async () => {
+      const ok = await ask(this.ui, `Delete “${b.dataset.q}”?`, [], { confirm: 'Delete poll', danger: true, note: 'This removes the poll and all its votes for everyone. It can’t be undone. (Ending it keeps the results.)' });
+      if (!ok) return;
+      await this.call('delete_poll', { p_id: +b.dataset.delpoll }, 'Poll deleted');
+      this.app.pollStatus(); this.refresh();
+    }; });
   }
 
   // ───────────── game switches ─────────────

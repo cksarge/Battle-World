@@ -312,6 +312,10 @@ export class Api {
     return error ? [] : data;
   }
 
+  // Live polls and recently ended ones (supabase/schema.sql, polls_list). [] if the database isn't updated yet.
+  async polls() { try { return (await this.rpc('polls_list')) || []; } catch { return []; } }
+  votePoll(id, choice) { return this.rpc('poll_vote', { p_poll: id, p_choice: choice }); }
+
   async appSettings() {
     const { data, error } = await this.sb.from('app_settings').select('key,value');
     return error ? {} : Object.fromEntries(data.map((r) => [r.key, r.value]));
