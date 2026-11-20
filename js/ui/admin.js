@@ -230,6 +230,7 @@ export class AdminPanel {
           <button class="btn tiny danger" data-act="ban" data-u="${r.target}" data-r="${r.id}">Ban</button>
           <button class="btn tiny" data-act="mute" data-u="${r.target}" data-r="${r.id}">Mute</button>
           <button class="btn tiny" data-act="warn" data-u="${r.target}" data-r="${r.id}">Warn</button>
+          <button class="btn tiny" data-act="notice" data-u="${r.target}">Send notice</button>
           <button class="btn tiny" data-act="kick" data-u="${r.target}" data-r="${r.id}">Kick</button>
           ${r.status === 'open' ? `<button class="btn tiny ghost" data-resolve="${r.id}" data-st="actioned">Mark handled</button><button class="btn tiny ghost" data-resolve="${r.id}" data-st="dismissed">Dismiss</button>` : `<button class="btn tiny ghost" data-resolve="${r.id}" data-st="open">Reopen</button>`}
         </div></div>`).join('') : '<p class="m-empty">No reports here.</p>'}`;
@@ -296,6 +297,7 @@ export class AdminPanel {
         out.push(`<button class="btn tiny" data-player="${esc(t)}">Open player</button>`,
           `<button class="btn tiny danger" data-act="ban" data-u="${esc(t)}" data-f="${f.id}" data-reason="Cheating">Ban</button>`,
           `<button class="btn tiny" data-act="warn" data-u="${esc(t)}" data-f="${f.id}">Warn</button>`,
+          `<button class="btn tiny" data-act="notice" data-u="${esc(t)}">Send notice</button>`,
           `<button class="btn tiny" data-act="kick" data-u="${esc(t)}" data-f="${f.id}">Kick</button>`);
       }
       if (open) {
@@ -443,7 +445,8 @@ export class AdminPanel {
           ${banned ? `<button class="btn tiny" data-act="unban" data-u="${p.id}">Unban</button>` : `<button class="btn tiny danger" data-act="ban" data-u="${p.id}">Ban</button>`}
           ${muted ? `<button class="btn tiny" data-act="unmute" data-u="${p.id}">Unmute</button>` : `<button class="btn tiny" data-act="mute" data-u="${p.id}">Mute</button>`}
           <button class="btn tiny" data-act="warn" data-u="${p.id}">Warn</button>
-          <button class="btn tiny" data-act="kick" data-u="${p.id}">Kick from match</button>`}</div></div>
+          <button class="btn tiny" data-act="kick" data-u="${p.id}">Kick from match</button>`}
+          <button class="btn tiny" data-act="notice" data-u="${p.id}">Send notice</button></div></div>
         <div><small>Account</small><div class="row">
           <button class="btn tiny" data-act="rename" data-u="${p.id}" data-name="${esc(p.username)}">Rename</button>
           <button class="btn tiny" data-act="stats" data-u="${p.id}">Edit stats</button>
@@ -455,7 +458,7 @@ export class AdminPanel {
       </div>
       ${fold('Recent matches', d.matches.length, d.matches.length ? `<table class="tbl"><tr><th>When</th><th>Mode</th><th>Map</th><th>Result</th><th class="num">K–D</th><th class="num">ELO</th><th></th></tr>${d.matches.map((h) => `<tr><td class="m-sub">${when(h.created_at)}</td><td>${esc(MODES[h.mode]?.name || h.mode)}</td><td>${esc(MAPS[h.map]?.name || h.map)}</td><td class="res-${h.result}">${esc(h.result)}</td><td class="num">${h.kills}–${h.deaths}</td><td class="num">${h.ranked ? (h.elo_change > 0 ? '+' : '') + h.elo_change : '—'}</td><td>${h.ranked && h.elo_change ? `<button class="btn tiny ghost" data-void="${esc(h.match_id)}">Void result</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="m-empty">No matches.</p>', true)}
       ${fold('Reports against them', d.reports_against.length, d.reports_against.map((r) => `<div class="m-sub">${when(r.created_at)} · ${esc(REASON[r.reason])} from ${esc(r.reporter_name)} · ${esc(r.status)}${r.note ? ` · “${esc(r.note)}”` : ''}</div>`).join(''), d.reports_against.some((r) => r.status === 'open'))}
-      ${fold('Warnings', d.warnings.length, d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${w.kind === 'notice' ? 'Notice: ' : ''}${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join(''))}
+      ${fold('Warnings and notices', d.warnings.length, d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${w.kind === 'notice' ? 'Notice: ' : ''}${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join(''))}
       ${fold('Ban appeals', d.appeals?.length, (d.appeals || []).map((a) => `<div class="m-sub">${when(a.created_at)} · ${esc(a.status)}: “${esc(a.message)}”${a.admin_note ? ` · your note: ${esc(a.admin_note)}` : ''}</div>`).join(''))}
       ${fold('Team-kill kicks', d.ff_penalties?.length, `${m.queue_cooldown_until && new Date(m.queue_cooldown_until) > new Date() ? `<div class="m-sub">Matchmaking cooldown until ${when(m.queue_cooldown_until)}</div>` : ''}${(d.ff_penalties || []).map((f) => `<div class="m-sub">${when(f.created_at)} · ${f.team_kills} team kills, ${f.team_damage} team damage · match ${esc(f.match_id)}</div>`).join('')}`)}
       ${fold('Past seasons', d.seasons.length, d.seasons.map((s) => `<div class="m-sub">${esc(s.season_id.toUpperCase())}: ${s.final_elo} final, ${s.peak_elo} peak, ${s.wins}–${s.losses}, ${s.pass_xp.toLocaleString()} season XP</div>`).join(''))}
@@ -504,6 +507,12 @@ export class AdminPanel {
           v = await ask(this.ui, 'Send a warning', [{ id: 'msg', label: 'Message', type: 'textarea', max: 500 }], { confirm: 'Send' });
           if (!v || !v.msg.trim()) return;
           await this.call('warn', { p_user: u, p_message: v.msg }, 'Warning sent');
+        } else if (act === 'notice') {
+          // Information rather than a telling-off: shown as a notice, without the warning's "repeated
+          // problems can lead to a mute or ban" line. Admin accounts can receive these too.
+          v = await ask(this.ui, 'Send a notice', [{ id: 'msg', label: 'Message', type: 'textarea', max: 500 }], { confirm: 'Send', note: 'Shown to them as a notice from the moderator, not a warning, the next time their game checks in (within 30 seconds).' });
+          if (!v || !v.msg.trim()) return;
+          await this.call('notify', { p_user: u, p_message: v.msg }, 'Notice sent');
         } else if (act === 'rename') {
           v = await ask(this.ui, 'Rename player', [{ id: 'name', label: 'New username (3–16 letters, numbers or _)', type: 'text', value: b.dataset.name, max: 16 }], { confirm: 'Rename' });
           if (!v) return;

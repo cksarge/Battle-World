@@ -1,5 +1,9 @@
 # Changelog
 
+#### 4.9.1 · 2026-11-20
+
+- Moderators can now send you a notice: a message that's just information, not a warning
+
 ### 4.9.0 · 2026-11-20 · [0de7c39](https://github.com/cksarge/Battle-World/commit/0de7c39)
 
 - Stronger anti-cheat in online matches: the game now also watches for cheat scripts, aimbots, triggerbots and autoclickers. Anything it finds goes to a moderator to review; nobody is banned automatically, so a false alarm can't get you banned on its own
