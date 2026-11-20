@@ -150,11 +150,14 @@ export function showMaintenance(ui, mt) {
   </div></div>`;
 }
 
+// Warnings and notices (information such as a voided ranked result) from the admin. Only warnings
+// carry the "repeated problems" line.
 export function showWarnings(ui, list) {
-  const m = ui.modal(`<h2 class="m-h2">⚠ Message from the moderator</h2>
+  const warned = list.some((w) => w.kind !== 'notice');
+  const m = ui.modal(`<h2 class="m-h2">${warned ? '⚠ Message from the moderator' : '📣 Notice from the moderator'}</h2>
     ${list.map((w) => `<div class="warn-item"><p>${esc(w.message)}</p><span class="m-sub">${new Date(w.at).toLocaleString()}</span></div>`).join('')}
-    <p class="m-sub">Repeated problems can lead to a mute or ban.</p>
-    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn primary small" data-x>I understand</button></div>`);
+    ${warned ? '<p class="m-sub">Repeated problems can lead to a mute or ban.</p>' : ''}
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn primary small" data-x>${warned ? 'I understand' : 'OK'}</button></div>`);
   m.dataset.locked = '1';
   m.querySelector('[data-x]').onclick = () => m.remove();
 }

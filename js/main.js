@@ -714,7 +714,9 @@ class App {
 }
 
 const app = new App();
-window.jps = app;
+// The whole game reachable from the console is what most cheat scripts latch onto, so it's only
+// exposed when running locally (for the dev tools in tools/).
+if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) window.jps = app;
 app.init().catch((e) => {
   console.error(e);
   bootMsg.textContent = 'Failed to start: ' + e.message;

@@ -1,4 +1,5 @@
 import { pad, BTN } from '../engine/gamepad.js';
+import { trusted, click } from './integrity.js';
 
 // Controller buttons that act like keys, so the game reads them exactly like the keyboard.
 const PAD_KEYS = {
@@ -18,21 +19,23 @@ export class Input {
     this.typing = false;
     this.onUnlock = null;
     this._h = {
+      // Keyboard and mouse events made by a script (not a real device) are ignored and counted
+      // (see integrity.js), so input-faking cheats do nothing.
       kd: (e) => {
-        if (this.typing) return;
+        if (this.typing || !trusted(e)) return;
         if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
         if (!this.keys.has(e.code)) this.edges.add(e.code);
         this.keys.add(e.code);
       },
-      ku: (e) => { this.keys.delete(e.code); },
-      mm: (e) => { if (this.locked) { this.mouse.dx += e.movementX; this.mouse.dy += e.movementY; } },
+      ku: (e) => { if (trusted(e)) this.keys.delete(e.code); },
+      mm: (e) => { if (this.locked && trusted(e)) { this.mouse.dx += e.movementX; this.mouse.dy += e.movementY; } },
       md: (e) => {
-        if (!this.locked) return;
-        if (e.button === 0) { this.mouse.left = true; this.mouseEdges.add('left'); }
+        if (!this.locked || !trusted(e)) return;
+        if (e.button === 0) { this.mouse.left = true; this.mouseEdges.add('left'); click(e.timeStamp); }
         if (e.button === 2) { this.mouse.right = true; this.mouseEdges.add('right'); }
       },
-      mu: (e) => { if (e.button === 0) this.mouse.left = false; if (e.button === 2) this.mouse.right = false; },
-      wh: (e) => { if (this.locked) this.mouse.wheel += Math.sign(e.deltaY); },
+      mu: (e) => { if (!trusted(e)) return; if (e.button === 0) this.mouse.left = false; if (e.button === 2) this.mouse.right = false; },
+      wh: (e) => { if (this.locked && trusted(e)) this.mouse.wheel += Math.sign(e.deltaY); },
       plc: () => {
         const was = this.locked;
         this.locked = document.pointerLockElement === this.canvas;

@@ -343,6 +343,7 @@ export class Game {
   // ───────────────────────── local player ─────────────────────────
   updateLocal(dt, p) {
     const inp = this.input, s = this.settings;
+    this.anticheat.aimStart(p);
     const ui = this.hud.overlayOpen() || !inp.captured;
     // Look
     const w = p.weapon;
@@ -471,6 +472,7 @@ export class Game {
       reload: p.ws.reloadT >= 0 && w ? p.ws.reloadT / reloadTime(p, w) : -1, scoped: p.ws.scope > 0,
       drawTime: w?.draw || 0.4, hidden: this.emoteT > 0, calm: !!s.reduceMotion,
     });
+    this.anticheat.localFrame(p, firing);
   }
 
   // Wheel slots: 0 up, 1 right, 2 down, 3 left. A quick tap of G plays the first emote.

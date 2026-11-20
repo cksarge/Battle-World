@@ -1,5 +1,24 @@
 # Changelog
 
+### 4.9.0 · 2026-11-20
+
+- More anti-cheat. Each game now also checks itself during online matches and flags its own player for review when it finds:
+  - Built-in browser functions replaced (how speed hacks, wallhacks and packet editors hook in)
+  - Scripts added to the game page that the game didn't load (userscripts, some extensions)
+  - Keyboard or mouse input made by a script. The game now ignores that input entirely
+  - Autoclicking: 30 quick clicks spaced almost exactly evenly
+  - The aim moving between frames with no mouse or controller input (an aimbot setting it)
+  - Clicks within 90 ms of an enemy coming into view with the crosshair already on them, again and again (a triggerbot)
+  - The game is no longer reachable from the browser console (it still is when running locally, for the dev tools)
+- Admin → Cheat flags is now a queue you work through:
+  - Open / Handled / Dismissed / All, with a red count in the side menu and on the Overview
+  - Every flag has Ban (reason already set to Cheating), Warn, Kick, Mark handled and Dismiss, plus "Dismiss all" for a player. Banning from a flag closes all of that player's open flags
+  - Disputed ranked results show who was counted as the winner and the rating change, with **Void result and notify both** (both players get their rating and win/loss back, and a notice naming the other player) or **Keep result** (optionally with a notice)
+  - Each kind of flag explains what it means and what else can cause it
+  - Stat outliers: players with 70%+ headshots or 6+ kills per death over at least 100 online kills in the last 30 days
+- Notices: admin messages that aren't warnings (like a voided result) are shown as a notice, without the "repeated problems can lead to a ban" line
+- **Database update needed:** run `supabase/schema.sql` again in the Supabase SQL editor. Until then the Cheat flags page shows an error and the new self-checks are not saved
+
 ### 4.8.0 · 2026-11-18 · [2ec4b89](https://github.com/cksarge/Battle-World/commit/2ec4b89)
 
 - Terms of Service and Privacy Policy, readable in game from the Terms and Privacy links in the menu footer (and on GitHub as TERMS.md and PRIVACY.md)

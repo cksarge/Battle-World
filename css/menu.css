@@ -397,12 +397,14 @@
 #adm-body { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 #adm-body > .seg { align-self: flex-start; }
 .adm-report { padding: 10px 12px; background: var(--m-ink2); border: 1px solid var(--m-faint); border-left: 3px solid var(--m-red); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.adm-report.actioned { border-left-color: #59d38a; } .adm-report.dismissed { border-left-color: var(--m-dim); opacity: .8; }
+.adm-report.actioned, .adm-report.resolved { border-left-color: #59d38a; } .adm-report.dismissed { border-left-color: var(--m-dim); opacity: .8; }
 .ar-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .ar-reason { font-family: var(--m-stencil); font-size: 18px; }
 .ar-note { margin: 2px 0; font-style: italic; }
 .ar-chat { font-size: 13px; max-height: 140px; overflow-y: auto; padding: 6px 8px; background: rgba(0, 0, 0, .25); }
 .ar-actions { flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.ar-help { font-size: 13px; color: var(--m-dim); margin: 0; }
+.ar-ranked { font-size: 14px; padding: 6px 8px; background: rgba(0, 0, 0, .25); }
 .adm-report a, .adm-player a, #adm-body a { color: var(--m-teal); }
 .adm-list { display: flex; flex-direction: column; gap: 4px; }
 .adm-row { display: flex; gap: 10px; align-items: center; padding: 8px 10px; cursor: pointer; color: var(--m-bone); background: var(--m-ink2); border: 1px solid var(--m-faint); text-align: left; }

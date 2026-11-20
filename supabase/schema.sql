@@ -290,6 +290,10 @@ revoke all on public.warnings from anon, authenticated;
 grant select on public.warnings to authenticated;
 drop policy if exists "own warnings" on public.warnings;
 create policy "own warnings" on public.warnings for select using ((select auth.uid()) = user_id);
+-- 'warning' (a telling-off from admin_warn) or 'notice' (information, e.g. a ranked result was voided).
+alter table public.warnings add column if not exists kind text not null default 'warning';
+alter table public.warnings drop constraint if exists warnings_kind_check;
+alter table public.warnings add constraint warnings_kind_check check (kind in ('warning', 'notice'));
 
 -- Items an admin gives or takes away; the player's client applies them to its inventory.
 create table if not exists public.item_grants (
@@ -370,7 +374,7 @@ begin
       where a.user_id = uid and a.created_at >= coalesce(m.banned_at, m.updated_at) order by a.id desc limit 1) end,
     'muted_until', case when m.muted_until > now() then m.muted_until end, 'mute_reason', m.mute_reason,
     'kick_at', m.kick_at, 'kick_reason', m.kick_reason,
-    'warnings', (select coalesce(json_agg(json_build_object('id', w.id, 'message', w.message, 'at', w.created_at) order by w.id), '[]') from warnings w where w.user_id = uid and not w.seen),
+    'warnings', (select coalesce(json_agg(json_build_object('id', w.id, 'message', w.message, 'at', w.created_at, 'kind', w.kind) order by w.id), '[]') from warnings w where w.user_id = uid and not w.seen),
     'grants', (select coalesce(json_agg(json_build_object('id', g.id, 'kind', g.kind, 'item', g.item, 'revoke', g.revoke) order by g.id), '[]') from item_grants g where g.user_id = uid and not g.applied),
     'season', current_season(),
     'admin', is_admin(),
@@ -754,6 +758,7 @@ $$;
 -- Cheat flags: players' games report impossible things they see another player (or the host) do,
 -- such as moving too fast, shooting through walls, firing too fast, impossible purchases or round results.
 -- Players can't read them; they're listed in Admin → Cheat flags. Ranked disputes are added by report_ranked.
+-- Each game also flags itself (flag_self: reporter = target) for signs of cheat scripts on its own page.
 create table if not exists public.cheat_flags (
   id         bigint generated always as identity primary key,
   created_at timestamptz not null default now(),
@@ -761,11 +766,20 @@ create table if not exists public.cheat_flags (
   target     uuid references public.profiles(id) on delete cascade,
   match_id   text not null,
   mode       text,
-  kind       text not null check (kind in ('speed', 'wall_shot', 'fire_rate', 'money', 'round', 'forged_hit', 'ranked_dispute')),
+  kind       text not null check (kind in ('speed', 'wall_shot', 'fire_rate', 'money', 'round', 'forged_hit', 'ranked_dispute', 'tampered', 'injected_script', 'synthetic_input', 'autoclicker', 'aim_hook', 'triggerbot')),
   details    jsonb,
   unique (reporter, match_id, target, kind)
 );
 create index if not exists cheat_flags_target_idx on public.cheat_flags (target, created_at desc);
+alter table public.cheat_flags drop constraint if exists cheat_flags_kind_check;
+alter table public.cheat_flags add constraint cheat_flags_kind_check check (kind in ('speed', 'wall_shot', 'fire_rate', 'money', 'round', 'forged_hit', 'ranked_dispute', 'tampered', 'injected_script', 'synthetic_input', 'autoclicker', 'aim_hook', 'triggerbot'));
+-- Worked through in the admin panel: open until resolved (acted on) or dismissed.
+alter table public.cheat_flags add column if not exists status text not null default 'open';
+alter table public.cheat_flags add column if not exists resolution text;
+alter table public.cheat_flags add column if not exists resolved_at timestamptz;
+alter table public.cheat_flags drop constraint if exists cheat_flags_status_check;
+alter table public.cheat_flags add constraint cheat_flags_status_check check (status in ('open', 'resolved', 'dismissed'));
+create index if not exists cheat_flags_status_idx on public.cheat_flags (status, id desc);
 alter table public.cheat_flags enable row level security;
 revoke all on public.cheat_flags from anon, authenticated;
 
@@ -786,6 +800,25 @@ end;
 $$;
 revoke all on function public.flag_player(text, uuid, text, text, jsonb) from public, anon;
 grant execute on function public.flag_player(text, uuid, text, text, jsonb) to authenticated;
+
+-- A player's own game reporting signs of cheat scripts on itself (js/game/anticheat.js, selfAudit).
+-- Shares flag_player's limit of 30 flags an hour per player.
+create or replace function public.flag_self(p_match_id text, p_kind text, p_mode text, p_details jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null or p_match_id is null then return; end if;
+  if p_kind not in ('tampered', 'injected_script', 'synthetic_input', 'autoclicker', 'aim_hook', 'triggerbot') then return; end if;
+  if (select count(*) from cheat_flags where reporter = uid and created_at > now() - interval '1 hour') >= 30 then return; end if;
+  insert into cheat_flags (reporter, target, match_id, mode, kind, details)
+  values (uid, uid, left(p_match_id, 80), left(p_mode, 30), p_kind,
+          case when p_details is not null and pg_column_size(p_details) <= 4000 then p_details end)
+  on conflict do nothing;
+end;
+$$;
+revoke all on function public.flag_self(text, text, text, jsonb) from public, anon;
+grant execute on function public.flag_self(text, text, text, jsonb) to authenticated;
 
 -- Sign in with a username: returns the account's email only when the password is right, so emails
 -- can't be looked up without it. Five wrong passwords per username lock it for 15 minutes. The game
@@ -947,6 +980,7 @@ begin
     'matches_today', (select count(*) from match_history where created_at > now() - interval '1 day'),
     'open_reports', (select count(*) from reports where status = 'open'),
     'open_feedback', (select count(*) from feedback where status = 'open'),
+    'open_flags', (select count(*) from cheat_flags where status = 'open'),
     'banned', (select count(*) from moderation where banned_until > now()),
     'muted', (select count(*) from moderation where muted_until > now()),
     'season', current_season(),
@@ -1189,19 +1223,102 @@ begin
 end;
 $$;
 
--- Cheat flags, newest first, with how many flags and separate reporters each player has.
-create or replace function public.admin_flags(p_limit int default 200)
+-- Cheat flags, newest first, with how many flags (and open ones) and separate reporters each player
+-- has. Ranked disputes include the result that counted, with both players' names.
+drop function if exists public.admin_flags(int);
+create or replace function public.admin_flags(p_status text default 'open', p_limit int default 200)
 returns json language plpgsql security definer set search_path = public as $$
 begin
   perform admin_guard();
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
     select f.*, rp.username as reporter_name, tp.username as target_name,
       (select count(*) from cheat_flags x where x.target = f.target) as target_flags,
-      (select count(distinct x.reporter) from cheat_flags x where x.target = f.target) as target_reporters
+      (select count(*) from cheat_flags x where x.target = f.target and x.status = 'open') as target_open,
+      (select count(distinct x.reporter) from cheat_flags x where x.target = f.target and x.reporter <> x.target) as target_reporters,
+      case when f.kind = 'ranked_dispute' then (
+        select json_build_object('winner', rm.winner, 'winner_name', wp.username, 'loser', rm.loser, 'loser_name', lp.username,
+          'winner_delta', rm.winner_delta, 'loser_delta', rm.loser_delta, 'voided', rm.voided, 'created_at', rm.created_at)
+        from ranked_matches rm left join profiles wp on wp.id = rm.winner left join profiles lp on lp.id = rm.loser
+        where rm.match_id = f.match_id) end as ranked
     from cheat_flags f
     left join profiles rp on rp.id = f.reporter
     left join profiles tp on tp.id = f.target
+    where p_status = 'all' or f.status = p_status
     order by f.id desc limit least(p_limit, 500)) t);
+end;
+$$;
+
+-- Closes a flag ('resolved' = acted on, 'dismissed' = nothing wrong) or reopens it ('open').
+-- p_all: every open flag against the same player instead. Returns how many changed.
+create or replace function public.admin_resolve_flag(p_id bigint, p_status text, p_note text, p_all boolean default false)
+returns int language plpgsql security definer set search_path = public as $$
+declare t uuid; n int;
+begin
+  perform admin_guard();
+  if p_status not in ('open', 'resolved', 'dismissed') then raise exception 'invalid status'; end if;
+  select target into t from cheat_flags where id = p_id;
+  if not found then raise exception 'flag not found'; end if;
+  update cheat_flags set status = p_status, resolution = case when p_status = 'open' then null else left(p_note, 500) end,
+    resolved_at = case when p_status = 'open' then null else now() end
+  where (id = p_id) or (coalesce(p_all, false) and target = t and status = 'open');
+  get diagnostics n = row_count;
+  perform admin_log('resolve_flag', p_id::text, json_build_object('status', p_status, 'note', p_note, 'all', coalesce(p_all, false), 'count', n)::jsonb);
+  return n;
+end;
+$$;
+
+-- A message to a player that isn't a warning (no "repeated problems" line). Admins can receive these.
+create or replace function public.admin_notify(p_user uuid, p_message text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  if coalesce(trim(p_message), '') = '' then raise exception 'empty message'; end if;
+  if not exists (select 1 from profiles where id = p_user) then raise exception 'player not found'; end if;
+  insert into warnings (user_id, message, kind) values (p_user, left(p_message, 500), 'notice');
+  perform admin_log('notify', p_user::text, json_build_object('message', p_message)::jsonb);
+end;
+$$;
+
+-- Settles a disputed ranked result from its flag. p_void: void the result (both players get their
+-- rating and win/loss back; see admin_void_ranked) or keep it as it counted. p_message, if given, is
+-- sent to both players as a notice. Every open dispute flag for that match is closed.
+create or replace function public.admin_settle_dispute(p_id bigint, p_void boolean, p_message text, p_note text default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare f cheat_flags%rowtype; r ranked_matches%rowtype;
+begin
+  perform admin_guard();
+  select * into f from cheat_flags where id = p_id;
+  if not found or f.kind <> 'ranked_dispute' then raise exception 'not a ranked dispute'; end if;
+  select * into r from ranked_matches where match_id = f.match_id;
+  if not found then raise exception 'no ranked result for that match'; end if;
+  if p_void and not r.voided then perform admin_void_ranked(f.match_id); end if;
+  if coalesce(trim(p_message), '') <> '' then
+    insert into warnings (user_id, message, kind) values (r.winner, left(p_message, 500), 'notice'), (r.loser, left(p_message, 500), 'notice');
+  end if;
+  update cheat_flags set status = case when p_void then 'resolved' else 'dismissed' end,
+    resolution = left(coalesce(nullif(trim(p_note), ''), case when p_void then 'Result voided' else 'Result kept' end), 500), resolved_at = now()
+  where match_id = f.match_id and kind = 'ranked_dispute' and status = 'open';
+  perform admin_log(case when p_void then 'void_dispute' else 'keep_dispute' end, f.match_id,
+    json_build_object('flag', p_id, 'message', p_message, 'winner', r.winner, 'loser', r.loser)::jsonb);
+end;
+$$;
+
+-- Players whose online results over the last p_days are far outside normal: at least 100 kills and
+-- 70%+ of them headshots, or 6+ kills per death. Read from match_history; nothing is flagged.
+create or replace function public.admin_stat_outliers(p_days int default 30)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  return (select coalesce(json_agg(row_to_json(t)), '[]') from (
+    select h.user_id, p.username, count(*) as matches, sum(h.kills) as kills, sum(h.deaths) as deaths, sum(h.headshots) as headshots,
+      round(sum(h.headshots)::numeric / nullif(sum(h.kills), 0), 2) as hs_rate,
+      round(sum(h.kills)::numeric / greatest(sum(h.deaths), 1), 2) as kd,
+      (m.banned_until > now()) as banned
+    from match_history h join profiles p on p.id = h.user_id left join moderation m on m.user_id = h.user_id
+    where h.online and h.created_at > now() - make_interval(days => greatest(1, least(p_days, 365)))
+    group by h.user_id, p.username, m.banned_until
+    having sum(h.kills) >= 100 and (sum(h.headshots)::numeric / sum(h.kills) >= 0.7 or sum(h.kills)::numeric / greatest(sum(h.deaths), 1) >= 6)
+    order by sum(h.headshots)::numeric / sum(h.kills) desc limit 50) t);
 end;
 $$;
 
@@ -1567,7 +1684,9 @@ begin
     'admin_kick(uuid, text)', 'admin_warn(uuid, text)', 'admin_rename(uuid, text)', 'admin_set_stats(uuid, jsonb)',
     'admin_reset_stats(uuid)', 'admin_grant_item(uuid, text, text, boolean)', 'admin_void_ranked(text)',
     'admin_moderated(int)', 'admin_announce(text, numeric, text, timestamptz)', 'admin_end_announcement(bigint)',
-    'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int)', 'admin_flags(int)'
+    'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int)', 'admin_flags(text, int)',
+    'admin_resolve_flag(bigint, text, text, boolean)', 'admin_notify(uuid, text)', 'admin_settle_dispute(bigint, boolean, text, text)',
+    'admin_stat_outliers(int)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

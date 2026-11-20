@@ -37,6 +37,23 @@ const SECTION_KEYS = new Set(NAV.flatMap(([, s]) => s.map(([k]) => k)).concat('p
 const BAN_REASONS = ['Cheating', 'Hacking / exploits', 'Team killing / griefing', 'Harassment', 'Hate speech', 'Inappropriate name', 'Ban evasion'];
 const MUTE_REASONS = ['Spam', 'Harassment', 'Hate speech', 'Inappropriate language'];
 const SAVED_SECTION = 'jps-admin-section';
+// Cheat flag kinds (js/game/anticheat.js). The second group is found by the player's own game.
+const FLAG_KINDS = {
+  speed: 'Moving too fast', wall_shot: 'Kills through walls', fire_rate: 'Firing too fast', money: 'Impossible purchase', round: 'Impossible round result',
+  forged_hit: 'Impossible hit (rejected by host)', ranked_dispute: 'Disputed ranked result',
+  tampered: 'Browser functions replaced', injected_script: 'Script added to the game page', synthetic_input: 'Input made by a script',
+  autoclicker: 'Autoclicker', aim_hook: 'Aim moved without input', triggerbot: 'Inhumanly fast reactions',
+};
+const SELF_KINDS = new Set(['tampered', 'injected_script', 'synthetic_input', 'autoclicker', 'aim_hook', 'triggerbot']);
+const FLAG_HELP = {
+  ranked_dispute: 'The two players\' games reported different winners. The first report counted. A real cheat would usually be the counted winner\'s game lying; a disconnect can also cause it.',
+  tampered: 'Built-in browser functions were replaced on their page (listed below). Cheat scripts do this (timer hooks for speed hacks, WebGL hooks for wallhacks), but so do some privacy and anti-fingerprinting extensions. Worth more alongside other flags.',
+  injected_script: 'A script the game didn\'t load was added to their page: a userscript (Tampermonkey and similar) or an extension. The address below usually tells you which.',
+  synthetic_input: 'Keyboard or mouse events made by a script arrived during the match (the game ignored them). Real keyboards and mice never do this.',
+  autoclicker: '30 quick clicks in a row spaced within a couple of milliseconds of each other. A hand varies by 10–30 ms.',
+  aim_hook: 'Their view turned between frames with no mouse or controller input. Only input, recoil and respawns turn you, so this points to a script setting the aim (an aimbot).',
+  triggerbot: 'They kept clicking within 90 ms of an enemy coming into view with the crosshair already on them. People need about 100 ms or more.',
+};
 
 // A foldable history section on a player's page, with its count in the title. Empty ones are left out.
 const fold = (title, n, html, open = false) => (n ? `<details class="adm-fold" ${open ? 'open' : ''}><summary>${esc(title)} <i>${n}</i></summary>${html}</details>` : '');
@@ -97,11 +114,11 @@ export class AdminPanel {
     this.go('player');
   }
 
-  // Badge numbers for the side menu: open reports, appeals and feedback.
+  // Badge numbers for the side menu: open reports, appeals, cheat flags and feedback.
   async navCounts() {
     const [o, appeals] = await Promise.all([this.app.api.admin('overview'), this.app.api.admin('appeals', { p_status: 'open' })]);
     this.overviewData = o;
-    this.counts = { reports: o.open_reports, feedback: o.open_feedback, appeals: appeals?.length || 0, moderated: (o.banned || 0) + (o.muted || 0) };
+    this.counts = { reports: o.open_reports, flags: o.open_flags, feedback: o.open_feedback, appeals: appeals?.length || 0, moderated: (o.banned || 0) + (o.muted || 0) };
     this.paintNav();
   }
 
@@ -178,13 +195,14 @@ export class AdminPanel {
     const todo = [
       [o.open_reports, 'report', 'reports', 'reports'],
       [appeals, 'ban appeal', 'ban appeals', 'appeals'],
+      [o.open_flags, 'cheat flag', 'cheat flags', 'flags'],
       [o.open_feedback, 'feedback message', 'feedback messages', 'feedback'],
     ].filter(([n]) => n > 0);
     // Every tile opens the page it counts.
     const tile = (k, l, go) => `<button data-go="${go}" class="${(k === 'open_reports' || k === 'open_feedback') && o[k] ? 'hot' : ''}"><b>${Number(o[k] || 0).toLocaleString()}</b><span>${l}</span></button>`;
     this.body.innerHTML = `${mt ? '<p class="m-banner warn"><b>Maintenance on</b><span>Online play is paused for everyone but you. Turn it off in Game switches.</span></p>' : ''}
       <h3 class="m-h3" style="margin-top:0">Needs your attention</h3>
-      ${todo.length ? `<div class="adm-todo">${todo.map(([n, one, many, go]) => `<button class="adm-row" data-go="${go}"><b>${n}</b><span>open ${n === 1 ? one : many}</span><span class="spacer"></span><span class="m-sub">Review →</span></button>`).join('')}</div>` : '<p class="m-empty">All caught up: no open reports, appeals or feedback.</p>'}
+      ${todo.length ? `<div class="adm-todo">${todo.map(([n, one, many, go]) => `<button class="adm-row" data-go="${go}"><b>${n}</b><span>open ${n === 1 ? one : many}</span><span class="spacer"></span><span class="m-sub">Review →</span></button>`).join('')}</div>` : '<p class="m-empty">All caught up: no open reports, appeals, cheat flags or feedback.</p>'}
       <h3 class="m-h3">Today</h3>
       <div class="adm-stats">
         ${tile('players', 'Players', 'players')}${tile('new_today', 'New today', 'players')}${tile('active_today', 'Active today', 'live')}${tile('matches_today', 'Matches today', 'live')}
@@ -251,18 +269,96 @@ export class AdminPanel {
   }
 
   // ───────────── cheat flags ─────────────
-  // Impossible things players' games saw someone do (js/game/anticheat.js), plus disputed ranked results.
+  // Impossible things players' games saw someone do (js/game/anticheat.js), signs of cheat scripts a
+  // player's own game found on itself, and disputed ranked results. Each can be acted on from here and
+  // closed (resolved / dismissed); a disputed result can be voided or kept, with a notice to both players.
   async flags() {
-    const list = await this.call('flags', { p_limit: 200 });
-    const KIND = { speed: 'Moving too fast', wall_shot: 'Kills through walls', fire_rate: 'Firing too fast', money: 'Impossible purchase', round: 'Impossible round result', forged_hit: 'Impossible hit (rejected by host)', ranked_dispute: 'Disputed ranked result' };
+    this.flagFilter ||= 'open';
+    const [list, outliers] = await Promise.all([
+      this.call('flags', { p_status: this.flagFilter, p_limit: 200 }),
+      this.flagFilter === 'open' ? this.app.api.admin('stat_outliers', { p_days: 30 }).catch(() => []) : [],
+    ]);
     const detail = (d) => (d ? Object.entries(d).filter(([k]) => k !== 'name').map(([k, v]) => `${esc(k.replace(/_/g, ' '))}: ${esc(typeof v === 'object' ? JSON.stringify(v) : v)}`).join(' · ') : '');
-    this.body.innerHTML = `<p class="m-sub">Flags come from other players' games when they see something impossible. One flag can be a glitch; several from different players is worth a look. Nothing here bans anyone automatically.</p>
-      ${list.length ? list.map((f) => `<div class="adm-report">
-        <div class="ar-head"><b class="ar-reason">${esc(KIND[f.kind] || f.kind)}</b><span>${f.target ? `<a href="#" data-player="${esc(f.target)}">${esc(f.target_name || '?')}</a>` : 'unknown'}${f.target_reporters > 1 ? ` <em class="hot">${f.target_flags} flags from ${f.target_reporters} players</em>` : ` <span class="m-sub">${f.target_flags} flag${f.target_flags === 1 ? '' : 's'} total</span>`}</span><span class="spacer"></span><span class="m-sub">${when(f.created_at)}</span></div>
-        <div class="m-sub">Seen by ${esc(f.reporter_name || '?')} · ${esc(MODES[f.mode]?.name || f.mode || '')} · match ${esc(f.match_id)}</div>
-        ${f.details ? `<div class="m-sub small">${detail(f.details)}</div>` : ''}
-      </div>`).join('') : '<p class="m-empty">No cheat flags yet.</p>'}`;
+    const pl = (id, name) => (id ? `<a href="#" data-player="${esc(id)}">${esc(name || '?')}</a>` : 'unknown');
+    const ranked = (f) => {
+      const r = f.ranked;
+      if (!r) return '<div class="ar-ranked">The ranked result for this match is gone.</div>';
+      const claim = f.details?.reported_winner === r.loser ? `${pl(r.loser, r.loser_name)}'s game says they won instead.` : 'The other game reported a different winner.';
+      return `<div class="ar-ranked">Counted: ${pl(r.winner, r.winner_name)} beat ${pl(r.loser, r.loser_name)} (${r.winner_name ? esc(r.winner_name) : 'winner'} +${Math.abs(num(r.winner_delta))}, ${r.loser_name ? esc(r.loser_name) : 'loser'} −${Math.abs(num(r.loser_delta))}). ${claim}${r.voided ? ' <span class="tag ok">Voided</span>' : ''}</div>`;
+    };
+    const actions = (f) => {
+      const open = f.status === 'open', t = f.target, out = [];
+      if (f.kind === 'ranked_dispute' && open && f.ranked) {
+        out.push(f.ranked.voided ? `<button class="btn tiny primary" data-settle="${f.id}" data-void="1">Close dispute (already voided)</button>`
+          : `<button class="btn tiny danger" data-settle="${f.id}" data-void="1">Void result and notify both</button><button class="btn tiny" data-settle="${f.id}" data-void="0">Keep result</button>`);
+      }
+      if (t) {
+        out.push(`<button class="btn tiny" data-player="${esc(t)}">Open player</button>`,
+          `<button class="btn tiny danger" data-act="ban" data-u="${esc(t)}" data-f="${f.id}" data-reason="Cheating">Ban</button>`,
+          `<button class="btn tiny" data-act="warn" data-u="${esc(t)}" data-f="${f.id}">Warn</button>`,
+          `<button class="btn tiny" data-act="kick" data-u="${esc(t)}" data-f="${f.id}">Kick</button>`);
+      }
+      if (open) {
+        out.push(`<button class="btn tiny ghost" data-flag="${f.id}" data-st="resolved">Mark handled</button><button class="btn tiny ghost" data-flag="${f.id}" data-st="dismissed">Dismiss</button>`);
+        if (t && f.target_open > 1) out.push(`<button class="btn tiny ghost" data-flag="${f.id}" data-st="dismissed" data-all="1">Dismiss all ${f.target_open} for this player</button>`);
+      } else out.push(`<button class="btn tiny ghost" data-flag="${f.id}" data-st="open">Reopen</button>`);
+      return out.join('');
+    };
+    const self = (f) => f.reporter === f.target && SELF_KINDS.has(f.kind);
+    this.body.innerHTML = `<div class="seg" id="ff">${[['open', 'Open'], ['resolved', 'Handled'], ['dismissed', 'Dismissed'], ['all', 'All']].map(([k, l]) => `<button data-k="${k}" class="${k === this.flagFilter ? 'sel' : ''}">${l}</button>`).join('')}</div>
+      <p class="m-sub">Flags come from players' games: things they saw another player do that are impossible, and signs of cheat scripts a player's own game found on itself. One flag can be a glitch or a browser extension; several kinds, or flags from different players, are worth a look. Nothing here bans anyone automatically.</p>
+      ${fold('Stat outliers, last 30 days', outliers?.length, `<p class="ar-help">Online results far outside normal: at least 100 kills with 70%+ headshots, or 6+ kills per death. Not flagged automatically; worth spectating.</p>
+        <table class="tbl"><tr><th>Player</th><th class="num">Matches</th><th class="num">Kills</th><th class="num">Headshots</th><th class="num">K/D</th><th></th></tr>${(outliers || []).map((o) => `<tr><td>${pl(o.user_id, o.username)}</td><td class="num">${num(o.matches)}</td><td class="num">${num(o.kills)}</td><td class="num">${Math.round(num(o.hs_rate) * 100)}%</td><td class="num">${num(o.kd)}</td><td>${o.banned ? '<span class="tag bad">Banned</span>' : ''}</td></tr>`).join('')}</table>`)}
+      ${list.length ? list.map((f) => `<div class="adm-report ${esc(f.status || 'open')}">
+        <div class="ar-head"><b class="ar-reason">${esc(FLAG_KINDS[f.kind] || f.kind)}</b><span>${pl(f.target, f.target_name)}${f.target_open > 1 ? ` <em class="hot">${f.target_open} open flags</em>` : ''} <span class="m-sub">${f.target_flags} total${f.target_reporters > 1 ? ` · seen by ${f.target_reporters} players` : ''}</span></span><span class="spacer"></span><span class="m-sub">${when(f.created_at)}</span></div>
+        <div class="m-sub">${self(f) ? 'Found by their own game' : `Seen by ${esc(f.reporter_name || '?')}`} · ${esc(MODES[f.mode]?.name || f.mode || '')} · match ${esc(f.match_id)}</div>
+        ${FLAG_HELP[f.kind] ? `<p class="ar-help">${esc(FLAG_HELP[f.kind])}</p>` : ''}
+        ${f.kind === 'ranked_dispute' ? ranked(f) : f.details ? `<div class="m-sub small">${detail(f.details)}</div>` : ''}
+        ${f.status && f.status !== 'open' ? `<div class="m-sub">${f.status === 'resolved' ? 'Handled' : 'Dismissed'}${f.resolution ? ': ' + esc(f.resolution) : ''} · ${when(f.resolved_at)}</div>` : ''}
+        <div class="row ar-actions">${actions(f)}</div>
+      </div>`).join('') : `<p class="m-empty">${this.flagFilter === 'open' ? 'No open cheat flags.' : 'No cheat flags here.'}</p>`}`;
+    this.body.querySelectorAll('#ff button').forEach((b) => { b.onclick = () => { this.flagFilter = b.dataset.k; this.refresh(); }; });
     this.bindPlayerLinks(this.body);
+    this.bindActions(this.body);
+    this.body.querySelectorAll('[data-flag]').forEach((b) => { b.onclick = async () => {
+      const st = b.dataset.st, all = b.dataset.all === '1';
+      const v = st === 'open' ? { note: '' } : await ask(this.ui, all ? `Dismiss all open flags for this player` : st === 'dismissed' ? 'Dismiss flag' : 'Mark flag handled', [{ id: 'note', label: 'Note (optional, only you see it)', type: 'textarea' }], { confirm: st === 'dismissed' ? 'Dismiss' : 'Mark handled' });
+      if (!v) return;
+      try {
+        const n = await this.call('resolve_flag', { p_id: +b.dataset.flag, p_status: st, p_note: v.note, p_all: all });
+        this.ui.toast(st === 'open' ? 'Flag reopened' : `${n} flag${n === 1 ? '' : 's'} ${st === 'dismissed' ? 'dismissed' : 'marked handled'}`, 'good');
+      } catch { return; }
+      this.refresh();
+    }; });
+    this.body.querySelectorAll('[data-settle]').forEach((b) => { b.onclick = async () => {
+      const f = list.find((x) => x.id === +b.dataset.settle), r = f?.ranked;
+      if (!r) return;
+      const voiding = b.dataset.void === '1', already = r.voided;
+      const day = new Date(r.created_at || f.created_at).toLocaleDateString();
+      const msg = voiding
+        ? `Your ranked match against ${r.winner_name && r.loser_name ? '{other}' : 'your opponent'} on ${day} was voided because the two games reported different winners. Any rating you gained or lost in it has been returned, and it no longer counts as a win or a loss.`
+        : `We reviewed your ranked match on ${day}, where the two games reported different winners. The result stands as it was recorded.`;
+      const v = await ask(this.ui, voiding ? (already ? 'Close dispute' : 'Void disputed result') : 'Keep disputed result', [
+        { id: 'notify', label: 'Send a notice to both players', type: 'checkbox', value: voiding && !already },
+        { id: 'msg', label: 'Notice ({other} becomes the other player\'s name)', type: 'textarea', max: 500, value: msg },
+        { id: 'note', label: 'Note (optional, only you see it)', type: 'text', max: 200 },
+      ], {
+        confirm: voiding ? (already ? 'Close it' : 'Void it') : 'Keep it', danger: voiding && !already,
+        note: voiding ? (already ? 'This result was already voided. Closes the dispute.' : `${r.winner_name} loses the ${Math.abs(num(r.winner_delta))} rating they gained, ${r.loser_name} gets back the ${Math.abs(num(r.loser_delta))} they lost, and the win and loss are removed. The match stays recorded as voided.`)
+          : `${r.winner_name}'s win and both rating changes stay as they are. The dispute is closed.`,
+      });
+      if (!v) return;
+      const text = v.notify ? v.msg.trim() : '';
+      try {
+        // {other} is personal, so each player gets their own copy; without it one shared notice is enough.
+        if (text.includes('{other}')) {
+          await this.call('settle_dispute', { p_id: f.id, p_void: voiding, p_message: null, p_note: v.note });
+          await Promise.all([[r.winner, r.loser_name], [r.loser, r.winner_name]].map(([u, other]) => this.call('notify', { p_user: u, p_message: text.replaceAll('{other}', other || 'your opponent') })));
+        } else await this.call('settle_dispute', { p_id: f.id, p_void: voiding, p_message: text || null, p_note: v.note });
+        this.ui.toast(voiding ? `Result ${already ? 'dispute closed' : 'voided'}${text ? ', both players notified' : ''}` : `Result kept${text ? ', both players notified' : ''}`, 'good');
+      } catch { /* toast already shown */ }
+      this.refresh();
+    }; });
   }
 
   // ───────────── players ─────────────
@@ -359,7 +455,7 @@ export class AdminPanel {
       </div>
       ${fold('Recent matches', d.matches.length, d.matches.length ? `<table class="tbl"><tr><th>When</th><th>Mode</th><th>Map</th><th>Result</th><th class="num">K–D</th><th class="num">ELO</th><th></th></tr>${d.matches.map((h) => `<tr><td class="m-sub">${when(h.created_at)}</td><td>${esc(MODES[h.mode]?.name || h.mode)}</td><td>${esc(MAPS[h.map]?.name || h.map)}</td><td class="res-${h.result}">${esc(h.result)}</td><td class="num">${h.kills}–${h.deaths}</td><td class="num">${h.ranked ? (h.elo_change > 0 ? '+' : '') + h.elo_change : '—'}</td><td>${h.ranked && h.elo_change ? `<button class="btn tiny ghost" data-void="${esc(h.match_id)}">Void result</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="m-empty">No matches.</p>', true)}
       ${fold('Reports against them', d.reports_against.length, d.reports_against.map((r) => `<div class="m-sub">${when(r.created_at)} · ${esc(REASON[r.reason])} from ${esc(r.reporter_name)} · ${esc(r.status)}${r.note ? ` · “${esc(r.note)}”` : ''}</div>`).join(''), d.reports_against.some((r) => r.status === 'open'))}
-      ${fold('Warnings', d.warnings.length, d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join(''))}
+      ${fold('Warnings', d.warnings.length, d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${w.kind === 'notice' ? 'Notice: ' : ''}${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join(''))}
       ${fold('Ban appeals', d.appeals?.length, (d.appeals || []).map((a) => `<div class="m-sub">${when(a.created_at)} · ${esc(a.status)}: “${esc(a.message)}”${a.admin_note ? ` · your note: ${esc(a.admin_note)}` : ''}</div>`).join(''))}
       ${fold('Team-kill kicks', d.ff_penalties?.length, `${m.queue_cooldown_until && new Date(m.queue_cooldown_until) > new Date() ? `<div class="m-sub">Matchmaking cooldown until ${when(m.queue_cooldown_until)}</div>` : ''}${(d.ff_penalties || []).map((f) => `<div class="m-sub">${when(f.created_at)} · ${f.team_kills} team kills, ${f.team_damage} team damage · match ${esc(f.match_id)}</div>`).join('')}`)}
       ${fold('Past seasons', d.seasons.length, d.seasons.map((s) => `<div class="m-sub">${esc(s.season_id.toUpperCase())}: ${s.final_elo} final, ${s.peak_elo} peak, ${s.wins}–${s.losses}, ${s.pass_xp.toLocaleString()} season XP</div>`).join(''))}
@@ -378,14 +474,14 @@ export class AdminPanel {
   // Ban / mute / warn / kick / rename / stats / items buttons.
   bindActions(root, after = () => this.refresh()) {
     root.querySelectorAll('[data-act]').forEach((b) => { b.onclick = async () => {
-      const u = b.dataset.u, act = b.dataset.act, rid = b.dataset.r;
+      const u = b.dataset.u, act = b.dataset.act, rid = b.dataset.r, fid = b.dataset.f;
       let v;
       try {
         if (act === 'ban') {
           v = await ask(this.ui, 'Ban player', [
             { id: 'mins', label: 'Length', type: 'select', options: DURATIONS, value: 1440 },
             { id: 'days', label: 'Custom length in days (optional)', type: 'number', value: '', placeholder: 'e.g. 2.5', hint: 'Fill this in only for a length not in the list above; it takes priority.' },
-            { id: 'reason', label: 'Reason (shown to them)', type: 'textarea' },
+            { id: 'reason', label: 'Reason (shown to them)', type: 'textarea', value: b.dataset.reason || '' },
             { type: 'chips', target: 'reason', options: BAN_REASONS },
             { id: 'appeal', label: 'Allow them to appeal', type: 'checkbox', value: true },
             { id: 'device', label: 'Device ban: permanent, no appeal, and new accounts on their devices are banned too', type: 'checkbox', value: false },
@@ -442,6 +538,8 @@ export class AdminPanel {
           await this.call('grant_item', { p_user: u, p_kind: kind, p_item: item, p_revoke: act === 'revoke' }, act === 'grant' ? 'Item sent' : 'Removal sent');
         }
         if (rid && ['ban', 'mute', 'warn', 'kick'].includes(act)) await this.call('resolve_report', { p_id: +rid, p_status: 'actioned', p_note: act }).catch(() => null);
+        // From a cheat flag: a ban closes every open flag against them, a warning or kick just this one.
+        if (fid && ['ban', 'warn', 'kick'].includes(act)) await this.call('resolve_flag', { p_id: +fid, p_status: 'resolved', p_note: act === 'ban' ? 'Banned' : act === 'warn' ? 'Warned' : 'Kicked', p_all: act === 'ban' }).catch(() => null);
         after();
       } catch { /* toast already shown */ }
     }; });

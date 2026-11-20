@@ -7,8 +7,17 @@
 // Everything is cheap: arithmetic on position and shot packets the game already receives, with a
 // short line check only when someone gets a kill. Positions of other players are a little delayed and
 // smoothed, so every positional check has wide margins and needs to trip more than once.
+//
+// Each game also checks itself (see selfAudit and below) for signs of cheat scripts: built-in functions
+// replaced, scripts added to the page, keyboard/mouse input made by a script, autoclicking, the aim
+// moving with no mouse or controller input, and clicks too quick after an enemy appears. Those are
+// flagged against this player's own account. A cheat can switch them off, so they catch scripts, not
+// determined cheaters; and extensions can trip some of them, so the admin judges each one.
+import * as THREE from 'three';
 import { WEAPONS, ECON } from '../data/weapons.js';
 import { CELL } from '../engine/world.js';
+import { traceBullet } from './combat.js';
+import { hookedNatives, injectedScripts, fakeInput, autoclicker, resetClicks } from './integrity.js';
 
 const SPEED_LIMIT = 14;      // m/s horizontal; the fastest legal run is about 7.3
 const SPEED_WINDOW = 750;    // ms of movement averaged per speed sample
@@ -16,6 +25,16 @@ const SPAWN_GRACE = 1500;    // ms after a spawn or respawn before movement is c
 const FIRE_WINDOW = 2000;    // ms of shots counted per fire-rate sample
 const MAX_REPORTS = 8;       // per match, from this game
 const KNIVES = Object.values(WEAPONS).filter((w) => w.type === 'knife');
+const SELF_EVERY = 5000;     // ms between checks of this page for hooks, added scripts and fake input
+const FAKE_INPUT_MIN = 5;    // script-made input events in a match before it's flagged
+const AIM_STRIKES = 3;       // frames in a match where the aim moved with no input
+const REACT_FAST = 90;       // ms; nobody sees an enemy and clicks quicker than about 100 ms
+const REACT_MIN = 8;         // timed clicks before the reaction check can flag
+const HEIGHTS = [1.6, 1.1, 0.5];
+// Hooks and added scripts stay for the whole visit, so they're flagged once per page load, not every match.
+const ONCE = new Set();
+const tmp = new THREE.Vector3(), aim = new THREE.Vector3();
+const turn = (a, b) => { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return Math.abs(d); };
 
 // The most damage one shot (or swing) of `w` can do to one player: every pellet, best body part.
 export function maxHit(w, part = 'head') {
@@ -71,6 +90,18 @@ export class AntiCheat {
     this.moves = new Map();  // player id → { x, z, t, strikes }
     this.fire = new Map();   // player id → { shots: [[t, n]], strikes }
     this.walls = new Map();  // killer id → wall kills this match
+    // Checks on this game itself.
+    this.selfReported = new Set();
+    this.selfAt = 0;
+    this.fakeBase = fakeInput().n;
+    this.aimEnd = null;      // where the aim was left at the end of the last frame
+    this.aimStrikes = 0;
+    this.aimMoved = 0;
+    this.seen = new Map();   // enemy id → when they came into view
+    this.wasFiring = false;
+    this.lastPress = 0;
+    this.react = { n: 0, ms: [] };
+    resetClicks();
   }
 
   get on() { return this.g.online && !this.g.spectator && !this.g.training && !this.g.tutorial; }
@@ -87,6 +118,82 @@ export class AntiCheat {
     this.reported.add(key);
     console.info('[anticheat]', kind, p?.name || target, details);
     g.app.api?.flagPlayer(g.matchId, target, kind, g.mode.id, { name: p?.name, ...details }).catch(() => null);
+  }
+
+  // A flag against this player's own account (see the top of this file).
+  selfReport(kind, details, once = false) {
+    const g = this.g;
+    if (!this.on || !g.localId || this.selfReported.has(kind) || (once && ONCE.has(kind))) return;
+    this.selfReported.add(kind);
+    if (once) ONCE.add(kind);
+    g.app.api?.flagSelf?.(g.matchId, kind, g.mode.id, details).catch(() => null);
+  }
+
+  // Every few seconds: anything wrong with this page?
+  selfAudit() {
+    const hooks = hookedNatives();
+    if (hooks.length) this.selfReport('tampered', { hooked: hooks.slice(0, 12) }, true);
+    const scripts = injectedScripts();
+    if (scripts.length) this.selfReport('injected_script', { scripts: scripts.slice(0, 5) }, true);
+    const fake = fakeInput();
+    if (fake.n - this.fakeBase >= FAKE_INPUT_MIN) this.selfReport('synthetic_input', { events: fake.n - this.fakeBase, types: fake.types });
+    const clicks = autoclicker();
+    if (clicks) this.selfReport('autoclicker', clicks);
+  }
+
+  // Start of the local player's frame, before mouse and controller input turn them. Only that input
+  // (and recoil, later in the same frame) turns the local player, and spawns reset the view with
+  // snapTo, so a change since the end of the last frame means something else wrote the aim.
+  aimStart(p) {
+    const e = this.aimEnd;
+    this.aimEnd = null;
+    if (!this.on || !p.alive || !e || (p.snapAt || 0) >= e.t) return;
+    const moved = turn(e.yaw, p.yaw) + Math.abs(p.pitch - e.pitch);
+    if (moved < 1e-4) return;
+    this.aimStrikes++;
+    this.aimMoved += moved;
+    if (this.aimStrikes >= AIM_STRIKES) this.selfReport('aim_hook', { frames: this.aimStrikes, degrees: Math.round(this.aimMoved * 180 / Math.PI) });
+  }
+
+  // End of the local player's frame (alive). `firing` is whether the trigger is held this frame.
+  localFrame(p, firing) {
+    if (!this.on) return;
+    const now = performance.now();
+    this.aimEnd = { yaw: p.yaw, pitch: p.pitch, t: now };
+    if (now - this.selfAt > SELF_EVERY) { this.selfAt = now; this.selfAudit(); }
+    if (!this.g.zombies) this.reactionTime(p, firing, now);
+  }
+
+  // Triggerbots fire the moment an enemy is under the crosshair. Times each fresh click (no click in
+  // the 400 ms before, so not spraying or tapping) that lands on an enemy who came into view (any of
+  // head, chest or legs clear of walls) within the last second. People need at least about 100 ms to
+  // react; enemies seen earlier through gaps the wall check misses only make the times longer.
+  reactionTime(p, firing, now) {
+    const g = this.g, eye = p.eye();
+    for (const o of g.players.values()) {
+      if (o === p || !o.alive || !g.isEnemy(p, o) || o.pos.distanceToSquared(p.pos) > 6400) { this.seen.delete(o.id); continue; }
+      const visible = HEIGHTS.some((h) => !wallBetween(g.world, eye, tmp.set(o.pos.x, o.pos.y + h, o.pos.z)));
+      if (!visible) this.seen.delete(o.id);
+      else if (!this.seen.has(o.id)) this.seen.set(o.id, now);
+    }
+    const press = firing && !this.wasFiring;
+    this.wasFiring = firing;
+    if (!press) return;
+    const fresh = now - this.lastPress > 400;
+    this.lastPress = now;
+    const w = p.weapon;
+    if (!fresh || !w || w.type === 'knife' || w.projectile || p.slot === 'nade' || p.slot === 'bomb') return;
+    const cp = Math.cos(p.pitch);
+    const tr = traceBullet(g, p, eye, aim.set(-Math.sin(p.yaw) * cp, Math.sin(p.pitch), -Math.cos(p.yaw) * cp));
+    const since = tr.victim && g.isEnemy(p, tr.victim) ? this.seen.get(tr.victim.id) : null;
+    if (since == null || now - since > 1000) return;
+    // Judged on the last 12 timed clicks, so switching a triggerbot on mid-match still shows.
+    const r = this.react;
+    r.n++;
+    r.ms.push(Math.round(now - since));
+    if (r.ms.length > 12) r.ms.shift();
+    const fast = r.ms.filter((ms) => ms < REACT_FAST).length;
+    if (r.ms.length >= REACT_MIN && fast >= 6 && fast / r.ms.length >= 0.6) this.selfReport('triggerbot', { timed_clicks: r.n, under_90ms: fast, recent_ms: r.ms.slice() });
   }
 
   // Host: should this hit be thrown away? Returns true (and reports it) when it's impossible.

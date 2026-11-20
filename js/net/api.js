@@ -197,6 +197,12 @@ export class Api {
     if (error) throw friendly(error);
   }
 
+  // Signs of cheat scripts this player's own game found on itself (see js/game/anticheat.js, selfAudit).
+  async flagSelf(matchId, kind, mode, details) {
+    const { error } = await this.sb.rpc('flag_self', { p_match_id: matchId, p_kind: kind, p_mode: mode, p_details: details });
+    if (error) throw friendly(error);
+  }
+
   async reportRanked(matchId, winner, loser) {
     const { data, error } = await this.sb.rpc('report_ranked', { p_match_id: matchId, p_winner: winner, p_loser: loser });
     if (error) throw friendly(error);

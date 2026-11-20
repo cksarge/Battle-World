@@ -1,6 +1,6 @@
 // Dev tool: checks that every button and input on every menu screen can be scrolled into view and
 // clicked (nothing pushed off-screen, nothing hidden under a sticky footer or overlay).
-// Usage (browser console on the game page): const m = await import('/tools/audit-ui.js'); await m.auditMenus();
+// Usage (browser console on the game page, served from localhost, where main.js exposes window.jps): const m = await import('/tools/audit-ui.js'); await m.auditMenus();
 // Run it at several window sizes. It returns a list of problems; an empty list means everything is reachable.
 
 export function audit(label, root = document) {
