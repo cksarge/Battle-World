@@ -1,6 +1,6 @@
 # Changelog
 
-#### 4.9.1 · 2026-11-20
+#### 4.9.1 · 2026-11-20 · [64b053e](https://github.com/cksarge/Battle-World/commit/64b053e)
 
 - Moderators can now send you a notice: a message that's just information, not a warning
 
