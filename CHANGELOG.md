@@ -2,22 +2,10 @@
 
 ### 4.9.0 · 2026-11-20 · [0de7c39](https://github.com/cksarge/Battle-World/commit/0de7c39)
 
-- More anti-cheat. Each game now also checks itself during online matches and flags its own player for review when it finds:
-  - Built-in browser functions replaced (how speed hacks, wallhacks and packet editors hook in)
-  - Scripts added to the game page that the game didn't load (userscripts, some extensions)
-  - Keyboard or mouse input made by a script. The game now ignores that input entirely
-  - Autoclicking: 30 quick clicks spaced almost exactly evenly
-  - The aim moving between frames with no mouse or controller input (an aimbot setting it)
-  - Clicks within 90 ms of an enemy coming into view with the crosshair already on them, again and again (a triggerbot)
-  - The game is no longer reachable from the browser console (it still is when running locally, for the dev tools)
-- Admin → Cheat flags is now a queue you work through:
-  - Open / Handled / Dismissed / All, with a red count in the side menu and on the Overview
-  - Every flag has Ban (reason already set to Cheating), Warn, Kick, Mark handled and Dismiss, plus "Dismiss all" for a player. Banning from a flag closes all of that player's open flags
-  - Disputed ranked results show who was counted as the winner and the rating change, with **Void result and notify both** (both players get their rating and win/loss back, and a notice naming the other player) or **Keep result** (optionally with a notice)
-  - Each kind of flag explains what it means and what else can cause it
-  - Stat outliers: players with 70%+ headshots or 6+ kills per death over at least 100 online kills in the last 30 days
-- Notices: admin messages that aren't warnings (like a voided result) are shown as a notice, without the "repeated problems can lead to a ban" line
-- **Database update needed:** run `supabase/schema.sql` again in the Supabase SQL editor. Until then the Cheat flags page shows an error and the new self-checks are not saved
+- Stronger anti-cheat in online matches: the game now also watches for cheat scripts, aimbots, triggerbots and autoclickers. Anything it finds goes to a moderator to review; nobody is banned automatically, so a false alarm can't get you banned on its own
+- Keyboard and mouse input faked by a script is now ignored, so input-faking cheats do nothing
+- Disputed ranked matches (where the two players' games report different winners) are now reviewed by a moderator. If a match is voided, both players get back the rating they won or lost, the win and loss are removed from their records, and both are sent a notice explaining why
+- Messages from the moderator that are just information, like a voided match, now show as a notice instead of a warning
 
 #### 4.8.2 · 2026-11-20 · [a244afc](https://github.com/cksarge/Battle-World/commit/a244afc)
 
