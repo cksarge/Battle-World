@@ -1,5 +1,9 @@
 # Changelog
 
+#### 4.10.1 · 2026-11-20
+
+- Rewards for upcoming seasons are now a surprise: the Season tab only shows their names and dates, and their items no longer appear in the Armory until the season starts
+
 ### 4.10.0 · 2026-11-20 · [7bbdfa4](https://github.com/cksarge/Battle-World/commit/7bbdfa4)
 
 - Polls! When one is running it shows at the top of the menu: press **Vote**, pick an option and see how everyone else voted

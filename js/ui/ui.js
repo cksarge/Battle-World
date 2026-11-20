@@ -1,7 +1,7 @@
 import { MODES, rankBadge, rankFor, levelFor, RANKS } from '../data/modes.js';
 import { PERKS, OPERATORS, CHAR_OPTIONS, sanitizeChar } from '../data/characters.js';
 import { WEAPONS, CLASS_NAMES } from '../data/weapons.js';
-import { RARITIES, KINDS, owns } from '../data/skins.js';
+import { RARITIES, KINDS, owns, seasonLocked } from '../data/skins.js';
 import { MAPS, variantName } from '../data/maps.js';
 import { sfx } from '../engine/audio.js';
 import { PASSWORD_RULES, OTP_LENGTH, assertPassword } from '../data/auth.js';
@@ -683,7 +683,8 @@ export class UI {
     const app = this.app, kind = this.armoryKind;
     const c = { ...app.char, skins: { ...(app.char.skins || {}) }, mods: { ...(app.char.mods || {}) }, emotes: [...(app.char.emotes || [])] };
     const defs = KINDS[kind].defs;
-    const total = Object.entries(KINDS).reduce((n, [kk, k]) => n + Object.keys(k.defs).filter((id) => !k.defs[id].awarded || this.owned(kk, id)).length, 0);
+    // Items from seasons that haven't started are left out entirely, so nobody sees them early.
+    const total = Object.entries(KINDS).reduce((n, [kk, k]) => n + Object.keys(k.defs).filter((id) => !seasonLocked(k.defs[id]) && (!k.defs[id].awarded || this.owned(kk, id))).length, 0);
     const have = Object.entries(KINDS).reduce((n, [k, d]) => n + Object.keys(d.defs).filter((id) => this.owned(k, id)).length, 0);
     const wid = this.armoryWeapon;
     const current = kind === 'finish' ? c.skins[wid] || 'factory' : kind === 'outfit' ? c.outfit || 'standard' : kind === 'card' ? c.card : kind === 'effect' ? c.killfx : null;
@@ -705,7 +706,7 @@ export class UI {
         <p class="m-sub">Pick a wheel slot, then an emote to put there. Hold G in a match to use the wheel. Click any emote to preview it.</p>` : ''}
       ${kind === 'effect' ? '<p class="m-sub">Click an effect to see it play beside your operator.</p>' : ''}
       ${kind === 'card' ? `<div class="card-preview" style="background-image:url(${cardImage(c.card || 'standard')})"><span>${esc(app.me().name)}</span></div>` : ''}
-      <div class="item-grid ${kind === 'card' ? 'cards' : ''}">${Object.entries(defs).map(([id, d]) => card(id, d)).join('')}</div>
+      <div class="item-grid ${kind === 'card' ? 'cards' : ''}">${Object.entries(defs).filter(([, d]) => !seasonLocked(d)).map(([id, d]) => card(id, d)).join('')}</div>
       ${kind === 'finish' ? `<button class="btn small ghost" id="apply-all">Use ${esc(defs[current]?.name || 'Factory')} on every weapon</button>` : ''}`;
     const focus = kind === 'finish' ? 'weapon' : kind === 'card' ? 'play' : 'operator';
     this.scene?.setFocus(focus);

@@ -59,10 +59,9 @@ export async function renderSeason(ui, el) {
     </div>` : '<h2 class="m-h1">Between seasons</h2><p class="m-sub">The next season hasn’t started yet.</p>';
 
   el.insertAdjacentHTML('beforeend', `<h3 class="m-h3">Upcoming seasons</h3><div class="future">${SEASONS.filter((x) => x !== s && !seasonStarted(x)).map((x) => {
-    const ex = seasonTrack(x.id).filter((r) => r.exclusive);
+    // Only the name and dates: a season's rewards stay secret until it starts.
     return `<div class="future-s" style="--sc:${x.color}"><div class="fs-head"><b>Season ${x.num}: ${esc(x.name)}</b><span class="m-sub">${fmtDate(x.start)} – ${fmtDate(new Date(Date.parse(x.end) - 1).toISOString())}</span></div>
-      <div class="fs-items">${ex.map((r) => { const sw = itemSwatch(r.kind, r.id); return r.kind === 'card' ? `<span class="sw wide" title="${esc(itemDef(r).name)}" style="background-image:url(${cardImage(r.id, 240, 60)})"></span>` : `<span class="sw" title="${esc(itemDef(r).name)}" style="background:${sw.bg}">${sw.glyph}</span>`; }).join('')}</div>
-      <span class="m-sub">Exclusive rewards locked until ${fmtDate(x.start)}</span></div>`;
+      <span class="m-sub">Rewards revealed when the season starts</span></div>`;
   }).join('')}</div>`);
 
   // Clicking a reward previews it on your operator.

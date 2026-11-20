@@ -356,7 +356,7 @@
 .track { display: grid; grid-auto-flow: column; grid-auto-columns: 112px; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; overscroll-behavior-x: contain; }
 .tier { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; padding: 22px 6px 8px; cursor: pointer; color: var(--m-bone); background: var(--m-ink2); border: 1px solid var(--m-faint); border-top: 3px solid var(--rc); text-align: center; min-width: 0; }
 .tier .sw { width: 56px; height: 56px; display: grid; place-items: center; font-size: 26px; border-radius: 4px; }
-.tier .sw.wide, .future-s .sw.wide, .ranked-reward .sw.wide { width: 96px; height: 24px; background-size: cover; background-position: center; border-radius: 2px; }
+.tier .sw.wide, .ranked-reward .sw.wide { width: 96px; height: 24px; background-size: cover; background-position: center; border-radius: 2px; }
 .tier b { font-size: 12px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .tier em { font-style: normal; font-size: 11px; color: var(--rc); }
 .tier small { font-size: 10px; color: var(--m-dim); text-transform: uppercase; letter-spacing: .06em; }
@@ -376,8 +376,6 @@
 .future { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .future-s { padding: 10px 12px; border: 1px solid var(--m-faint); border-left: 3px solid var(--sc); display: flex; flex-direction: column; gap: 8px; background: var(--m-ink2); }
 .fs-head { display: flex; flex-direction: column; } .fs-head b { color: var(--sc); }
-.fs-items { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.fs-items .sw { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 3px; filter: grayscale(.5) brightness(.8); }
 
 /* ───────────── social ───────────── */
 .commend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
