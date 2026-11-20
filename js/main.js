@@ -512,7 +512,7 @@ class App {
       this.party.attach(this.presence);
       this.presence.on('friend', (d) => { if (d.to === this.user?.id) this.loadFriends(); });
       this.presence.onSync(() => this.ui.friendsChanged?.());
-      this.ui.renderParty?.();
+      this.ui.bindParty?.();
     }
   }
 

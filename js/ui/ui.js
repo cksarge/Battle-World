@@ -348,17 +348,7 @@ export class UI {
     bindVersion(this.root.querySelector('.m-foot'), this);
     this.stage(tab === 'play' && this.source === 'offline' ? this.offline.map : null, FOCUS[tab]);
     this.footMap();
-    this.renderParty();
-    if (app.party) {
-      let key = '';
-      this.partyUnsub = app.party.onChange(() => {
-        this.renderParty();
-        this.scene?.setSquad(this.squad());
-        // Leader / size changes affect who can start a search, so refresh the Play panel.
-        const k = `${app.party.inParty}-${app.party.isLeader}-${app.party.size}`;
-        if (k !== key && this.tab === 'play' && !this.lobby) { key = k; this.renderPlay(this.root.querySelector('#tab')); }
-      });
-    }
+    this.bindParty();
     const el = this.root.querySelector('#tab');
     ({
       play: () => this.renderPlay(el), season: () => renderSeason(this, el), admin: () => (this.adminPanel ||= new AdminPanel(this)).render(el), operators: () => this.renderOperators(el), armory: () => this.renderArmory(el),
@@ -443,6 +433,23 @@ export class UI {
   }
 
   // ───────────────────────── party strip ─────────────────────────
+  // Keeps the party strip and Play panel in step with the party. Called when the menu is drawn and
+  // again once the party exists: signing in draws the menu before the presence room has connected.
+  bindParty() {
+    this.partyUnsub?.(); this.partyUnsub = null;
+    const app = this.app;
+    this.renderParty();
+    if (!app.party || !this.root.querySelector('#party')) return;
+    let key = `${app.party.inParty}-${app.party.isLeader}-${app.party.size}`;
+    this.partyUnsub = app.party.onChange(() => {
+      this.renderParty();
+      this.scene?.setSquad(this.squad());
+      // Leader / size changes affect who can start a search, so refresh the Play panel.
+      const k = `${app.party.inParty}-${app.party.isLeader}-${app.party.size}`;
+      if (k !== key && this.tab === 'play' && !this.lobby) { key = k; this.renderPlay(this.root.querySelector('#tab')); }
+    });
+  }
+
   renderParty() {
     const el = this.root.querySelector('#party');
     if (!el) return;

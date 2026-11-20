@@ -154,6 +154,10 @@ export class Effects {
 
     this.light = new THREE.PointLight(0xffb060, 0, 10, 2);
     scene.add(this.light);
+    // Incendiary lights live in the scene from the start (dark until used). Adding or removing a light
+    // changes the scene's light count, which makes three.js recompile every lit material and freezes
+    // the game for a moment, so fires borrow one of these instead of creating their own.
+    this.fireLights = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xff7a2a, 0, 8, 2); scene.add(l); return l; });
     this.lightT = 0;
     this.lightFade = null;
 
@@ -372,9 +376,9 @@ export class Effects {
     const can = buildGun('fire');
     can.scale.setScalar(1.6); can.rotation.set(0, Math.random() * 6, Math.PI / 2); can.position.y = 0.05;
     group.add(can);
-    const light = new THREE.PointLight(0xff7a2a, 0, radius * 4, 2);
-    light.position.y = 0.8;
-    group.add(light);
+    // Borrow a free pooled light; with every one taken, the newest fire goes without.
+    const light = this.fireLights.find((l) => !this.fires.some((x) => x.light === l)) || null;
+    if (light) { light.distance = radius * 4; light.intensity = 0; light.position.copy(pos).y += 0.8; }
     this.scene.add(group);
     // Ignition: a rolling burst of flame across the ground.
     for (let i = 0; i < 10; i++) {
@@ -393,6 +397,7 @@ export class Effects {
   endFire(f) {
     if (!f) return;
     f.group.removeFromParent();
+    if (f.light) f.light.intensity = 0;
     f.parts.forEach((p) => p.material.dispose());
     f.glow?.material.dispose(); f.scorch?.material.dispose();
     this.fires = this.fires.filter((x) => x !== f);
@@ -561,7 +566,7 @@ export class Effects {
       }
       const glow = 0.55 + Math.sin(f.t * 17) * 0.08 + Math.sin(f.t * 5.3) * 0.08;
       f.glow.material.opacity = glow * k;
-      f.light.intensity = (14 + Math.sin(f.t * 23) * 3 + Math.sin(f.t * 7) * 3) * k;
+      if (f.light) f.light.intensity = (14 + Math.sin(f.t * 23) * 3 + Math.sin(f.t * 7) * 3) * k;
       f.emberT -= dt;
       if (f.emberT <= 0 && k > 0.3) {
         f.emberT = 0.07;
