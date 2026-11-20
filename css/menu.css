@@ -295,6 +295,7 @@
 /* auth */
 .auth-hero { grid-area: hero; align-self: center; padding: 0 0 60px 60px; max-width: 640px; max-height: 100%; overflow: hidden; }
 .m-hero { font-family: var(--m-stencil); font-weight: 800; font-size: clamp(64px, 9vw, 132px); line-height: 0.86; margin: 0 0 18px; text-transform: none; letter-spacing: 1px; text-shadow: 0 6px 30px rgba(0, 0, 0, 0.55); }
+.m-hero span { color: var(--m-amber); }
 .auth-hero p { font-size: 17px; line-height: 1.5; max-width: 44ch; color: var(--m-bone); text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8); margin: 0 0 18px; }
 .auth-hero .ranks { display: flex; gap: 8px; }
 .auth-panel { align-self: center; margin-right: 40px; max-height: calc(100vh - 160px); }

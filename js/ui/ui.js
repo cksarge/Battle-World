@@ -178,7 +178,7 @@ export class UI {
     this.root.innerHTML = `<div class="m-shell auth" data-tab="auth">
       <header class="m-top"><div class="m-brand"><span class="m-mark">BW</span><span class="m-title">Battle World</span></div></header>
       <div class="auth-hero">
-        <h1 class="m-hero">Battle<br>World</h1>
+        <h1 class="m-hero">Battle<br><span>World</span></h1>
         <p>Five-a-side bomb defusal, ranked duels, wingman and free-for-all. Build your operator, bring your friends, climb the ladder.</p>
         <div class="ranks">${RANKS.map((r) => `<span class="rank-badge" style="--rc:${r.color}" title="${r.name}, ${r.min}+ rating"><i></i></span>`).join('')}</div>
       </div>
