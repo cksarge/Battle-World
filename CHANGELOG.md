@@ -1,6 +1,6 @@
 # Changelog
 
-### 4.9.0 · 2026-11-20
+### 4.9.0 · 2026-11-20 · [0de7c39](https://github.com/cksarge/Battle-World/commit/0de7c39)
 
 - More anti-cheat. Each game now also checks itself during online matches and flags its own player for review when it finds:
   - Built-in browser functions replaced (how speed hacks, wallhacks and packet editors hook in)
@@ -18,6 +18,17 @@
   - Stat outliers: players with 70%+ headshots or 6+ kills per death over at least 100 online kills in the last 30 days
 - Notices: admin messages that aren't warnings (like a voided result) are shown as a notice, without the "repeated problems can lead to a ban" line
 - **Database update needed:** run `supabase/schema.sql` again in the Supabase SQL editor. Until then the Cheat flags page shows an error and the new self-checks are not saved
+
+#### 4.8.2 · 2026-11-20 · [a244afc](https://github.com/cksarge/Battle-World/commit/a244afc)
+
+- Throwing an incendiary no longer makes the game hitch (when it's thrown and again when the fire burns out)
+- The party slots at the top of the menu update as soon as friends join or leave, instead of only after you switch tabs
+- "World" in the title on the sign-in screen is amber
+
+#### 4.8.1 · 2026-11-19 · [1980ba6](https://github.com/cksarge/Battle-World/commit/1980ba6)
+
+- The game is now called **Battle World**: title, menus, loading screen, BW logo, Terms and Privacy pages and account emails
+- New address: battleworld.carterscoding.com
 
 ### 4.8.0 · 2026-11-18 · [2ec4b89](https://github.com/cksarge/Battle-World/commit/2ec4b89)
 
