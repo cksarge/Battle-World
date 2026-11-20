@@ -1,6 +1,6 @@
 # Changelog
 
-#### 4.10.1 · 2026-11-20
+#### 4.10.1 · 2026-11-20 · [9a7faf5](https://github.com/cksarge/Battle-World/commit/9a7faf5)
 
 - Rewards for upcoming seasons are now a surprise: the Season tab only shows their names and dates, and their items no longer appear in the Armory until the season starts
 
