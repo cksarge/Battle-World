@@ -1,6 +1,6 @@
 # Changelog
 
-### 4.10.0 · 2026-11-20
+### 4.10.0 · 2026-11-20 · [7bbdfa4](https://github.com/cksarge/Battle-World/commit/7bbdfa4)
 
 - Polls! When one is running it shows at the top of the menu: press **Vote**, pick an option and see how everyone else voted
   - You get one vote per poll, and it can't be changed
