@@ -1029,6 +1029,12 @@ export class Game {
       result = d.winner === this.localId ? 'win' : 'loss';
     } else if (d.winner >= 0 && lp) result = d.winner === lp.team ? 'win' : 'loss';
     if (d.reason === 'host-left' && d.winner === -2) result = 'draw';
+    // A two-team match that ends 0-0 (usually someone leaving before anyone scored) is voided: it counts
+    // as neither a win nor a loss, ranked rating doesn't change, and there's no drop, challenge or
+    // achievement progress from it.
+    const voided = !this.spectator && !POOL_KINDS.has(this.mode.kind) && d.reason !== 'host-left'
+      && Array.isArray(d.scores) && d.scores[0] === 0 && d.scores[1] === 0;
+    if (voided) result = 'draw';
     if (this.spectator) result = 'over';
     const myStats = lp ? { k: lp.kills, a: lp.assists, d: lp.deaths, hs: lp.hs } : { k: 0, a: 0, d: 0, hs: 0 };
     this.endKillcam();
@@ -1048,16 +1054,16 @@ export class Game {
       : this.mode.kind === 'infect' ? `${lp?.score || 0} points`
       : this.mode.kind === 'ffa' ? `${myStats.k} kills`
       : this.mode.kind === 'gungame' ? `Weapon ${Math.min((lp?.gg || 0) + 1, GUN_GAME_ORDER.length)}/${GUN_GAME_ORDER.length}`
-        : `${d.scores[lp?.team ?? 0]}-${d.scores[1 - (lp?.team ?? 0)]}`;
+        : `${d.scores[lp?.team ?? 0]}-${d.scores[1 - (lp?.team ?? 0)]}${voided ? ' (voided)' : ''}`;
     (result === 'win' ? sfx.win : result === 'loss' ? sfx.lose : sfx.roundStart)();
-    const results = { result, reason: d.reason, scores: d.scores, stats: d.stats || this.statsPayload(), eloChange: null, score };
+    const results = { result, reason: d.reason, scores: d.scores, stats: d.stats || this.statsPayload(), eloChange: null, score, voided };
     const highlight = d.reason !== 'host-left' && d.reason !== 'forfeit' && this.settings.killcam !== false ? this.findHighlight() : null;
     if (highlight) setTimeout(() => this.playHighlight(highlight, () => this.hud.showResults(results)), 1200);
     else this.hud.showResults(results);
     // Spectators and map-editor test matches don't count: no stats, drops, challenges or achievements.
     if (this.spectator || this.mapDef.id === 'draft') return;
     this.app.recordLocalStats?.({ mode: this.mode.id, map: this.mapDef.id, result, online: this.online, k: myStats.k, a: myStats.a, d: myStats.d, hs: myStats.hs, details: this.myStats });
-    if (this.mode.kind !== 'training' && d.reason !== 'host-left') {
+    if (this.mode.kind !== 'training' && d.reason !== 'host-left' && !voided) {
       const ms = this.myStats, knife = Object.entries(ms.weapons).reduce((a, [w, v]) => a + (isKnife(w) ? v.k : 0), 0);
       this.app.trackChallenges?.({ mode: this.mode.id, result, online: this.online, k: myStats.k, hs: myStats.hs, dmg: Math.round(lp?.damage || 0), weapons: ms.weapons, nades: ms.nades, plants: ms.plants, defuses: ms.defuses, rescues: ms.rescues, knife });
       this.app.trackAchievements?.({
@@ -1067,7 +1073,7 @@ export class Game {
         party: this.app.party?.inParty ? this.app.party.size : 1,
       });
     }
-    if (d.reason !== 'host-left') this.app.awardDrop?.(result, this.online).then((item) => this.hud.showDrop(item)).catch((e) => console.warn('Drop failed', e));
+    if (d.reason !== 'host-left' && !voided) this.app.awardDrop?.(result, this.online).then((item) => this.hud.showDrop(item)).catch((e) => console.warn('Drop failed', e));
     const api = this.app.api;
     if (api && this.app.user) {
       try {
@@ -1083,7 +1089,7 @@ export class Game {
           matchId: this.matchId, mode: this.mode.id, map: this.mapDef.id, ranked: !!this.mode.ranked, online: this.online,
           result, kills: myStats.k, assists: myStats.a, deaths: myStats.d, headshots: myStats.hs, score, eloChange, details: this.myStats,
         });
-        this.hud.setEloChange(this.mode.ranked ? eloChange : null);
+        this.hud.setEloChange(this.mode.ranked && !voided ? eloChange : null, null, voided);
         this.app.refreshProfile?.();
       } catch (e) {
         console.warn('Could not record match', e);

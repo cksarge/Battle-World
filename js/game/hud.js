@@ -536,9 +536,9 @@ export class Hud {
   }
 
   // ───────────── results ─────────────
-  showResults({ result, reason, scores, stats, score }) {
+  showResults({ result, reason, scores, stats, score, voided }) {
     this.overlay = 'results';
-    const g = this.g, title = g.zombies && !g.spectator ? (result === 'win' ? 'SURVIVED' : 'OVERRUN') : { win: 'VICTORY', loss: 'DEFEAT', draw: 'DRAW', over: 'MATCH OVER' }[result];
+    const g = this.g, title = voided ? 'VOIDED' : g.zombies && !g.spectator ? (result === 'win' ? 'SURVIVED' : 'OVERRUN') : { win: 'VICTORY', loss: 'DEFEAT', draw: 'DRAW', over: 'MATCH OVER' }[result];
     const color = result === 'win' ? 'var(--good)' : result === 'loss' ? 'var(--bad)' : 'var(--muted)';
     const reasonText = { forfeit: 'Opponent forfeited', 'host-left': 'The host left the match', kills: 'Kill limit reached', time: 'Time limit reached', gungame: 'Got a kill with every weapon', score: '', last: 'Last player standing', overrun: `Overrun on wave ${g.state.z?.wave || 0}` }[reason] || '';
     // Commend or report other real players (signed-in online matches only).
@@ -551,6 +551,7 @@ export class Hud {
       <div style="text-align:center"><div class="hud-num" style="font-size:64px;color:${color}">${title}</div>
       <div class="muted">${esc(g.mode.name)} · ${esc(g.mapDef.name)} · ${esc(score)}</div>
       ${reasonText ? `<div class="muted small">${esc(reasonText)}</div>` : ''}
+      ${voided ? `<div class="muted small">Nobody scored, so this match doesn't count: no win or loss${g.mode.ranked ? ' and no rating change' : ''}.</div>` : ''}
       <div class="elo" style="margin:10px 0;font-family:var(--display);font-size:22px">${g.mode.ranked && g.app.user ? 'Updating rating…' : ''}</div>
       <div class="drop"></div></div>
       <table class="tbl"><tr><th>Player</th>${teamCol ? '<th>Team</th>' : ''}${pts ? '<th class="num">PTS</th>' : ''}<th class="num">K</th><th class="num">A</th><th class="num">D</th><th class="num">HS</th><th class="num">DMG</th>${social ? '<th></th>' : ''}</tr>${rows}</table>
@@ -580,11 +581,12 @@ export class Hud {
       <b>${esc(item.name)}</b><span style="color:${r.color}">${r.name} ${(KINDS[item.kind]?.label || '').toLowerCase()}</span></div>`;
   }
 
-  setEloChange(delta, error) {
+  setEloChange(delta, error, voided = false) {
     const e = this.el.ovl.querySelector('.elo');
-    if (this.overlay !== 'results') { this.pendingElo = [delta, error]; return; }
+    if (this.overlay !== 'results') { this.pendingElo = [delta, error, voided]; return; }
     if (!e) return;
     if (error) { e.innerHTML = `<span class="small" style="color:var(--bad)">${esc(error)}</span>`; return; }
+    if (voided && this.g.mode.ranked) { e.textContent = 'Rating unchanged'; return; }
     if (delta === null || delta === undefined) { e.textContent = this.g.app.user ? 'Stats saved' : ''; return; }
     e.innerHTML = `<span style="color:${delta >= 0 ? 'var(--good)' : 'var(--bad)'}">${delta >= 0 ? '+' : ''}${delta} ELO</span>`;
   }

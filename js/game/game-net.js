@@ -142,12 +142,15 @@ export class GameNet {
         break;
       }
       case 'bomb': {
-        const prev = s.bomb?.state;
+        // On the host (every bot match, and online matches you host) the rules have already stored this
+        // same object in s.bomb before broadcasting it, so it's a fresh plant even though s.bomb says
+        // planted. Other players get a copy over the network and compare with what they had.
+        const fresh = d.state === 'planted' && (s.bomb === d || s.bomb?.state !== 'planted');
         s.bomb = d;
         this.refreshBombCarrier();
-        if (d.state === 'planted' && prev !== 'planted' && d.planter === this.localId) this.myStats.plants++;
+        if (fresh && d.planter === this.localId) this.myStats.plants++;
         if (d.state === 'defused' && d.defuser === this.localId) this.myStats.defuses++;
-        if (d.state === 'planted' && prev !== 'planted') { this.hud.center('CHARGE PLANTED', `Site ${d.site} · ${this.mode.bombTime}s`, 3); sfx.plantDone(new THREE.Vector3(...d.pos)); }
+        if (fresh) { this.hud.center('CHARGE PLANTED', `Site ${d.site} · ${this.mode.bombTime}s`, 3); sfx.plantDone(new THREE.Vector3(...d.pos)); }
         if (d.state === 'exploded') { const pos = new THREE.Vector3(...d.pos); this.effects.explosion(pos, 0, pos.y); this.effects.explosion(pos.clone().setY(pos.y + 1.5)); sfx.explosion(pos); }
         if (d.state === 'defused') sfx.plantDone(new THREE.Vector3(...d.pos));
         break;

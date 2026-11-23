@@ -1,6 +1,11 @@
 # Changelog
 
-#### 4.11.1 · 2026-11-23
+#### 4.11.2 · 2026-11-23
+
+- Matches that end 0-0 are now voided: they don't count as a win or a loss, ranked rating doesn't change, and they give no drop, challenge or achievement progress. This mostly happens when someone leaves before anyone scores
+- Fixed planting the charge not counting toward the **Charge Set** and **Demolitionist** achievements (and planting challenges) in bot matches and in online matches you host. The "Charge planted" banner and sound now show there too
+
+#### 4.11.1 · 2026-11-23 · [cb5bb74](https://github.com/cksarge/Battle-World/commit/cb5bb74)
 
 - Fixed some text boxes showing white text on a white background: search boxes (like the admin panel's player search), number boxes and some message boxes now use the game's dark style, with readable placeholder text
 
