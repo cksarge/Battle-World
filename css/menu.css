@@ -357,7 +357,7 @@
 .track { display: grid; grid-auto-flow: column; grid-auto-columns: 112px; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; overscroll-behavior-x: contain; }
 .tier { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; padding: 22px 6px 8px; cursor: pointer; color: var(--m-bone); background: var(--m-ink2); border: 1px solid var(--m-faint); border-top: 3px solid var(--rc); text-align: center; min-width: 0; }
 .tier .sw { width: 56px; height: 56px; display: grid; place-items: center; font-size: 26px; border-radius: 4px; }
-.tier .sw.wide, .ranked-reward .sw.wide { width: 96px; height: 24px; background-size: cover; background-position: center; border-radius: 2px; }
+.tier .sw.wide, .ranked-reward .sw.wide { flex: none; width: 96px; height: 24px; background-size: cover; background-position: center; border-radius: 2px; }
 .tier b { font-size: 12px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .tier em { font-style: normal; font-size: 11px; color: var(--rc); }
 .tier small { font-size: 10px; color: var(--m-dim); text-transform: uppercase; letter-spacing: .06em; }
@@ -374,13 +374,6 @@
 .ch.done { border-color: color-mix(in srgb, var(--good) 50%, transparent); } .ch.done .bar i { background: var(--good); }
 .season-rank, .ranked-reward { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
 .season-rank > div, .ranked-reward > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.rank-cards { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-.rank-card-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin-top: 4px; }
-.rank-card { display: flex; flex-direction: column; gap: 2px; align-items: center; opacity: .55; }
-.rank-card.mine { opacity: 1; }
-.rank-card.mine .sw { outline: 2px solid var(--m-amber); outline-offset: 1px; }
-.rank-card .sw.wide { width: 100%; aspect-ratio: 4 / 1; background-size: cover; background-position: center; border-radius: 2px; }
-.rank-card small { font-size: 11px; color: var(--m-dim); }
 .future { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .future-s { padding: 10px 12px; border: 1px solid var(--m-faint); border-left: 3px solid var(--sc); display: flex; flex-direction: column; gap: 8px; background: var(--m-ink2); }
 .fs-head { display: flex; flex-direction: column; } .fs-head b { color: var(--sc); }

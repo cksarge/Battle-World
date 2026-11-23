@@ -684,9 +684,21 @@ export class UI {
     const app = this.app, kind = this.armoryKind;
     const c = { ...app.char, skins: { ...(app.char.skins || {}) }, mods: { ...(app.char.mods || {}) }, emotes: [...(app.char.emotes || [])] };
     const defs = KINDS[kind].defs;
-    // Items from seasons that haven't started are left out entirely, so nobody sees them early.
-    const total = Object.entries(KINDS).reduce((n, [kk, k]) => n + Object.keys(k.defs).filter((id) => !seasonLocked(k.defs[id]) && (!k.defs[id].awarded || this.owned(kk, id))).length, 0);
-    const have = Object.entries(KINDS).reduce((n, [k, d]) => n + Object.keys(d.defs).filter((id) => this.owned(k, id)).length, 0);
+    // Items from seasons that haven't started are left out entirely, so nobody sees them early. A
+    // season's rank cards (one per rank, you only ever get the one you finish on) count as a single
+    // item: collecting any one of them collects it.
+    let total = 0, have = 0;
+    const rankSets = new Map();
+    for (const [kk, k] of Object.entries(KINDS)) {
+      for (const [id, d] of Object.entries(k.defs)) {
+        if (seasonLocked(d)) continue;
+        const own = this.owned(kk, id);
+        if (d.rankFinish) { rankSets.set(d.season, rankSets.get(d.season) || own); continue; }
+        if (d.awarded && !own) continue;
+        total++; if (own) have++;
+      }
+    }
+    for (const own of rankSets.values()) { total++; if (own) have++; }
     const wid = this.armoryWeapon;
     const current = kind === 'finish' ? c.skins[wid] || 'factory' : kind === 'outfit' ? c.outfit || 'standard' : kind === 'card' ? c.card : kind === 'effect' ? c.killfx : null;
     const card = (id, d) => {
@@ -707,7 +719,8 @@ export class UI {
         <p class="m-sub">Pick a wheel slot, then an emote to put there. Hold G in a match to use the wheel. Click any emote to preview it.</p>` : ''}
       ${kind === 'effect' ? '<p class="m-sub">Click an effect to see it play beside your operator.</p>' : ''}
       ${kind === 'card' ? `<div class="card-preview" style="background-image:url(${cardImage(c.card || 'standard')})"><span>${esc(app.me().name)}</span></div>` : ''}
-      <div class="item-grid ${kind === 'card' ? 'cards' : ''}">${Object.entries(defs).filter(([, d]) => !seasonLocked(d)).map(([id, d]) => card(id, d)).join('')}</div>
+      <div class="item-grid ${kind === 'card' ? 'cards' : ''}">${Object.entries(defs).filter(([id, d]) => !seasonLocked(d) && (!d.rankFinish || this.owned(kind, id))).map(([id, d]) => card(id, d)).join('')}</div>
+      ${kind === 'card' ? '<p class="m-sub">Season rank cards show up here once you earn one: play ranked during a season to get the card for the rank you finish on.</p>' : ''}
       ${kind === 'finish' ? `<button class="btn small ghost" id="apply-all">Use ${esc(defs[current]?.name || 'Factory')} on every weapon</button>` : ''}`;
     const focus = kind === 'finish' ? 'weapon' : kind === 'card' ? 'play' : 'operator';
     this.scene?.setFocus(focus);

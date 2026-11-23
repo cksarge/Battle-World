@@ -1,6 +1,13 @@
 # Changelog
 
-### 4.13.0 · 2026-11-23
+#### 4.13.1 · 2026-11-23
+
+- Season rank cards no longer fill the Armory with eight locked cards per season: they only show up once you've earned one
+- Each season's rank cards count as a single item in your collection, so earning any one of them collects it. You don't need every rank to reach 100%
+- The Season tab shows just one rank card: the one for the rank you're on now
+- Card pictures on the Season tab are no longer squashed next to long descriptions
+
+### 4.13.0 · 2026-11-23 · [880de34](https://github.com/cksarge/Battle-World/commit/880de34)
 
 - When a season ends, **everyone's rating now resets to 1000**, whether it was above or below, so every season is a fresh climb. This happens for every account at once when the season ends, even if you're not playing
 - New **season-end rank cards**: play ranked during a season and when it ends you get that season's card for the rank you finished on, like **Season 1 Gold**. There's one for every rank from Iron to Elite in each of Seasons 1–5
