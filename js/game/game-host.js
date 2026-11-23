@@ -148,7 +148,7 @@ export class GameHost {
   hostBuy(p, item) {
     if (!this.canBuy(p) && !(p.isBot && this.state.phase === 'buy')) return;
     const info = itemInfo(item);
-    if (!info) return;
+    if (!info || this.mode.banned?.includes(item)) return;
     const price = this.priceOf(item, p);
     if (p.money < price) return;
     if (WEAPONS[item]) { if (p.inv[WEAPONS[item].slot] === item) return; }

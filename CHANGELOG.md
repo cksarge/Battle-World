@@ -1,6 +1,11 @@
 # Changelog
 
-#### 4.13.1 · 2026-11-23
+#### 4.13.2 · 2026-11-23
+
+- The **Thumper Launcher** can no longer be bought in Ranked 1v1. It's still in every other mode
+  - A saved loadout with the Thumper in it buys everything else on it in ranked
+
+#### 4.13.1 · 2026-11-23 · [803f9d4](https://github.com/cksarge/Battle-World/commit/803f9d4)
 
 - Season rank cards no longer fill the Armory with eight locked cards per season: they only show up once you've earned one
 - Each season's rank cards count as a single item in your collection, so earning any one of them collects it. You don't need every rank to reach 100%

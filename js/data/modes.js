@@ -27,6 +27,8 @@ export const MODES = {
     id: 'ranked', name: 'Ranked 1v1', short: '1V1', teamSize: 1, kind: 'rounds', ranked: true,
     desc: 'Competitive 1v1 with an economy that rewards winning rounds. Moves your ELO. First to 7. Leaving counts as a loss.',
     economy: true, roundsToWin: 7, roundTime: 75, buyTime: 7, maps: SMALL,
+    // Weapons that can't be bought in this mode (left out of the buy menu, refused by the host).
+    banned: ['thumper'],
   },
   duo: {
     id: 'duo', name: '2v2 Wingman', short: '2V2', teamSize: 2, kind: 'rounds',

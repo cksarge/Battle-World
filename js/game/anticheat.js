@@ -297,7 +297,8 @@ export class AntiCheat {
     if (!this.on || !p || !g.econ || g.zombies) return;
     const roundMode = ['rounds', 'bomb', 'hostage', 'retake'].includes(g.mode.kind);
     const late = roundMode && s.phase !== 'buy' && !(s.phase === 'live' && s.time > g.mode.roundTime - 25);
-    if (late || d.money < 0 || d.money > (g.econ?.max || ECON.max)) this.report(g.hostId, 'money', { player: p.name, item: d.item, money: d.money, phase: s.phase, late });
+    const banned = !!g.mode.banned?.includes(d.item);
+    if (late || banned || d.money < 0 || d.money > (g.econ?.max || ECON.max)) this.report(g.hostId, 'money', { player: p.name, item: d.item, money: d.money, phase: s.phase, late, ...(banned ? { banned_in_mode: true } : {}) });
   }
 
   // Every game: a round ending. The host decides these, so anything impossible is reported against it.

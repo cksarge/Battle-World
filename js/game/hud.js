@@ -266,7 +266,9 @@ export class Hud {
     // the defuse kit only shows for defenders.
     const gear = BUY_MENU.find((c) => c.title === 'Gear').items.filter((id) => id !== 'defusekit' || g.kitAllowed(p));
     const nades = BUY_MENU.find((c) => c.title === 'Grenades').items;
-    const cats = BUY_MENU.filter((c) => c.title !== 'Gear' && c.title !== 'Grenades').map((c) => `<div class="buy-cat"><h3>${c.title}</h3>${c.items.map(item).join('')}</div>`).join('');
+    const banned = new Set(g.mode.banned || []);
+    const cats = BUY_MENU.filter((c) => c.title !== 'Gear' && c.title !== 'Grenades').map((c) => [c.title, c.items.filter((id) => !banned.has(id))]).filter(([, items]) => items.length)
+      .map(([title, items]) => `<div class="buy-cat"><h3>${title}</h3>${items.map(item).join('')}</div>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay" data-close><div class="buy-menu">
       <div class="row"><h2 style="margin:0">${free ? 'Choose loadout' : 'Buy menu'}</h2><span class="spacer"></span>
       ${free ? '' : `<span class="hud-num" style="font-size:28px;color:var(--good)">$${p.money}</span>`}
