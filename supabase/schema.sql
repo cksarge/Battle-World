@@ -263,6 +263,30 @@ create table if not exists public.banned_devices (
 alter table public.banned_devices enable row level security;
 revoke all on public.banned_devices from anon, authenticated;
 
+-- source_user (4.10.3): the account whose device ban put each device on the list. For ban evasion it's
+-- the account being evaded, so unbanning that account clears every device its ban spread to. A device
+-- can be on the list once per ban it is part of. The first run backfills existing rows, tracing ban
+-- evasion rows back to the account that was evaded where the shared devices show it.
+do $$
+declare n int;
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'banned_devices' and column_name = 'source_user') then return; end if;
+  alter table public.banned_devices add column source_user uuid references public.profiles(id) on delete set null;
+  update public.banned_devices set source_user = user_id;
+  for i in 1..20 loop
+    update public.banned_devices b set source_user = r.source_user
+    from public.player_devices d join public.banned_devices r on r.device_id = d.device_id
+    where b.reason = 'Ban evasion' and b.source_user = b.user_id and d.user_id = b.user_id
+      and r.source_user <> b.user_id and (r.reason is distinct from 'Ban evasion' or r.source_user <> r.user_id);
+    get diagnostics n = row_count;
+    exit when n = 0;
+  end loop;
+  alter table public.banned_devices drop constraint if exists banned_devices_pkey;
+end;
+$$;
+create unique index if not exists banned_devices_device_source_idx on public.banned_devices (device_id, source_user) nulls not distinct;
+create index if not exists banned_devices_source_idx on public.banned_devices (source_user);
+
 create table if not exists public.ban_appeals (
   id           bigint generated always as identity primary key,
   user_id      uuid not null references public.profiles(id) on delete cascade,
@@ -443,10 +467,12 @@ begin
     on conflict (user_id) do update set banned_until = 'infinity', banned_at = now(), ban_reason = excluded.ban_reason,
       ban_appealable = false, device_ban = true, kick_at = now(), kick_reason = 'Banned', updated_at = now();
   end if;
-  insert into banned_devices (device_id, user_id, reason)
-  select d.device_id, uid, 'Ban evasion' from player_devices d
+  -- This account's devices join the ban of each account this device was banned for.
+  insert into banned_devices (device_id, user_id, reason, source_user)
+  select d.device_id, uid, 'Ban evasion', s.src from player_devices d
+  cross join (select distinct coalesce(b.source_user, uid) as src from banned_devices b where b.device_id = p_device) s
   where d.user_id = uid and not exists (select 1 from player_devices a join admins ad on ad.user_id = a.user_id where a.device_id = d.device_id)
-  on conflict (device_id) do nothing;
+  on conflict (device_id, source_user) do nothing;
   return true;
 end;
 $$;
@@ -1110,21 +1136,30 @@ begin
   on conflict (user_id) do update set banned_until = until, banned_at = now(), ban_reason = left(p_reason, 300),
     ban_appealable = appealable, device_ban = coalesce(p_device, false), kick_at = now(), kick_reason = 'Banned', updated_at = now();
   if p_device then
-    insert into banned_devices (device_id, user_id, reason)
-    select d.device_id, p_user, left(p_reason, 300) from player_devices d
+    insert into banned_devices (device_id, user_id, reason, source_user)
+    select d.device_id, p_user, left(p_reason, 300), p_user from player_devices d
     where d.user_id = p_user and not exists (select 1 from player_devices a join admins ad on ad.user_id = a.user_id where a.device_id = d.device_id)
-    on conflict (device_id) do nothing;
+    on conflict (device_id, source_user) do nothing;
   end if;
   perform admin_log('ban', p_user::text, json_build_object('minutes', p_minutes, 'reason', p_reason, 'appealable', appealable, 'device', coalesce(p_device, false))::jsonb);
 end;
 $$;
+
+-- Lifting a ban takes the player's devices off the list: every device their ban spread to (including
+-- other accounts caught evading it), and their own devices that were banned for evading someone else.
+-- Devices that are also part of another account's ban stay banned under that one.
+create or replace function public.lift_device_bans(p_user uuid)
+returns void language sql security definer set search_path = public as $$
+  delete from banned_devices where source_user = p_user or user_id = p_user;
+$$;
+revoke all on function public.lift_device_bans(uuid) from public, anon, authenticated;
 
 create or replace function public.admin_unban(p_user uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
   perform admin_guard();
   update moderation set banned_until = null, ban_reason = null, banned_at = null, ban_appealable = true, device_ban = false, updated_at = now() where user_id = p_user;
-  delete from banned_devices where user_id = p_user;
+  perform lift_device_bans(p_user);
   perform admin_log('unban', p_user::text, null);
 end;
 $$;
@@ -1264,7 +1299,7 @@ begin
   if uid is null then raise exception 'That appeal was already handled.'; end if;
   if p_accept then
     update moderation set banned_until = null, ban_reason = null, banned_at = null, ban_appealable = true, device_ban = false, updated_at = now() where user_id = uid;
-    delete from banned_devices where user_id = uid;
+    perform lift_device_bans(uid);
   end if;
   perform admin_log(case when p_accept then 'appeal_accepted' else 'appeal_denied' end, uid::text, json_build_object('appeal', p_id, 'note', p_note)::jsonb);
 end;
