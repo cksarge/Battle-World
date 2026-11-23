@@ -1,4 +1,6 @@
 // Collectible cosmetics. Weapon finishes work on every gun; outfits work on every operator.
+import { RANKS, rankFor } from './modes.js';
+
 export const RARITIES = {
   common: { name: 'Common', color: '#9aa4ad', weight: 50 },
   uncommon: { name: 'Uncommon', color: '#59d38a', weight: 28 },
@@ -123,6 +125,22 @@ export const CALLING_CARDS = {
   // with 3 reports that a moderator acted on.
   moderator: { name: 'Moderator', rarity: 'moderator', colors: ['#0c0714', '#c49bff', '#ffd23f'], motif: 'shield', awarded: 'Became a Battle World moderator, or sent in 3 player reports that were acted on' },
 };
+
+// Season-end rank cards: when a season ends, everyone who played ranked in it gets the card for the
+// rank they finished on (e.g. "Season 1 Gold"). Given by js/main.js grantSeasonRewards from the
+// season's final rating in season_history; like every season item, hidden until its season starts.
+const RANK_RARITY = { Iron: 'common', Bronze: 'common', Silver: 'uncommon', Gold: 'rare', Platinum: 'epic', Diamond: 'epic', Master: 'legendary', Elite: 'legendary' };
+const SEASON_CARD_LOOK = [['s1', 1, '#11161d', '#f2a33a'], ['s2', 2, '#0d1a2a', '#7cc7ff'], ['s3', 3, '#0b1a10', '#6ddc5a'], ['s4', 4, '#2a0a06', '#ff7a3d'], ['s5', 5, '#0a0614', '#c06cff']];
+for (const [sid, n, bg, accent] of SEASON_CARD_LOOK) {
+  for (const r of RANKS) {
+    CALLING_CARDS[`${sid}_rank_${r.name.toLowerCase()}`] = { name: `Season ${n} ${r.name}`, rarity: RANK_RARITY[r.name] || 'rare', colors: [bg, r.color, accent], motif: 'rank', tag: `S${n}`, rank: r.name, season: sid, rankFinish: r.name };
+  }
+}
+// The rank card a final rating earns in a season, or null if that season has none.
+export function rankCardId(seasonId, elo) {
+  const id = `${seasonId}_rank_${rankFor(elo ?? 1000).name.toLowerCase()}`;
+  return CALLING_CARDS[id] ? id : null;
+}
 
 // Effects that play where your victim falls. Everyone in the match sees them.
 export const KILL_FX = {

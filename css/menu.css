@@ -374,6 +374,13 @@
 .ch.done { border-color: color-mix(in srgb, var(--good) 50%, transparent); } .ch.done .bar i { background: var(--good); }
 .season-rank, .ranked-reward { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
 .season-rank > div, .ranked-reward > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rank-cards { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.rank-card-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin-top: 4px; }
+.rank-card { display: flex; flex-direction: column; gap: 2px; align-items: center; opacity: .55; }
+.rank-card.mine { opacity: 1; }
+.rank-card.mine .sw { outline: 2px solid var(--m-amber); outline-offset: 1px; }
+.rank-card .sw.wide { width: 100%; aspect-ratio: 4 / 1; background-size: cover; background-position: center; border-radius: 2px; }
+.rank-card small { font-size: 11px; color: var(--m-dim); }
 .future { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .future-s { padding: 10px 12px; border: 1px solid var(--m-faint); border-left: 3px solid var(--sc); display: flex; flex-direction: column; gap: 8px; background: var(--m-ink2); }
 .fs-head { display: flex; flex-direction: column; } .fs-head b { color: var(--sc); }

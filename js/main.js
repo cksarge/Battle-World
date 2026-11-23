@@ -10,7 +10,7 @@ import { PartyManager } from './net/party.js';
 import { initAudio } from './engine/audio.js';
 import { pad, PadNav, isTouchOnly, applyPadSettings, padHelp } from './engine/gamepad.js';
 import { ATTACHMENTS, unlockedBetween } from './data/attachments.js';
-import { normalizeInventory, rollDrop, addToInventory, KINDS, WEAPON_SKINS } from './data/skins.js';
+import { normalizeInventory, rollDrop, addToInventory, KINDS, WEAPON_SKINS, rankCardId } from './data/skins.js';
 import { WEAPONS } from './data/weapons.js';
 import { applySeasonRows, currentSeason, seasonById, seasonTrack, tierFor, rankedReward, RANKED_REWARD_WINS } from './data/seasons.js';
 import { normalizeProgress, applyMatch } from './data/challenges.js';
@@ -406,6 +406,9 @@ class App {
       for (const r of seasonTrack(h.season_id).slice(0, tierFor(h.pass_xp).tier)) addToInventory(this.inventory, r);
       const rr = rankedReward(h.season_id);
       if (rr && h.wins >= RANKED_REWARD_WINS) addToInventory(this.inventory, rr);
+      // The season-end rank card for the rank they finished on, if they played ranked that season.
+      const rc = h.wins + h.losses > 0 ? rankCardId(h.season_id, h.final_elo) : null;
+      if (rc) addToInventory(this.inventory, { kind: 'card', id: rc });
     }
     if (JSON.stringify(this.inventory) !== before) {
       await this.saveInventory().catch(() => null);

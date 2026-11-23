@@ -140,6 +140,26 @@ export function cardImage(id, w = 480, h = 120) {
       g.shadowBlur = 0; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
       break;
     }
+    case 'rank': {
+      // Season-end rank cards: the season tag in the season's colour, rank stripes, and a glowing rank emblem.
+      g.globalAlpha = 0.18; g.fillStyle = fg2;
+      for (let i = 0; i < 7; i++) { const x = w * 0.3 + i * h * 0.22; g.beginPath(); g.moveTo(x, h); g.lineTo(x + h * 0.5, 0); g.lineTo(x + h * 0.6, 0); g.lineTo(x + h * 0.1, h); g.fill(); }
+      g.globalAlpha = 1;
+      g.font = `900 ${Math.round(h * 0.5)}px sans-serif`; g.textBaseline = 'middle';
+      g.fillStyle = fg2; g.fillText(def.tag || '', w * 0.05, h * 0.42);
+      g.font = `700 ${Math.round(h * 0.17)}px sans-serif`; g.fillStyle = fg;
+      g.fillText((def.rank || '').toUpperCase(), w * 0.05 + 2, h * 0.8);
+      const ex = w * 0.8, ey = h * 0.5, r = h * 0.34;
+      g.shadowColor = fg; g.shadowBlur = h * 0.22; g.fillStyle = fg;
+      g.beginPath(); g.moveTo(ex, ey - r); g.lineTo(ex + r * 0.85, ey); g.lineTo(ex, ey + r); g.lineTo(ex - r * 0.85, ey); g.closePath(); g.fill();
+      g.shadowBlur = 0; g.fillStyle = bg;
+      const k = r * 0.45;
+      g.beginPath(); g.moveTo(ex, ey - k); g.lineTo(ex + k * 0.85, ey); g.lineTo(ex, ey + k); g.lineTo(ex - k * 0.85, ey); g.closePath(); g.fill();
+      g.strokeStyle = fg2; g.lineWidth = Math.max(2, h * 0.02);
+      g.beginPath(); g.moveTo(ex, ey - r); g.lineTo(ex + r * 0.85, ey); g.lineTo(ex, ey + r); g.lineTo(ex - r * 0.85, ey); g.closePath(); g.stroke();
+      g.textBaseline = 'alphabetic';
+      break;
+    }
     case 'shield': {
       // Moderator: a column of report rows with flags on the left, a glowing shield with a tick on the right.
       for (let i = 0, y = h * 0.14; i < 5; i++, y += h * 0.16) {

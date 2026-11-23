@@ -2,8 +2,8 @@
 // the season leaderboard and a look at the seasons still to come.
 import { SEASONS, currentSeason, seasonStarted, seasonTrack, tierFor, rankedReward, itemDef, rarityColor, fmtDate, timeLeft, TIERS, TIER_XP, RANKED_REWARD_WINS } from '../data/seasons.js';
 import { activeChallenges, normalizeProgress, nextDailyReset, nextWeeklyReset } from '../data/challenges.js';
-import { KINDS, RARITIES } from '../data/skins.js';
-import { rankBadge } from '../data/modes.js';
+import { KINDS, RARITIES, rankCardId } from '../data/skins.js';
+import { rankBadge, rankFor, RANKS } from '../data/modes.js';
 import { itemSwatch, cardImage } from './cards.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -54,7 +54,9 @@ export async function renderSeason(ui, el) {
       <section><h3 class="m-h3">Ranked season</h3>
         ${p ? `<div class="season-rank">${rankBadge(p.elo, true)}<div><b>${p.elo} rating</b><span class="m-sub">${inSeason ? `${p.season_wins}–${p.season_losses} this season · peak ${p.season_peak}` : 'Play a ranked match to join this season'}</span></div></div>` : '<p class="m-sub">Sign in to play ranked.</p>'}
         ${ranked ? `<div class="ranked-reward"><span class="sw wide" style="background-image:url(${cardImage(ranked.id, 240, 60)})"></span><div><b>${esc(itemDef(ranked).name)}</b><span class="m-sub">Win ${RANKED_REWARD_WINS} ranked matches this season (${Math.min(rWins, RANKED_REWARD_WINS)}/${RANKED_REWARD_WINS}). Awarded when the season ends.</span></div></div>` : ''}
-        <p class="m-sub">When a season ends your rating moves halfway back toward 1000, so everyone climbs again.</p></section>
+        <div class="rank-cards"><b>Season-end rank card</b><span class="m-sub">Play ranked this season and you get the Season ${s.num} card for the rank you finish on.${p && inSeason && p.season_wins + p.season_losses > 0 ? ` Right now that's <b>${esc(rankFor(p.elo).name)}</b>.` : ''}</span>
+          <div class="rank-card-row">${RANKS.map((r) => { const id = rankCardId(s.id, r.min); const mine = p && inSeason && p.season_wins + p.season_losses > 0 && rankFor(p.elo).name === r.name; return `<span class="rank-card ${mine ? 'mine' : ''}" title="${esc(itemDef({ kind: 'card', id })?.name)}"><span class="sw wide" style="background-image:url(${cardImage(id, 240, 60)})"></span><small>${esc(r.name)}</small></span>`; }).join('')}</div></div>
+        <p class="m-sub">When a season ends, everyone's rating resets to 1000, so everyone climbs again.</p></section>
       <section><h3 class="m-h3">Season leaderboard</h3><div id="season-lb"><p class="m-sub">Loading…</p></div></section>
     </div>` : '<h2 class="m-h1">Between seasons</h2><p class="m-sub">The next season hasn’t started yet.</p>';
 

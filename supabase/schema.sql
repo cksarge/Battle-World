@@ -143,6 +143,8 @@ insert into public.seasons (id, num, name, starts_at, ends_at) values
   ('s4', 4, 'Heatwave',      '2027-07-01 00:00:00+00', '2027-10-01 00:00:00+00'),
   ('s5', 5, 'Nightfall',     '2027-10-01 00:00:00+00', '2028-01-01 00:00:00+00')
 on conflict (id) do update set num = excluded.num, name = excluded.name, starts_at = excluded.starts_at, ends_at = excluded.ends_at;
+-- When finish_seasons() wrapped the season up (null until it has ended and been processed).
+alter table public.seasons add column if not exists finalized_at timestamptz;
 
 -- Per-season progress on the profile. Written only by the functions below.
 alter table public.profiles add column if not exists season_id     text;
@@ -186,21 +188,43 @@ returns text language sql stable set search_path = public as $$
   select id from seasons where now() >= starts_at and now() < ends_at order by starts_at limit 1;
 $$;
 
--- Moves a player into the current season the first time they play in it. On a rollover the old
--- season is archived and ELO is pulled halfway back to 1000 (a soft reset). Safe to call repeatedly.
+-- Wraps up every season whose end date has passed, once each and for everyone at the same moment
+-- (4.13.0): each player who took part (ranked matches or season XP) gets a season_history row with
+-- their final rating, which their game turns into that season's rank card and other end-of-season
+-- rewards (js/main.js grantSeasonRewards). Then every account's rating goes back to exactly 1000 and
+-- season progress starts over. It runs from ensure_season, which my_status calls for every signed-in
+-- player every 30 seconds, so the first check-in after a season ends does it; nothing is run by hand.
+-- It works after the last season too (no next season needed). Safe to call any number of times.
+create or replace function public.finish_seasons()
+returns void language plpgsql security definer set search_path = public as $$
+declare s seasons%rowtype;
+begin
+  if not exists (select 1 from seasons where ends_at <= now() and finalized_at is null) then return; end if;
+  -- One at a time: anyone else arriving waits here, then finds the work done.
+  perform pg_advisory_xact_lock(hashtext('public.finish_seasons'));
+  for s in select * from seasons where ends_at <= now() and finalized_at is null order by ends_at loop
+    insert into season_history (user_id, season_id, final_elo, peak_elo, wins, losses, pass_xp)
+    select id, s.id, elo, greatest(season_peak, elo), season_wins, season_losses, pass_xp from profiles
+    where season_id = s.id and (season_wins + season_losses > 0 or pass_xp > 0)
+    on conflict do nothing;
+    update profiles set elo = 1000, season_peak = 1000, season_id = null, pass_xp = 0, season_wins = 0, season_losses = 0
+    where elo <> 1000 or season_id is not null;
+    update seasons set finalized_at = now() where id = s.id;
+  end loop;
+end;
+$$;
+
+-- Moves a player into the current season the first time they play in it (finished seasons are
+-- wrapped up first, by finish_seasons). Safe to call repeatedly.
 create or replace function public.ensure_season(p_user uuid)
 returns void language plpgsql security definer set search_path = public as $$
-declare cur text := current_season(); p profiles%rowtype;
+declare cur text; p profiles%rowtype;
 begin
+  perform finish_seasons();
+  cur := current_season();
   if cur is null then return; end if;
   select * into p from profiles where id = p_user for update;
   if not found or p.season_id is not distinct from cur then return; end if;
-  if p.season_id is not null then
-    insert into season_history (user_id, season_id, final_elo, peak_elo, wins, losses, pass_xp)
-    values (p_user, p.season_id, p.elo, p.season_peak, p.season_wins, p.season_losses, p.pass_xp)
-    on conflict do nothing;
-    update profiles set elo = 1000 + round((elo - 1000) / 2.0)::int where id = p_user;
-  end if;
   update profiles set season_id = cur, pass_xp = 0, season_wins = 0, season_losses = 0, season_peak = elo where id = p_user;
 end;
 $$;
@@ -2029,16 +2053,24 @@ returns json language sql stable security definer set search_path = public as $$
   ) t;
 $$;
 
+-- A running season ranks players by their current rating; a finished one by the final ratings saved
+-- in season_history (ranked players only).
 create or replace function public.season_leaderboard(p_season text, p_limit int default 100)
 returns json language sql stable security definer set search_path = public as $$
   select coalesce(json_agg(t order by t.pos), '[]') from (
-    select row_number() over (order by p.elo desc) as pos,
-      p.id, p.username, p.elo, p.season_peak, p.season_wins, p.season_losses, p.pass_xp,
-      (select c.tag from clan_members cm join clans c on c.id = cm.clan_id where cm.user_id = p.id) as clan
-    from profiles p
-    where p.season_id = p_season
-      and not exists (select 1 from moderation m where m.user_id = p.id and m.banned_until > now())
-    order by p.elo desc
+    select row_number() over (order by x.elo desc) as pos, x.*,
+      (select c.tag from clan_members cm join clans c on c.id = cm.clan_id where cm.user_id = x.id) as clan
+    from (
+      select p.id, p.username, p.elo, p.season_peak, p.season_wins, p.season_losses, p.pass_xp
+      from profiles p
+      where p.season_id = p_season and not exists (select 1 from seasons s where s.id = p_season and s.finalized_at is not null)
+      union all
+      select h.user_id, p.username, h.final_elo, h.peak_elo, h.wins, h.losses, h.pass_xp
+      from season_history h join profiles p on p.id = h.user_id
+      where h.season_id = p_season and h.wins + h.losses > 0 and exists (select 1 from seasons s where s.id = p_season and s.finalized_at is not null)
+    ) x
+    where not exists (select 1 from moderation m where m.user_id = x.id and m.banned_until > now())
+    order by x.elo desc
     limit least(greatest(coalesce(p_limit, 100), 1), 200)
   ) t;
 $$;
@@ -2046,6 +2078,7 @@ $$;
 -- ───────────── function permissions ─────────────
 -- Internal helpers are not callable from the app at all.
 revoke all on function public.ensure_season(uuid) from public, anon, authenticated;
+revoke all on function public.finish_seasons() from public, anon, authenticated;
 revoke all on function public.admin_guard() from public, anon, authenticated;
 revoke all on function public.admin_log(text, text, jsonb) from public, anon, authenticated;
 revoke all on function public.admin_target(uuid) from public, anon, authenticated;

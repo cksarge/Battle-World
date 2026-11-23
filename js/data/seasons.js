@@ -59,7 +59,7 @@ export function seasonTrack(seasonId) {
   const exclusives = {};
   for (const [kind, k] of Object.entries(KINDS)) {
     for (const [id, d] of Object.entries(k.defs)) {
-      if (d.season !== seasonId || d.rankedReward) continue;
+      if (d.season !== seasonId || d.rankedReward || !d.slot) continue;
       exclusives[d.slot] = { kind, id };
     }
   }

@@ -1,6 +1,14 @@
 # Changelog
 
-### 4.12.0 · 2026-11-23
+### 4.13.0 · 2026-11-23
+
+- When a season ends, **everyone's rating now resets to 1000**, whether it was above or below, so every season is a fresh climb. This happens for every account at once when the season ends, even if you're not playing
+- New **season-end rank cards**: play ranked during a season and when it ends you get that season's card for the rank you finished on, like **Season 1 Gold**. There's one for every rank from Iron to Elite in each of Seasons 1–5
+  - The Season tab shows this season's rank cards, with the one you're on now highlighted
+  - Later seasons' rank cards stay hidden until their season starts
+- Finished seasons' leaderboards show everyone's final ratings
+
+### 4.12.0 · 2026-11-23 · [d6d5bb3](https://github.com/cksarge/Battle-World/commit/d6d5bb3)
 
 - New **Moderator** calling card, like the Contributor and Developer cards. It's given to moderators, and to players who send in 3 player reports that a moderator acts on
   - It's handed out automatically, including to everyone who already qualifies, and the admin can also give or remove it from a player's page
