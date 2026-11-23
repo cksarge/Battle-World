@@ -262,7 +262,15 @@ export class GameNet {
     if (this.mode.kind === 'infect') { p.maxHp = p.team === 1 ? 150 : 100; p.speedMul = p.team === 1 ? 1.1 : 1; }
     this.party?.onSpawn(p);
     p.alive = true; p.hp = p.maxHp || 100;
-    if (resetKit) { p.resetKit(); p.armor = 0; p.helmet = false; }
+    if (resetKit) {
+      p.resetKit(); p.armor = 0; p.helmet = false;
+      // Modes with a set loadout (Sniper Duels): that gun and a knife, or the one they picked since.
+      if (this.mode.kit) {
+        const gun = p.kitPick || this.mode.kit;
+        p.inv = { primary: gun, secondary: null, melee: p.knifePref || 'knife', nades: [] };
+        p.ammo = {}; p.giveAmmo(gun); p.slot = 'primary'; p.lastSlot = 'melee';
+      }
+    }
     if (freeArmor && !(this.mode.kind === 'infect' && p.team === 1)) { p.armor = 100; p.helmet = true; }
     if (p.char?.perk === 'fortified' && p.armor < 100) p.armor = 100;
     p.model?.revive();
@@ -377,6 +385,7 @@ export class GameNet {
       if (prev && prev !== it) delete p.bought[prev];
       p.inv[w.slot] = it;
       if (w.type === 'knife') p.knifePref = it;
+      if (this.mode.kit && w.slot === 'primary') p.kitPick = it;
       p.giveAmmo(it);
       switchSlot(p, w.slot);
     } else if (GRENADES[it]) p.inv.nades.push(it);

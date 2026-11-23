@@ -1,6 +1,13 @@
 # Changelog
 
-#### 4.13.3 · 2026-11-23
+### 4.14.0 · 2026-11-23
+
+- New mode: **Sniper Duels**. A 1v1 with snipers only, first to 7 rounds
+  - Every round you start with an AWP, a knife and full armor. No pistols or grenades
+  - In the buy phase you can swap to any other sniper for free, and you keep starting with it in the rounds after
+  - Play it online (All modes), against bots, or in a custom lobby
+
+#### 4.13.3 · 2026-11-23 · [73ff436](https://github.com/cksarge/Battle-World/commit/73ff436)
 
 - Fixed matchmaking sometimes putting a player into two matches at once (or starting a match without someone in it) when more than two people were searching at the same time. A match now only starts once every player in it has confirmed, and anyone already being matched is left out of other matches until theirs starts or falls through
 

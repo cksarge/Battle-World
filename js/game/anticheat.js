@@ -15,6 +15,7 @@
 // determined cheaters; and extensions can trip some of them, so the admin judges each one.
 import * as THREE from 'three';
 import { WEAPONS, ECON } from '../data/weapons.js';
+import { canBuyIn } from '../data/modes.js';
 import { CELL, WOOD_HP } from '../engine/world.js';
 import { traceBullet } from './combat.js';
 import { hookedNatives, injectedScripts, fakeInput, autoclicker, resetClicks } from './integrity.js';
@@ -294,11 +295,13 @@ export class AntiCheat {
   // money can never go negative or above the cap.
   onGive(d) {
     const g = this.g, s = g.state, p = g.players.get(d.id);
-    if (!this.on || !p || !g.econ || g.zombies) return;
+    if (!this.on || !p || g.zombies) return;
+    // Something the mode doesn't sell at all (a banned gun, or a non-sniper in Sniper Duels).
+    if (!canBuyIn(g.mode, d.item)) { this.report(g.hostId, 'money', { player: p.name, item: d.item, banned_in_mode: true }); return; }
+    if (!g.econ) return;
     const roundMode = ['rounds', 'bomb', 'hostage', 'retake'].includes(g.mode.kind);
     const late = roundMode && s.phase !== 'buy' && !(s.phase === 'live' && s.time > g.mode.roundTime - 25);
-    const banned = !!g.mode.banned?.includes(d.item);
-    if (late || banned || d.money < 0 || d.money > (g.econ?.max || ECON.max)) this.report(g.hostId, 'money', { player: p.name, item: d.item, money: d.money, phase: s.phase, late, ...(banned ? { banned_in_mode: true } : {}) });
+    if (late || d.money < 0 || d.money > (g.econ?.max || ECON.max)) this.report(g.hostId, 'money', { player: p.name, item: d.item, money: d.money, phase: s.phase, late });
   }
 
   // Every game: a round ending. The host decides these, so anything impossible is reported against it.

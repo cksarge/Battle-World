@@ -1,4 +1,4 @@
-import { GUN_GAME_ORDER, ECON, DUEL_ECON } from './weapons.js';
+import { GUN_GAME_ORDER, ECON, DUEL_ECON, WEAPONS } from './weapons.js';
 
 const SMALL = ['vault', 'courtyard', 'foundry', 'outpost'];
 const LARGE = ['dustline', 'harbor', 'canopy', 'frostbite'];
@@ -29,6 +29,13 @@ export const MODES = {
     economy: true, roundsToWin: 7, roundTime: 75, buyTime: 7, maps: SMALL,
     // Weapons that can't be bought in this mode (left out of the buy menu, refused by the host).
     banned: ['thumper'],
+  },
+  snipers: {
+    id: 'snipers', name: 'Sniper Duels', short: 'SNP', teamSize: 1, kind: 'rounds',
+    desc: 'A 1v1 with snipers only. Every round you start with an AWP and a knife; swap to any other sniper for free in the buy phase and keep it for the rounds after. First to 7.',
+    roundsToWin: 7, roundTime: 90, buyTime: 7, maps: SMALL,
+    // Only these weapon types can be bought (always free here), and the gun everyone starts each round with.
+    onlyTypes: ['sniper'], kit: 'longshot',
   },
   duo: {
     id: 'duo', name: '2v2 Wingman', short: '2V2', teamSize: 2, kind: 'rounds',
@@ -124,6 +131,15 @@ export const MODES = {
     maps: ['course'],
   },
 };
+
+// Whether an item can be bought in a mode: not on its banned list, and, for modes limited to some weapon
+// types (Sniper Duels), one of those types or a knife. Gear and grenades aren't sold in limited modes.
+export function canBuyIn(mode, id) {
+  if (mode?.banned?.includes(id)) return false;
+  if (!mode?.onlyTypes) return true;
+  const w = WEAPONS[id];
+  return !!w && (w.type === 'knife' || mode.onlyTypes.includes(w.type));
+}
 
 // Money rules for a mode, or null when loadouts are free.
 export function econFor(mode) {

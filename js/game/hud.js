@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { WEAPONS, GRENADES, BUY_MENU, itemInfo, GUN_GAME_ORDER } from '../data/weapons.js';
-import { TEAM_CLASS, SOLO_KINDS, POOL_KINDS, RESPAWN_KINDS, SIDED_KINDS, BOMB_KINDS, goalText, econFor } from '../data/modes.js';
+import { TEAM_CLASS, SOLO_KINDS, POOL_KINDS, RESPAWN_KINDS, SIDED_KINDS, BOMB_KINDS, goalText, econFor, canBuyIn } from '../data/modes.js';
 import { POINTS } from '../data/zombies.js';
 import { ATTACHMENTS } from '../data/attachments.js';
 import { DISGUISES } from './party.js';
@@ -264,10 +264,10 @@ export class Hud {
     };
     // Gear gets its own column on the left and grenades one on the right, both with bigger buttons;
     // the defuse kit only shows for defenders.
-    const gear = BUY_MENU.find((c) => c.title === 'Gear').items.filter((id) => id !== 'defusekit' || g.kitAllowed(p));
-    const nades = BUY_MENU.find((c) => c.title === 'Grenades').items;
-    const banned = new Set(g.mode.banned || []);
-    const cats = BUY_MENU.filter((c) => c.title !== 'Gear' && c.title !== 'Grenades').map((c) => [c.title, c.items.filter((id) => !banned.has(id))]).filter(([, items]) => items.length)
+    const ok = (id) => canBuyIn(g.mode, id);
+    const gear = BUY_MENU.find((c) => c.title === 'Gear').items.filter((id) => (id !== 'defusekit' || g.kitAllowed(p)) && ok(id));
+    const nades = BUY_MENU.find((c) => c.title === 'Grenades').items.filter(ok);
+    const cats = BUY_MENU.filter((c) => c.title !== 'Gear' && c.title !== 'Grenades').map((c) => [c.title, c.items.filter(ok)]).filter(([, items]) => items.length)
       .map(([title, items]) => `<div class="buy-cat"><h3>${title}</h3>${items.map(item).join('')}</div>`).join('');
     this.el.ovl.innerHTML = `<div class="overlay" data-close><div class="buy-menu">
       <div class="row"><h2 style="margin:0">${free ? 'Choose loadout' : 'Buy menu'}</h2><span class="spacer"></span>

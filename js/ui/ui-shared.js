@@ -9,8 +9,8 @@ export const kd = (k, d) => (d ? (k / d).toFixed(2) : k ? k.toFixed(2) : '0.00')
 export const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
 export const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago'; };
 export const QUAD_MODES = ['ranked', 'duo', 'bomb', 'tdm'];
-export const MORE_MODES = ['dom', 'koth', 'ctf', 'hostage', 'retake', 'duel', 'infection', 'gungame', 'ffa'];
-export const OFFLINE_MODES = ['duel', 'duo', 'bomb', 'hostage', 'retake', 'tdm', 'dom', 'koth', 'ctf', 'infection', 'gungame', 'ffa'];
+export const MORE_MODES = ['dom', 'koth', 'ctf', 'hostage', 'retake', 'duel', 'snipers', 'infection', 'gungame', 'ffa'];
+export const OFFLINE_MODES = ['duel', 'snipers', 'duo', 'bomb', 'hostage', 'retake', 'tdm', 'dom', 'koth', 'ctf', 'infection', 'gungame', 'ffa'];
 // Party modes get their own list under the others (online, versus bots and custom lobbies).
 export const PARTY_MODES = ['chamber', 'sharpshooter', 'juggernaut', 'prophunt'];
 // Custom lobbies can also run co-op zombies.

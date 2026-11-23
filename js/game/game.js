@@ -5,7 +5,7 @@ import { Viewmodel } from '../engine/viewmodel.js';
 import { buildGun } from '../engine/models.js';
 import { sfx, initAudio, setVolume, onSoundCue } from '../engine/audio.js';
 import { MAPS, withVariant, SIGHT } from '../data/maps.js';
-import { MODES, RESPAWN_KINDS, SOLO_KINDS, POOL_KINDS, OBJECTIVE_KINDS, PARTY_KINDS, SPLIT_KINDS, econFor } from '../data/modes.js';
+import { MODES, RESPAWN_KINDS, SOLO_KINDS, POOL_KINDS, OBJECTIVE_KINDS, PARTY_KINDS, SPLIT_KINDS, econFor, canBuyIn } from '../data/modes.js';
 import { HostageView } from './hostage.js';
 import { Objectives } from './objectives.js';
 import { PartyMode } from './party.js';
@@ -621,7 +621,7 @@ export class Game {
     const p = this.local;
     if (!p || !items?.length) { if (manual) this.hud.info(`No ${label} saved yet`, 2); return; }
     if (!this.canBuy()) { if (manual) this.hud.info('You can only buy during the buy phase', 2); return; }
-    const missing = this.missingItems(items, p).filter((id) => !this.mode.banned?.includes(id));
+    const missing = this.missingItems(items, p).filter((id) => canBuyIn(this.mode, id));
     if (!missing.length) { if (manual) this.hud.info(`Already equipped: ${label}`, 1.5); return; }
     // Remember exactly what this rebuy asked for: when those purchases arrive (after a network round
     // trip online) they must not overwrite the saved loadout.

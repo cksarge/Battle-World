@@ -1,4 +1,4 @@
-import { POOL_KINDS } from '../data/modes.js';
+import { POOL_KINDS, canBuyIn } from '../data/modes.js';
 import { WEAPONS, GRENADES, itemInfo, nadeDef } from '../data/weapons.js';
 import { KILL_TAGS } from './hud.js';
 import { ready, maxNades, nadeLimit } from './combat.js';
@@ -148,7 +148,7 @@ export class GameHost {
   hostBuy(p, item) {
     if (!this.canBuy(p) && !(p.isBot && this.state.phase === 'buy')) return;
     const info = itemInfo(item);
-    if (!info || this.mode.banned?.includes(item)) return;
+    if (!info || !canBuyIn(this.mode, item)) return;
     const price = this.priceOf(item, p);
     if (p.money < price) return;
     if (WEAPONS[item]) { if (p.inv[WEAPONS[item].slot] === item) return; }
@@ -168,6 +168,11 @@ export class GameHost {
     const pick = (list) => list[Math.floor(Math.random() * list.length)];
     for (const p of this.players.values()) {
       if (!p.isBot || !p.alive) continue;
+      if (this.mode.onlyTypes) {
+        // Sniper Duels: bots sometimes swap the AWP for another sniper.
+        if (Math.random() < 0.3) this.hostBuy(p, pick(Object.values(WEAPONS).filter((w) => this.mode.onlyTypes.includes(w.type)).map((w) => w.id)));
+        continue;
+      }
       if (!this.econ) {
         this.hostBuy(p, pick(FFA_WEAPONS));
         if (Math.random() < 0.4) this.hostBuy(p, 'magnum');
