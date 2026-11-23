@@ -1,6 +1,15 @@
 # Changelog
 
-#### 4.10.3 · 2026-11-23
+### 4.11.0 · 2026-11-23
+
+- Moderators! The admin can now make players moderators and choose exactly what each one can do: reviewing reports, cheat flags, feedback or ban appeals, looking up players, warning, muting, kicking, banning, announcements, polls and community maps
+  - Moderators get the Admin tab with only the pages and buttons their role allows
+  - Buttons for things a moderator can't do themselves, like Ban, become **Recommend**, which sends the admin a message about that player
+- Admin panel: new **Moderators** page to add moderators, edit their roles (with presets), see what they've been doing and remove them
+- Admin panel: new **Mod contact** page for direct messages between the admin and each moderator. A message can link a player and a recommended action, which the admin can carry out from the message
+- The audit log now shows who did each action
+
+#### 4.10.3 · 2026-11-23 · [58a70e1](https://github.com/cksarge/Battle-World/commit/58a70e1)
 
 - Fixed lifted device bans leaving some devices banned. When a ban is lifted or an appeal accepted, every device the ban spread to (including devices of accounts caught evading it) is now cleared too, so the player isn't banned again the next time they sign in on one of them
   - Devices that are part of someone else's ban stay banned

@@ -387,20 +387,21 @@ export class UI {
   }
 
   navHTML(tab) {
-    const items = this.app.isAdmin ? [...NAV, ADMIN_NAV] : NAV;
+    const items = this.app.isStaff ? [...NAV, ADMIN_NAV] : NAV;
     return items.map(([k, label, hint]) => `<button data-t="${k}" class="${k === tab ? 'on' : ''} ${k === 'admin' ? 'nav-admin' : ''}"><b>${label}</b><span>${hint}</span></button>`).join('');
   }
 
-  // The admin tab appears only after the database confirms admin rights (see App.pollStatus).
+  // The admin tab appears only after the database confirms admin or moderator rights (see App.pollStatus).
   adminChanged() {
     const nav = this.root.querySelector('.m-nav');
     if (!nav) return;
     const has = !!nav.querySelector('[data-t=admin]');
-    if (has !== !!this.app.isAdmin) {
+    if (has !== !!this.app.isStaff) {
       nav.innerHTML = this.navHTML(this.tab);
       nav.querySelectorAll('button').forEach((b) => { b.onclick = () => this.showMenu(b.dataset.t); });
-      if (!this.app.isAdmin && this.tab === 'admin') this.showMenu('play');
+      if (!this.app.isStaff && this.tab === 'admin') this.showMenu('play');
     }
+    this.adminPanel?.staffChanged();
   }
 
   renderBanner() {

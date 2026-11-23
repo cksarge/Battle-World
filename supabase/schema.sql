@@ -220,6 +220,38 @@ returns boolean language sql stable security definer set search_path = public as
   select auth.uid() is not null and exists (select 1 from admins where user_id = auth.uid());
 $$;
 
+-- Moderators (4.11.0): accounts the admin trusts with part of the admin panel. Each one has a list of
+-- scopes (what they may do); only the admin (public.admins) adds, changes or removes them, from
+-- Admin → Moderators. Things no scope covers stay admin-only: game switches, the audit log, renaming,
+-- stats, items, device bans, voiding ranked results by hand and managing moderators.
+create table if not exists public.moderators (
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  scopes     text[] not null default '{}',
+  note       text,
+  added_by   uuid references public.profiles(id) on delete set null,
+  added_at   timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table public.moderators enable row level security;
+revoke all on public.moderators from anon, authenticated;
+
+-- Every scope a moderator can be given. The admin panel lists the same ones (js/ui/admin.js, SCOPES).
+create or replace function public.staff_scope_list()
+returns text[] language sql immutable as $$
+  select array['reports', 'flags', 'feedback', 'appeals', 'players', 'warn', 'mute', 'kick', 'ban', 'announce', 'polls', 'maps'];
+$$;
+
+-- True if the caller is the admin, or a moderator (not banned) with any of the given scopes.
+-- An empty or null list means any moderator at all.
+create or replace function public.has_scope(p_scopes text[])
+returns boolean language plpgsql stable security definer set search_path = public as $$
+begin
+  return is_admin() or exists (select 1 from moderators m where m.user_id = auth.uid()
+    and (coalesce(cardinality(p_scopes), 0) = 0 or m.scopes && p_scopes)
+    and not exists (select 1 from moderation x where x.user_id = m.user_id and x.banned_until > now()));
+end;
+$$;
+
 create table if not exists public.moderation (
   user_id      uuid primary key references public.profiles(id) on delete cascade,
   banned_until timestamptz,
@@ -445,6 +477,10 @@ begin
     'grants', (select coalesce(json_agg(json_build_object('id', g.id, 'kind', g.kind, 'item', g.item, 'revoke', g.revoke) order by g.id), '[]') from item_grants g where g.user_id = uid and not g.applied),
     'season', current_season(),
     'admin', is_admin(),
+    'staff', case when is_admin() then json_build_object('owner', true, 'scopes', staff_scope_list(),
+        'unread', (select count(*) from staff_messages where not from_owner and read_at is null))
+      when has_scope(null) then json_build_object('owner', false, 'scopes', (select scopes from moderators where user_id = uid),
+        'unread', (select count(*) from staff_messages where mod_id = uid and from_owner and read_at is null)) end,
     'friend_requests', (select count(*) from friends where friend_id = uid and status = 'pending')
   );
 end;
@@ -1028,11 +1064,23 @@ begin
 end;
 $$;
 
--- ───────────── admin functions (each one refuses anyone who isn't in public.admins) ─────────────
+-- ───────────── admin functions ─────────────
+-- Each one refuses anyone who isn't allowed: admin_guard() lets only the admin (public.admins) through,
+-- staff_guard(scopes) also lets in moderators who have one of those scopes (null = any moderator).
 create or replace function public.admin_guard()
 returns uuid language plpgsql stable security definer set search_path = public as $$
 begin
   if not is_admin() then raise exception 'not authorized'; end if;
+  return auth.uid();
+end;
+$$;
+
+create or replace function public.staff_guard(p_scopes text[])
+returns uuid language plpgsql stable security definer set search_path = public as $$
+begin
+  if not has_scope(p_scopes) then
+    raise exception '%', case when exists (select 1 from moderators where user_id = auth.uid()) then 'Your moderator role doesn''t allow that' else 'not authorized' end;
+  end if;
   return auth.uid();
 end;
 $$;
@@ -1045,7 +1093,7 @@ $$;
 create or replace function public.admin_overview()
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(null);
   return json_build_object(
     'players', (select count(*) from profiles),
     'new_today', (select count(*) from profiles where created_at > now() - interval '1 day'),
@@ -1065,7 +1113,7 @@ $$;
 create or replace function public.admin_reports(p_status text default 'open', p_limit int default 100)
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['reports']);
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
     select r.*, rp.username as reporter_name, tp.username as target_name,
       (select count(*) from reports x where x.target = r.target) as target_report_count
@@ -1078,7 +1126,7 @@ $$;
 create or replace function public.admin_resolve_report(p_id bigint, p_status text, p_note text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['reports']);
   if p_status not in ('open', 'actioned', 'dismissed') then raise exception 'invalid status'; end if;
   update reports set status = p_status, resolution = left(p_note, 500), resolved_by = auth.uid(),
     resolved_at = case when p_status = 'open' then null else now() end where id = p_id;
@@ -1090,11 +1138,12 @@ $$;
 create or replace function public.admin_player(p_id uuid)
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['players']);
   return json_build_object(
     'profile', (select row_to_json(p) from profiles p where p.id = p_id),
     'moderation', (select row_to_json(m) from moderation m where m.user_id = p_id),
     'is_admin', exists (select 1 from admins where user_id = p_id),
+    'moderator', (select json_build_object('scopes', m.scopes, 'note', case when is_admin() then m.note end, 'added_at', m.added_at) from moderators m where m.user_id = p_id),
     'warnings', (select coalesce(json_agg(w order by w.id desc), '[]') from warnings w where w.user_id = p_id),
     'reports_against', (select coalesce(json_agg(row_to_json(t)), '[]') from (select r.*, rp.username as reporter_name from reports r join profiles rp on rp.id = r.reporter where r.target = p_id order by r.created_at desc limit 50) t),
     'reports_filed', (select count(*) from reports where reporter = p_id),
@@ -1111,12 +1160,14 @@ begin
 end;
 $$;
 
--- Admins can't be banned, muted or kicked, so the panel can't lock its own owner out.
+-- Admins can't be banned, muted or kicked, so the panel can't lock its own owner out. Moderators can't
+-- do any of that to other moderators either; only the admin can.
 create or replace function public.admin_target(p_user uuid)
 returns void language plpgsql stable security definer set search_path = public as $$
 begin
   if not exists (select 1 from profiles where id = p_user) then raise exception 'player not found'; end if;
   if exists (select 1 from admins where user_id = p_user) then raise exception 'admins cannot be moderated'; end if;
+  if not is_admin() and exists (select 1 from moderators where user_id = p_user) then raise exception 'Only the admin can moderate a moderator'; end if;
 end;
 $$;
 
@@ -1130,7 +1181,8 @@ declare
   until timestamptz := case when p_device or p_minutes is null or p_minutes <= 0 then 'infinity'::timestamptz else now() + make_interval(mins => p_minutes) end;
   appealable boolean := coalesce(p_appealable, true) and not coalesce(p_device, false);
 begin
-  perform admin_guard(); perform admin_target(p_user);
+  perform staff_guard(array['ban']); perform admin_target(p_user);
+  if coalesce(p_device, false) and not is_admin() then raise exception 'Only the admin can give device bans'; end if;
   insert into moderation (user_id, banned_until, banned_at, ban_reason, ban_appealable, device_ban, kick_at, kick_reason, updated_at)
   values (p_user, until, now(), left(p_reason, 300), appealable, coalesce(p_device, false), now(), 'Banned', now())
   on conflict (user_id) do update set banned_until = until, banned_at = now(), ban_reason = left(p_reason, 300),
@@ -1157,7 +1209,7 @@ revoke all on function public.lift_device_bans(uuid) from public, anon, authenti
 create or replace function public.admin_unban(p_user uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['ban']);
   update moderation set banned_until = null, ban_reason = null, banned_at = null, ban_appealable = true, device_ban = false, updated_at = now() where user_id = p_user;
   perform lift_device_bans(p_user);
   perform admin_log('unban', p_user::text, null);
@@ -1168,7 +1220,7 @@ create or replace function public.admin_mute(p_user uuid, p_minutes int, p_reaso
 returns void language plpgsql security definer set search_path = public as $$
 declare until timestamptz := case when p_minutes is null or p_minutes <= 0 then 'infinity'::timestamptz else now() + make_interval(mins => p_minutes) end;
 begin
-  perform admin_guard(); perform admin_target(p_user);
+  perform staff_guard(array['mute']); perform admin_target(p_user);
   insert into moderation (user_id, muted_until, mute_reason, updated_at) values (p_user, until, left(p_reason, 300), now())
   on conflict (user_id) do update set muted_until = until, mute_reason = left(p_reason, 300), updated_at = now();
   perform admin_log('mute', p_user::text, json_build_object('minutes', p_minutes, 'reason', p_reason)::jsonb);
@@ -1178,7 +1230,7 @@ $$;
 create or replace function public.admin_unmute(p_user uuid)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['mute']);
   update moderation set muted_until = null, mute_reason = null, updated_at = now() where user_id = p_user;
   perform admin_log('unmute', p_user::text, null);
 end;
@@ -1187,7 +1239,7 @@ $$;
 create or replace function public.admin_kick(p_user uuid, p_reason text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard(); perform admin_target(p_user);
+  perform staff_guard(array['kick']); perform admin_target(p_user);
   insert into moderation (user_id, kick_at, kick_reason, updated_at) values (p_user, now(), left(p_reason, 300), now())
   on conflict (user_id) do update set kick_at = now(), kick_reason = left(p_reason, 300), updated_at = now();
   perform admin_log('kick', p_user::text, json_build_object('reason', p_reason)::jsonb);
@@ -1197,7 +1249,7 @@ $$;
 create or replace function public.admin_warn(p_user uuid, p_message text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard(); perform admin_target(p_user);
+  perform staff_guard(array['warn']); perform admin_target(p_user);
   if coalesce(trim(p_message), '') = '' then raise exception 'empty message'; end if;
   insert into warnings (user_id, message) values (p_user, left(p_message, 500));
   perform admin_log('warn', p_user::text, json_build_object('message', p_message)::jsonb);
@@ -1254,11 +1306,10 @@ $$;
 -- Undoes a ranked result: reverses both players' rating change and win/loss counts. Season counts
 -- only change if the match was played in the current season. The result stays recorded as voided so
 -- it can't be reported again.
-create or replace function public.admin_void_ranked(p_match_id text)
+create or replace function public.void_ranked_result(p_match_id text)
 returns void language plpgsql security definer set search_path = public as $$
 declare r ranked_matches%rowtype; this_season boolean;
 begin
-  perform admin_guard();
   select * into r from ranked_matches where match_id = p_match_id for update;
   if not found then raise exception 'no ranked result for that match'; end if;
   if r.voided then raise exception 'that result is already voided'; end if;
@@ -1272,12 +1323,22 @@ begin
   perform admin_log('void_ranked', p_match_id, row_to_json(r)::jsonb);
 end;
 $$;
+revoke all on function public.void_ranked_result(text) from public, anon, authenticated;
+
+-- Admin only (from a player's match list). Moderators with the flags scope void through disputes.
+create or replace function public.admin_void_ranked(p_match_id text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  perform void_ranked_result(p_match_id);
+end;
+$$;
 
 -- Ban appeals, newest first, with the player's current ban.
 create or replace function public.admin_appeals(p_status text default 'open')
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['appeals']);
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
     select a.*, p.username, m.banned_until as current_until, m.device_ban
     from ban_appeals a join profiles p on p.id = a.user_id left join moderation m on m.user_id = a.user_id
@@ -1293,7 +1354,7 @@ returns void language plpgsql security definer set search_path = public as $$
 declare
   uid uuid;
 begin
-  perform admin_guard();
+  perform staff_guard(array['appeals']);
   update ban_appeals set status = case when p_accept then 'accepted' else 'denied' end, admin_note = left(p_note, 500), resolved_at = now()
   where id = p_id and status = 'open' returning user_id into uid;
   if uid is null then raise exception 'That appeal was already handled.'; end if;
@@ -1311,7 +1372,7 @@ drop function if exists public.admin_flags(int);
 create or replace function public.admin_flags(p_status text default 'open', p_limit int default 200)
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['flags']);
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
     select f.*, rp.username as reporter_name, tp.username as target_name,
       (select count(*) from cheat_flags x where x.target = f.target) as target_flags,
@@ -1336,7 +1397,7 @@ create or replace function public.admin_resolve_flag(p_id bigint, p_status text,
 returns int language plpgsql security definer set search_path = public as $$
 declare t uuid; n int;
 begin
-  perform admin_guard();
+  perform staff_guard(array['flags']);
   if p_status not in ('open', 'resolved', 'dismissed') then raise exception 'invalid status'; end if;
   select target into t from cheat_flags where id = p_id;
   if not found then raise exception 'flag not found'; end if;
@@ -1353,7 +1414,7 @@ $$;
 create or replace function public.admin_notify(p_user uuid, p_message text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['warn']);
   if coalesce(trim(p_message), '') = '' then raise exception 'empty message'; end if;
   if not exists (select 1 from profiles where id = p_user) then raise exception 'player not found'; end if;
   insert into warnings (user_id, message, kind) values (p_user, left(p_message, 500), 'notice');
@@ -1362,18 +1423,18 @@ end;
 $$;
 
 -- Settles a disputed ranked result from its flag. p_void: void the result (both players get their
--- rating and win/loss back; see admin_void_ranked) or keep it as it counted. p_message, if given, is
+-- rating and win/loss back; see void_ranked_result) or keep it as it counted. p_message, if given, is
 -- sent to both players as a notice. Every open dispute flag for that match is closed.
 create or replace function public.admin_settle_dispute(p_id bigint, p_void boolean, p_message text, p_note text default null)
 returns void language plpgsql security definer set search_path = public as $$
 declare f cheat_flags%rowtype; r ranked_matches%rowtype;
 begin
-  perform admin_guard();
+  perform staff_guard(array['flags']);
   select * into f from cheat_flags where id = p_id;
   if not found or f.kind <> 'ranked_dispute' then raise exception 'not a ranked dispute'; end if;
   select * into r from ranked_matches where match_id = f.match_id;
   if not found then raise exception 'no ranked result for that match'; end if;
-  if p_void and not r.voided then perform admin_void_ranked(f.match_id); end if;
+  if p_void and not r.voided then perform void_ranked_result(f.match_id); end if;
   if coalesce(trim(p_message), '') <> '' then
     insert into warnings (user_id, message, kind) values (r.winner, left(p_message, 500), 'notice'), (r.loser, left(p_message, 500), 'notice');
   end if;
@@ -1391,7 +1452,7 @@ $$;
 create or replace function public.admin_stat_outliers(p_days int default 30)
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['flags']);
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
     select h.user_id, p.username, count(*) as matches, sum(h.kills) as kills, sum(h.deaths) as deaths, sum(h.headshots) as headshots,
       round(sum(h.headshots)::numeric / nullif(sum(h.kills), 0), 2) as hs_rate,
@@ -1408,7 +1469,7 @@ $$;
 create or replace function public.admin_moderated(p_limit int default 200)
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['ban', 'mute', 'players']);
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
     select m.*, p.username from moderation m join profiles p on p.id = m.user_id
     where m.banned_until > now() or m.muted_until > now() order by m.updated_at desc limit least(p_limit, 500)) t);
@@ -1422,7 +1483,7 @@ returns void language plpgsql security definer set search_path = public as $$
 declare
   starts timestamptz := greatest(coalesce(p_starts, now()), now());
 begin
-  perform admin_guard();
+  perform staff_guard(array['announce']);
   insert into announcements (message, kind, starts_at, ends_at, created_by)
   values (left(p_message, 300), p_kind, starts, starts + make_interval(secs => (greatest(0.1, p_hours) * 3600)::double precision), auth.uid());
   perform admin_log('announce', null, json_build_object('message', p_message, 'hours', p_hours, 'kind', p_kind, 'starts', starts)::jsonb);
@@ -1432,7 +1493,7 @@ $$;
 create or replace function public.admin_end_announcement(p_id bigint)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['announce']);
   update announcements set ends_at = now() where id = p_id;
   perform admin_log('end_announcement', p_id::text, null);
 end;
@@ -1441,7 +1502,7 @@ $$;
 create or replace function public.admin_announcements()
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['announce']);
   return (select coalesce(json_agg(a order by a.id desc), '[]') from (select * from announcements order by id desc limit 50) a);
 end;
 $$;
@@ -1505,7 +1566,7 @@ declare
   cut timestamptz;
   new_id bigint;
 begin
-  perform admin_guard();
+  perform staff_guard(array['polls']);
   select coalesce(jsonb_agg(left(btrim(o), 80) order by n), '[]') into opts from unnest(p_options) with ordinality as t(o, n) where btrim(coalesce(o, '')) <> '';
   if jsonb_array_length(opts) not between 2 and 10 then raise exception 'A poll needs 2 to 10 options'; end if;
   if btrim(coalesce(p_question, '')) = '' then raise exception 'Write a question'; end if;
@@ -1526,7 +1587,7 @@ $$;
 create or replace function public.admin_end_poll(p_id bigint)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['polls']);
   if exists (select 1 from polls where id = p_id and starts_at > now()) then
     delete from polls where id = p_id;
     perform admin_log('cancel_poll', p_id::text, null);
@@ -1540,7 +1601,7 @@ $$;
 create or replace function public.admin_delete_poll(p_id bigint)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['polls']);
   perform admin_log('delete_poll', p_id::text, (select json_build_object('question', question, 'counts', poll_counts(id)) from polls where id = p_id)::jsonb);
   delete from polls where id = p_id;
 end;
@@ -1549,7 +1610,7 @@ $$;
 create or replace function public.admin_polls()
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['polls']);
   return (select coalesce(json_agg(r order by r.id desc), '[]') from (
     select p.*, poll_counts(p.id) as counts from polls p order by p.id desc limit 50) r);
 end;
@@ -1566,12 +1627,16 @@ begin
 end;
 $$;
 
-create or replace function public.admin_audit_log(p_limit int default 100)
+-- p_actor: only that person's actions (a moderator's history on the Moderators page).
+drop function if exists public.admin_audit_log(int);
+create or replace function public.admin_audit_log(p_limit int default 100, p_actor uuid default null)
 returns json language plpgsql security definer set search_path = public as $$
 begin
   perform admin_guard();
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
-    select a.*, p.username as target_name from admin_audit a left join profiles p on p.id::text = a.target
+    select a.*, p.username as target_name, b.username as actor_name, (a.admin_id in (select user_id from admins)) as by_admin
+    from admin_audit a left join profiles p on p.id::text = a.target left join profiles b on b.id = a.admin_id
+    where p_actor is null or a.admin_id = p_actor
     order by a.id desc limit least(p_limit, 500)) t);
 end;
 $$;
@@ -1582,7 +1647,7 @@ create or replace function public.admin_feature_map(p_id bigint, p_slot int)
 returns void language plpgsql security definer set search_path = public as $$
 declare sz text;
 begin
-  perform admin_guard();
+  perform staff_guard(array['maps']);
   select size into sz from custom_maps where id = p_id;
   if not found then raise exception 'map not found'; end if;
   if p_slot is not null then
@@ -1599,7 +1664,7 @@ create or replace function public.admin_delete_map(p_id bigint)
 returns void language plpgsql security definer set search_path = public as $$
 declare m custom_maps%rowtype;
 begin
-  perform admin_guard();
+  perform staff_guard(array['maps']);
   delete from custom_maps where id = p_id returning * into m;
   perform admin_log('delete_map', p_id::text, json_build_object('name', m.name, 'owner', m.owner)::jsonb);
 end;
@@ -1608,7 +1673,7 @@ $$;
 create or replace function public.admin_feedback(p_status text default 'open', p_limit int default 100)
 returns json language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['feedback']);
   return (select coalesce(json_agg(row_to_json(t)), '[]') from (
     select f.*, p.username from feedback f join profiles p on p.id = f.user_id
     where p_status = 'all' or f.status = p_status order by f.created_at desc limit least(p_limit, 500)) t);
@@ -1618,10 +1683,135 @@ $$;
 create or replace function public.admin_resolve_feedback(p_id bigint, p_status text, p_note text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
-  perform admin_guard();
+  perform staff_guard(array['feedback']);
   if p_status not in ('open', 'resolved') then raise exception 'invalid status'; end if;
   update feedback set status = p_status, admin_note = left(p_note, 500), resolved_at = case when p_status = 'resolved' then now() end where id = p_id;
   perform admin_log('resolve_feedback', p_id::text, json_build_object('status', p_status, 'note', p_note)::jsonb);
+end;
+$$;
+
+-- ───────────── moderators and moderator contact (4.11.0) ─────────────
+-- One conversation per moderator, between them and the admin. from_owner: the admin wrote it.
+-- about / suggest: a player the message is about and what the moderator recommends (e.g. a ban), so
+-- the admin can act on it straight from the message. Read and written only through the functions below.
+create table if not exists public.staff_messages (
+  id         bigint generated always as identity primary key,
+  mod_id     uuid not null references public.profiles(id) on delete cascade,
+  from_owner boolean not null,
+  sender     uuid references public.profiles(id) on delete set null,
+  body       text not null check (char_length(body) between 1 and 2000),
+  about      uuid references public.profiles(id) on delete set null,
+  suggest    text check (suggest in ('ban', 'mute', 'warn', 'kick', 'unban', 'unmute', 'other')),
+  created_at timestamptz not null default now(),
+  read_at    timestamptz
+);
+create index if not exists staff_messages_mod on public.staff_messages (mod_id, id);
+alter table public.staff_messages enable row level security;
+revoke all on public.staff_messages from anon, authenticated;
+
+-- Every moderator with their scopes, when they last did something and unread messages from them.
+create or replace function public.admin_moderators()
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  return (select coalesce(json_agg(row_to_json(t) order by t.added_at), '[]') from (
+    select m.user_id, p.username, p.last_seen, m.scopes, m.note, m.added_at, m.updated_at,
+      (select max(created_at) from admin_audit a where a.admin_id = m.user_id) as last_action,
+      (select count(*) from admin_audit a where a.admin_id = m.user_id and a.created_at > now() - interval '7 days') as actions_week,
+      (select count(*) from staff_messages x where x.mod_id = m.user_id and not x.from_owner and x.read_at is null) as unread,
+      coalesce((select x.banned_until > now() from moderation x where x.user_id = m.user_id), false) as banned
+    from moderators m join profiles p on p.id = m.user_id) t);
+end;
+$$;
+
+-- Makes a player a moderator, or changes what a moderator may do. They get a notice the first time.
+create or replace function public.admin_set_moderator(p_user uuid, p_scopes text[], p_note text default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare clean text[]; was boolean;
+begin
+  perform admin_guard();
+  if not exists (select 1 from profiles where id = p_user) then raise exception 'player not found'; end if;
+  if exists (select 1 from admins where user_id = p_user) then raise exception 'That account is already the admin'; end if;
+  select coalesce(array_agg(distinct x order by x), '{}') into clean from unnest(p_scopes) x where x = any(staff_scope_list());
+  if cardinality(clean) = 0 then raise exception 'Pick at least one thing they can do'; end if;
+  was := exists (select 1 from moderators where user_id = p_user);
+  insert into moderators (user_id, scopes, note, added_by) values (p_user, clean, left(nullif(btrim(p_note), ''), 200), auth.uid())
+  on conflict (user_id) do update set scopes = clean, note = left(nullif(btrim(p_note), ''), 200), updated_at = now();
+  if not was then
+    insert into warnings (user_id, message, kind) values (p_user,
+      'You''re now a Battle World moderator. Open the Admin tab in the menu to get started, and use Mod contact there to message the admin.', 'notice');
+  end if;
+  perform admin_log(case when was then 'update_moderator' else 'add_moderator' end, p_user::text, json_build_object('scopes', clean, 'note', p_note)::jsonb);
+end;
+$$;
+
+-- Their messages are kept, so the conversation is still there if they're added back.
+create or replace function public.admin_remove_moderator(p_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare old text[];
+begin
+  perform admin_guard();
+  delete from moderators where user_id = p_user returning scopes into old;
+  if old is null then raise exception 'They aren''t a moderator'; end if;
+  perform admin_log('remove_moderator', p_user::text, json_build_object('scopes', old)::jsonb);
+end;
+$$;
+
+-- Admin: one row per conversation (current moderators, plus past ones with messages), newest first.
+create or replace function public.admin_staff_threads()
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform admin_guard();
+  return (select coalesce(json_agg(row_to_json(t) order by t.last_at desc nulls last, t.username), '[]') from (
+    select u.id as mod_id, p.username, exists (select 1 from moderators m where m.user_id = u.id) as active,
+      l.body as last_body, l.from_owner as last_from_owner, l.created_at as last_at,
+      (select count(*) from staff_messages x where x.mod_id = u.id and not x.from_owner and x.read_at is null) as unread
+    from (select user_id as id from moderators union select distinct mod_id from staff_messages) u
+    join profiles p on p.id = u.id
+    left join lateral (select body, from_owner, created_at from staff_messages x where x.mod_id = u.id order by x.id desc limit 1) l on true) t);
+end;
+$$;
+
+-- A conversation, oldest first (the last 200 messages). The admin names the moderator (p_mod); a
+-- moderator always gets their own. Opening it marks the other side's messages read.
+create or replace function public.admin_staff_messages(p_mod uuid default null)
+returns json language plpgsql security definer set search_path = public as $$
+declare owner boolean := is_admin(); who uuid;
+begin
+  perform staff_guard(null);
+  who := case when owner then p_mod else auth.uid() end;
+  if who is null then raise exception 'pick a moderator'; end if;
+  update staff_messages set read_at = now() where mod_id = who and from_owner <> owner and read_at is null;
+  return (select coalesce(json_agg(row_to_json(t) order by t.id), '[]') from (
+    select x.id, x.from_owner, x.body, x.about, ap.username as about_name, x.suggest, x.created_at, x.read_at, sp.username as sender_name
+    from staff_messages x left join profiles ap on ap.id = x.about left join profiles sp on sp.id = x.sender
+    where x.mod_id = who order by x.id desc limit 200) t);
+end;
+$$;
+
+-- Sends a message: the admin to a moderator (p_mod), or a moderator to the admin. p_about and
+-- p_suggest attach a player and a recommended action. Moderators can send 30 an hour.
+create or replace function public.admin_staff_send(p_body text, p_mod uuid default null, p_about uuid default null, p_suggest text default null)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare owner boolean := is_admin(); who uuid; new_id bigint;
+begin
+  perform staff_guard(null);
+  if btrim(coalesce(p_body, '')) = '' then raise exception 'Write a message first'; end if;
+  if p_suggest is not null and p_about is null then raise exception 'Pick the player your recommendation is about'; end if;
+  if p_about is not null and not exists (select 1 from profiles where id = p_about) then raise exception 'player not found'; end if;
+  if owner then
+    who := p_mod;
+    if who is null or not exists (select 1 from moderators where user_id = who) then raise exception 'They aren''t a moderator any more'; end if;
+  else
+    who := auth.uid();
+    if (select count(*) from staff_messages where mod_id = who and not from_owner and created_at > now() - interval '1 hour') >= 30 then
+      raise exception 'You''ve sent a lot of messages in the last hour. Try again a bit later.';
+    end if;
+  end if;
+  insert into staff_messages (mod_id, from_owner, sender, body, about, suggest)
+  values (who, owner, auth.uid(), left(btrim(p_body), 2000), p_about, nullif(p_suggest, ''))
+  returning id into new_id;
+  return new_id;
 end;
 $$;
 
@@ -1833,6 +2023,9 @@ revoke all on function public.admin_log(text, text, jsonb) from public, anon, au
 revoke all on function public.admin_target(uuid) from public, anon, authenticated;
 revoke all on function public.is_banned(uuid) from public, anon, authenticated;
 revoke all on function public.poll_counts(bigint) from public, anon, authenticated;
+revoke all on function public.staff_guard(text[]) from public, anon, authenticated;
+revoke all on function public.has_scope(text[]) from public, anon, authenticated;
+revoke all on function public.staff_scope_list() from public, anon, authenticated;
 -- The sign-up trigger only ever runs as a trigger, never through the API.
 revoke all on function public.handle_new_user() from public, anon, authenticated;
 
@@ -1879,10 +2072,12 @@ begin
     'admin_kick(uuid, text)', 'admin_warn(uuid, text)', 'admin_rename(uuid, text)', 'admin_set_stats(uuid, jsonb)',
     'admin_reset_stats(uuid)', 'admin_grant_item(uuid, text, text, boolean)', 'admin_void_ranked(text)',
     'admin_moderated(int)', 'admin_announce(text, numeric, text, timestamptz)', 'admin_end_announcement(bigint)',
-    'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int)', 'admin_flags(text, int)',
+    'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int, uuid)', 'admin_flags(text, int)',
     'admin_resolve_flag(bigint, text, text, boolean)', 'admin_notify(uuid, text)', 'admin_settle_dispute(bigint, boolean, text, text)',
     'admin_stat_outliers(int)', 'poll_vote(bigint, int)', 'admin_create_poll(text, text[], numeric, text, timestamptz, timestamptz)',
-    'admin_end_poll(bigint)', 'admin_delete_poll(bigint)', 'admin_polls()'
+    'admin_end_poll(bigint)', 'admin_delete_poll(bigint)', 'admin_polls()',
+    'admin_moderators()', 'admin_set_moderator(uuid, text[], text)', 'admin_remove_moderator(uuid)',
+    'admin_staff_threads()', 'admin_staff_messages(uuid)', 'admin_staff_send(text, uuid, uuid, text)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

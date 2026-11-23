@@ -41,8 +41,8 @@ export async function auditMenus() {
   for (const src of ['online', 'offline', 'zombies']) { ui.source = src; ui.showMenu('play'); await sleep(300); out.push(...audit('play-' + src)); }
   ui.source = 'online'; ui.allModes = true; ui.showMenu('play'); await sleep(300); out.push(...audit('play-all-modes')); ui.allModes = false;
   ui.showMenu('season'); await sleep(800); out.push(...audit('season'));
-  // The admin screen only exists for the admin account; audit it when signed in as admin.
-  if (app.isAdmin) for (const sec of ['overview', 'reports', 'players', 'moderated', 'live', 'announce', 'settings', 'audit']) {
+  // The admin screen only exists for the admin and moderators; audit all of it when signed in as admin.
+  if (app.isAdmin) for (const sec of ['overview', 'reports', 'players', 'moderated', 'live', 'announce', 'settings', 'mods', 'contact', 'audit']) {
     ui.showMenu('admin'); ui.adminPanel.section = sec; ui.adminPanel.refresh(); await sleep(700); out.push(...audit('admin-' + sec));
   }
   ui.showMenu('operators'); await sleep(300); out.push(...audit('operators'));

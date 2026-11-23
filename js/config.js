@@ -7,7 +7,7 @@ export const TURNSTILE_SITE_KEY = '0x4AAAAAAF8-kZzPxxkUI0iP';
 // Off while Supabase's CAPTCHA protection is off. Turn both back on together, or sign-in breaks.
 export const TURNSTILE_ENABLED = false;
 // MAJOR.Minor.patch, bumped with every change; each version is listed in CHANGELOG.md.
-export const GAME_VERSION = '4.10.3';
+export const GAME_VERSION = '4.11.0';
 // Effective date of TERMS.md and PRIVACY.md. Change it when either changes meaningfully, so every
 // player is told once (see ui/legal.js).
 export const LEGAL_VERSION = '2026-11-18';

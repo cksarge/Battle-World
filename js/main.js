@@ -235,7 +235,7 @@ class App {
   }
 
   loginGuest() {
-    this.user = null; this.profile = null; this.clan = null; this.isAdmin = false; this.muted = null;
+    this.user = null; this.profile = null; this.clan = null; this.isAdmin = false; this.staff = null; this.isStaff = false; this.muted = null;
     this.inventory = this.loadLocalInventory();
     this.challenges = this.loadLocalChallenges();
     this.achievements = this.loadLocalAchievements();
@@ -271,7 +271,7 @@ class App {
     this.presence?.leave(); this.presence = null;
     await this.api?.signOut();
     clearInterval(this.statusTimer);
-    this.user = null; this.profile = null; this.clan = null; this.isAdmin = false; this.muted = null; this.banned = null;
+    this.user = null; this.profile = null; this.clan = null; this.isAdmin = false; this.staff = null; this.isStaff = false; this.muted = null; this.banned = null;
     this.friends = []; this.friendsLoaded = false; this.friendsSeen = false; this.friendRequestCount = 0;
     this.inventory = this.loadLocalInventory();
     this.achievements = this.loadLocalAchievements();
@@ -306,6 +306,15 @@ class App {
       applySeasonRows(await this.api.seasons());
     }
     this.isAdmin = st.admin === true;
+    // Moderators (and the admin): which parts of the admin panel they can use, and unread Mod contact messages.
+    const unreadBefore = this.staff?.unread || 0;
+    this.staff = st.staff ? { owner: st.staff.owner === true, scopes: new Set(st.staff.scopes || []), unread: Number(st.staff.unread) || 0 } : null;
+    this.isStaff = !!this.staff;
+    const reading = this.ui.tab === 'admin' && this.ui.adminPanel?.section === 'contact';
+    if (this.staff && this.staff.unread > unreadBefore && !this.game && !reading) {
+      this.ui.toast(this.staff.owner ? 'New message from a moderator' : 'New message from the admin', 'good',
+        [{ label: 'Open', primary: true, fn: () => { this.ui.showMenu('admin'); this.ui.adminPanel?.go('contact'); } }], 8000);
+    }
     if (st.friend_requests !== undefined && (st.friend_requests !== this.friendRequestCount || !this.friendsLoaded)) this.loadFriends();
     this.muted = st.muted_until ? { until: st.muted_until, reason: st.mute_reason } : null;
     this.queueCooldown = st.queue_cooldown_until || null; // after team-kill kicks (report_ff_kick)

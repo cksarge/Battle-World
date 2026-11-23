@@ -1,6 +1,7 @@
-// Admin panel. Only shown when the database confirms the signed-in account is an admin
-// (public.admins, which only holds Carter's account), and every action here goes through an
-// admin_* database function that re-checks that on the server. Hiding or showing this screen
+// Admin panel. Only shown when the database confirms the signed-in account is the admin
+// (public.admins, which only holds Carter's account) or a moderator (public.moderators), and every
+// action here goes through an admin_* database function that re-checks that on the server: the admin
+// can do everything, a moderator only what their scopes allow. Hiding or showing parts of this screen
 // in the browser grants nothing.
 import { KINDS, CALLING_CARDS } from '../data/skins.js';
 import { MODES, rankBadge } from '../data/modes.js';
@@ -30,8 +31,45 @@ const NAV = [
   ['To do', [['overview', 'Overview'], ['reports', 'Reports'], ['appeals', 'Appeals'], ['flags', 'Cheat flags'], ['feedback', 'Feedback']]],
   ['Players', [['players', 'Find a player'], ['live', 'Online now'], ['moderated', 'Bans & mutes']]],
   ['Game', [['announce', 'Announcements'], ['polls', 'Polls'], ['settings', 'Game switches'], ['maps', 'Community maps']]],
+  ['Staff', [['mods', 'Moderators'], ['contact', 'Mod contact']]],
   ['History', [['audit', 'Audit log']]],
 ];
+// What a moderator can be allowed to do, one checkbox each on the Moderators page. The database has the
+// same list (staff_scope_list in supabase/schema.sql) and checks it on every call. Anything not listed
+// (game switches, the audit log, renames, stats, items, device bans, voiding ranked results by hand and
+// managing moderators) stays admin-only.
+export const SCOPES = [
+  ['reports', 'Reports', 'See player reports and mark them handled or dismissed'],
+  ['flags', 'Cheat flags', 'See cheat flags and stat outliers, close flags and settle disputed ranked results'],
+  ['feedback', 'Feedback', 'Read feedback and bug reports and mark them resolved'],
+  ['appeals', 'Ban appeals', 'Accept (which unbans) or deny ban appeals'],
+  ['players', 'Look up players', 'Player pages and history, who is online, spectating, the bans & mutes list'],
+  ['warn', 'Warn', 'Send warnings and notices'],
+  ['mute', 'Mute', 'Mute and unmute'],
+  ['kick', 'Kick', 'Kick players from their match'],
+  ['ban', 'Ban', 'Ban and unban (not device bans)'],
+  ['announce', 'Announcements', 'Post, schedule and end announcements'],
+  ['polls', 'Polls', 'Start, end and delete polls'],
+  ['maps', 'Community maps', 'Feature, unfeature and delete community maps'],
+];
+const SCOPE_NAME = Object.fromEntries(SCOPES.map(([k, l]) => [k, l]));
+// Quick starting points in the moderator editor; the boxes can still be changed after.
+const PRESETS = [
+  ['Reviewer', ['reports', 'flags', 'feedback', 'players', 'warn']],
+  ['Enforcer', ['reports', 'flags', 'appeals', 'players', 'warn', 'mute', 'kick', 'ban']],
+  ['Community', ['announce', 'polls', 'maps']],
+  ['Everything', SCOPES.map(([k]) => k)],
+];
+// The scopes that open each page (any one of them will do). [] = every moderator; pages not listed are admin-only.
+const SECTION_SCOPES = {
+  overview: [], contact: [], reports: ['reports'], appeals: ['appeals'], flags: ['flags'], feedback: ['feedback'],
+  players: ['players'], player: ['players'], live: ['players'], moderated: ['ban', 'mute', 'players'],
+  announce: ['announce'], polls: ['polls'], maps: ['maps'],
+};
+// The scope each player action needs. Actions not listed are admin-only.
+const ACT_SCOPES = { ban: 'ban', unban: 'ban', mute: 'mute', unmute: 'mute', warn: 'warn', notice: 'warn', kick: 'kick' };
+// What a moderator can recommend in Mod contact. Actions they can't do themselves turn into "Recommend …" buttons.
+const SUGGEST = { ban: 'Ban', mute: 'Mute', warn: 'Warn', kick: 'Kick', unban: 'Unban', unmute: 'Unmute', other: 'Something else' };
 const SECTION_KEYS = new Set(NAV.flatMap(([, s]) => s.map(([k]) => k)).concat('player'));
 // Quick reasons for the ban / mute / warn dialogs. Picking one fills the reason box; it can still be edited.
 const BAN_REASONS = ['Cheating', 'Hacking / exploits', 'Team killing / griefing', 'Harassment', 'Hate speech', 'Inappropriate name', 'Ban evasion'];
@@ -107,8 +145,36 @@ export class AdminPanel {
     this.refresh();
   }
 
+  // The admin (public.admins) can do everything; moderators what their scopes allow (App.staff).
+  get owner() { return !!this.app.staff?.owner; }
+  canSection(k) {
+    if (this.owner) return true;
+    const need = SECTION_SCOPES[k];
+    return !!this.app.staff && !!need && (!need.length || need.some((x) => this.app.staff.scopes.has(x)));
+  }
+  canAct(act) {
+    if (act === 'recommend') return !this.owner;
+    return this.owner || (!!ACT_SCOPES[act] && !!this.app.staff?.scopes.has(ACT_SCOPES[act]));
+  }
+
+  // Called after every status check: re-draws the panel if this moderator's scopes changed, and keeps
+  // the Mod contact badge (and an open conversation) up to date.
+  staffChanged() {
+    const st = this.app.staff, key = st ? `${st.owner}|${[...st.scopes].sort()}` : '';
+    const showing = this.ui.tab === 'admin' && this.el?.isConnected;
+    if (this.staffKey !== undefined && key !== this.staffKey && showing) { this.staffKey = key; this.refresh(); return; }
+    this.staffKey = key;
+    const unread = st?.unread || 0;
+    if (this.counts.contact === unread) return;
+    this.counts.contact = unread;
+    if (!showing) return;
+    this.paintNav();
+    if (unread && this.section === 'contact') this.contact(true).catch(() => null);
+  }
+
   // Opens a player's page from anywhere; "Back" returns to where you came from.
   openPlayer(id) {
+    if (!this.canSection('player')) { this.ui.toast('Looking up players isn’t part of your moderator role. You can ask the admin in Mod contact.', 'bad', null, 6000); return; }
     if (this.section !== 'player') this.back = this.section;
     this.playerId = id;
     this.go('player');
@@ -116,9 +182,9 @@ export class AdminPanel {
 
   // Badge numbers for the side menu: open reports, appeals, cheat flags and feedback.
   async navCounts() {
-    const [o, appeals] = await Promise.all([this.app.api.admin('overview'), this.app.api.admin('appeals', { p_status: 'open' })]);
+    const [o, appeals] = await Promise.all([this.app.api.admin('overview'), this.canSection('appeals') ? this.app.api.admin('appeals', { p_status: 'open' }) : []]);
     this.overviewData = o;
-    this.counts = { reports: o.open_reports, flags: o.open_flags, feedback: o.open_feedback, appeals: appeals?.length || 0, moderated: (o.banned || 0) + (o.muted || 0) };
+    this.counts = { reports: o.open_reports, flags: o.open_flags, feedback: o.open_feedback, appeals: appeals?.length || 0, moderated: (o.banned || 0) + (o.muted || 0), contact: this.app.staff?.unread || 0 };
     this.paintNav();
   }
 
@@ -137,20 +203,22 @@ export class AdminPanel {
       if (ok) this.ui.toast(ok, 'good');
       return r;
     } catch (e) {
-      this.ui.toast(e.missing ? 'Admin tools need the database update (supabase/schema.sql) first.' : e.message, 'bad', null, 6000);
+      this.ui.toast(e.missing ? 'Admin tools need the database update (supabase/schema.sql) first.' : e.message === 'not authorized' ? 'You don’t have access to that.' : e.message, 'bad', null, 6000);
       throw e;
     }
   }
 
   render(el) {
     this.el = el;
-    if (!this.app.isAdmin) { el.innerHTML = '<p class="m-empty">Not available.</p>'; return; }
+    if (!this.app.isStaff) { el.innerHTML = '<p class="m-empty">Not available.</p>'; return; }
+    if (!this.canSection(this.section)) this.section = 'overview';
     const on = this.section === 'player' ? 'players' : this.section;
-    el.innerHTML = `<div class="adm"><div class="row adm-top"><h2 class="m-h1">Admin</h2>
-        <div class="adm-find"><input type="search" id="adm-find" placeholder="Jump to a player…" aria-label="Jump to a player" autocomplete="off"><div class="adm-find-list hidden" id="adm-find-list"></div></div>
-        <span class="spacer"></span><button class="btn tiny ghost" id="adm-reload" title="Reload this page">↻ Refresh</button><span class="admin-badge">Moderator · ${esc(this.app.me().name)}</span></div>
+    const nav = NAV.map(([g, items]) => [g, items.filter(([k]) => this.canSection(k))]).filter(([, items]) => items.length);
+    el.innerHTML = `<div class="adm"><div class="row adm-top"><h2 class="m-h1">${this.owner ? 'Admin' : 'Moderation'}</h2>
+        ${this.canSection('players') ? '<div class="adm-find"><input type="search" id="adm-find" placeholder="Jump to a player…" aria-label="Jump to a player" autocomplete="off"><div class="adm-find-list hidden" id="adm-find-list"></div></div>' : ''}
+        <span class="spacer"></span><button class="btn tiny ghost" id="adm-reload" title="Reload this page">↻ Refresh</button><span class="admin-badge">${this.owner ? 'Admin' : 'Moderator'} · ${esc(this.app.me().name)}</span></div>
       <div class="adm-wrap">
-        <nav class="adm-nav">${NAV.map(([g, items]) => `<div class="adm-nav-g"><small>${g}</small>${items.map(([k, l]) => `<button data-s="${k}" class="${k === on ? 'on' : ''}">${l}</button>`).join('')}</div>`).join('')}</nav>
+        <nav class="adm-nav">${nav.map(([g, items]) => `<div class="adm-nav-g"><small>${g}</small>${items.map(([k, l]) => `<button data-s="${k}" class="${k === on ? 'on' : ''}">${l}</button>`).join('')}</div>`).join('')}</nav>
         <div id="adm-body"><p class="m-sub">Loading…</p></div>
       </div></div>`;
     this.paintNav();
@@ -166,12 +234,17 @@ export class AdminPanel {
 
   // Header search: type part of a name and pick from the list (or press Enter for the top match).
   bindFind(el) {
-    const input = el.querySelector('#adm-find'), list = el.querySelector('#adm-find-list');
+    const input = el.querySelector('#adm-find');
+    if (input) this.bindSearch(input, el.querySelector('#adm-find-list'), (r) => this.openPlayer(r.id));
+  }
+
+  // A name box with a drop-down of matching players; onPick gets the chosen row ({id, username, …}).
+  bindSearch(input, list, onPick) {
     let timer, rows = [];
     const show = () => {
       list.classList.toggle('hidden', !input.value.trim());
-      list.innerHTML = rows.length ? rows.map((r) => `<button class="adm-row" data-player="${esc(r.id)}"><b>${esc(r.username)}</b>${rankBadge(r.elo)}<span class="m-sub">${r.matches} matches</span></button>`).join('') : '<p class="m-sub" style="margin:6px 10px">No players match.</p>';
-      this.bindPlayerLinks(list);
+      list.innerHTML = rows.length ? rows.map((r, i) => `<button type="button" class="adm-row" data-i="${i}"><b>${esc(r.username)}</b>${rankBadge(r.elo)}<span class="m-sub">${r.matches} matches</span></button>`).join('') : '<p class="m-sub" style="margin:6px 10px">No players match.</p>';
+      list.querySelectorAll('[data-i]').forEach((b) => { b.onmousedown = (e) => e.preventDefault(); b.onclick = () => { list.classList.add('hidden'); onPick(rows[+b.dataset.i]); }; });
     };
     input.oninput = () => {
       clearTimeout(timer);
@@ -180,7 +253,7 @@ export class AdminPanel {
       timer = setTimeout(async () => { rows = await this.app.api.searchPlayers(q).catch(() => []); if (input.value.trim() === q) show(); }, 200);
     };
     input.onkeydown = (e) => {
-      if (e.key === 'Enter' && rows[0]) this.openPlayer(rows[0].id);
+      if (e.key === 'Enter' && rows[0]) { e.preventDefault(); list.classList.add('hidden'); onPick(rows[0]); }
       if (e.key === 'Escape') { input.value = ''; list.classList.add('hidden'); }
     };
     input.onblur = () => setTimeout(() => list.classList.add('hidden'), 150);
@@ -190,27 +263,30 @@ export class AdminPanel {
   // ───────────── overview ─────────────
   async overview() {
     const o = this.overviewData = await this.call('overview');
-    const appeals = this.counts.appeals ?? (await this.call('appeals', { p_status: 'open' })).length;
+    const appeals = !this.canSection('appeals') ? 0 : this.counts.appeals ?? (await this.call('appeals', { p_status: 'open' })).length;
     const mt = o.settings?.maintenance?.on;
     const todo = [
       [o.open_reports, 'report', 'reports', 'reports'],
       [appeals, 'ban appeal', 'ban appeals', 'appeals'],
       [o.open_flags, 'cheat flag', 'cheat flags', 'flags'],
       [o.open_feedback, 'feedback message', 'feedback messages', 'feedback'],
-    ].filter(([n]) => n > 0);
-    // Every tile opens the page it counts.
-    const tile = (k, l, go) => `<button data-go="${go}" class="${(k === 'open_reports' || k === 'open_feedback') && o[k] ? 'hot' : ''}"><b>${Number(o[k] || 0).toLocaleString()}</b><span>${l}</span></button>`;
-    this.body.innerHTML = `${mt ? '<p class="m-banner warn"><b>Maintenance on</b><span>Online play is paused for everyone but you. Turn it off in Game switches.</span></p>' : ''}
+      [this.app.staff?.unread || 0, 'unread message in Mod contact', 'unread messages in Mod contact', 'contact'],
+    ].filter(([n, , , go]) => n > 0 && this.canSection(go));
+    // Every tile opens the page it counts (a moderator sees only the ones for pages they can open).
+    const tile = (k, l, go) => `<button data-go="${go}" class="${(k === 'open_reports' || k === 'open_feedback') && o[k] ? 'hot' : ''}" ${this.canSection(go) ? '' : 'disabled'}><b>${Number(o[k] || 0).toLocaleString()}</b><span>${l}</span></button>`;
+    const quick = [['announce', 'Post an announcement'], ['polls', 'Start a poll'], ['settings', 'Start an XP event'], ['settings', mt ? 'Turn off maintenance' : 'Maintenance mode'], ['live', 'See who\'s online'], ['contact', this.owner ? 'Message a moderator' : 'Message the admin']]
+      .filter(([go]) => this.canSection(go));
+    this.body.innerHTML = `${mt ? `<p class="m-banner warn"><b>Maintenance on</b><span>${this.owner ? 'Online play is paused for everyone but you. Turn it off in Game switches.' : 'Online play is paused for players.'}</span></p>` : ''}
+      ${this.owner ? '' : `<p class="m-sub" style="margin-top:0">You're a moderator. You can: ${esc([...this.app.staff.scopes].map((k) => SCOPE_NAME[k] || k).join(', ') || 'nothing yet')}. For anything else, ask the admin in Mod contact.</p>`}
       <h3 class="m-h3" style="margin-top:0">Needs your attention</h3>
-      ${todo.length ? `<div class="adm-todo">${todo.map(([n, one, many, go]) => `<button class="adm-row" data-go="${go}"><b>${n}</b><span>open ${n === 1 ? one : many}</span><span class="spacer"></span><span class="m-sub">Review →</span></button>`).join('')}</div>` : '<p class="m-empty">All caught up: no open reports, appeals, cheat flags or feedback.</p>'}
+      ${todo.length ? `<div class="adm-todo">${todo.map(([n, one, many, go]) => `<button class="adm-row" data-go="${go}"><b>${n}</b><span>${go === 'contact' ? '' : 'open '}${n === 1 ? one : many}</span><span class="spacer"></span><span class="m-sub">${go === 'contact' ? 'Read' : 'Review'} →</span></button>`).join('')}</div>` : '<p class="m-empty">All caught up: nothing open on your pages.</p>'}
       <h3 class="m-h3">Today</h3>
       <div class="adm-stats">
         ${tile('players', 'Players', 'players')}${tile('new_today', 'New today', 'players')}${tile('active_today', 'Active today', 'live')}${tile('matches_today', 'Matches today', 'live')}
         ${tile('open_reports', 'Open reports', 'reports')}${tile('open_feedback', 'Open feedback', 'feedback')}${tile('banned', 'Banned', 'moderated')}${tile('muted', 'Muted', 'moderated')}
-        <button data-go="settings"><b>${esc((o.season || '—').toUpperCase())}</b><span>Current season</span></button></div>
-      <h3 class="m-h3">Quick actions</h3>
-      <div class="row" style="gap:8px;flex-wrap:wrap">
-        <button class="btn small" data-go="announce">Post an announcement</button><button class="btn small" data-go="settings">Start an XP event</button><button class="btn small" data-go="settings">${mt ? 'Turn off maintenance' : 'Maintenance mode'}</button><button class="btn small" data-go="live">See who's online</button></div>`;
+        <button data-go="settings" ${this.canSection('settings') ? '' : 'disabled'}><b>${esc((o.season || '—').toUpperCase())}</b><span>Current season</span></button></div>
+      ${quick.length ? `<h3 class="m-h3">Quick actions</h3>
+      <div class="row" style="gap:8px;flex-wrap:wrap">${quick.map(([go, l]) => `<button class="btn small" data-go="${go}">${l}</button>`).join('')}</div>` : ''}`;
     this.body.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => this.go(b.dataset.go); });
   }
 
@@ -430,7 +506,7 @@ export class AdminPanel {
     const live = this.app.onlinePlayers().find((o) => o.id === p.id);
     const liveText = !live ? 'Offline' : live.match ? `In a match: ${MODES[live.match.mode]?.name || live.match.mode} on ${MAPS[live.match.map]?.name || live.match.map}` : `Online (${live.status || 'menu'})`;
     box.innerHTML = `<div class="adm-player">
-      <div class="row"><h3 class="m-h2">${esc(p.username)}</h3>${rankBadge(p.elo)}${d.is_admin ? '<span class="admin-badge">Admin</span>' : ''}${banned ? `<span class="tag bad">Banned ${esc(banUntil(m.banned_until))}</span>${m.device_ban ? '<span class="tag bad">Device ban</span>' : m.ban_appealable === false ? '<span class="tag bad">No appeal</span>' : ''}` : ''}${muted ? `<span class="tag warn">Muted ${esc(banUntil(m.muted_until))}</span>` : ''}</div>
+      <div class="row"><h3 class="m-h2">${esc(p.username)}</h3>${rankBadge(p.elo)}${d.is_admin ? '<span class="admin-badge">Admin</span>' : ''}${d.moderator ? `<span class="admin-badge mod" title="${esc(d.moderator.scopes.map((k) => SCOPE_NAME[k] || k).join(', '))}">Moderator</span>` : ''}${banned ? `<span class="tag bad">Banned ${esc(banUntil(m.banned_until))}</span>${m.device_ban ? '<span class="tag bad">Device ban</span>' : m.ban_appealable === false ? '<span class="tag bad">No appeal</span>' : ''}` : ''}${muted ? `<span class="tag warn">Muted ${esc(banUntil(m.muted_until))}</span>` : ''}</div>
       <div class="m-sub">Joined ${when(p.created_at)} · last seen ${when(p.last_seen)} · id ${esc(p.id)}</div>
       ${banned && m.ban_reason ? `<div class="m-sub">Ban reason: ${esc(m.ban_reason)}</div>` : ''}${muted && m.mute_reason ? `<div class="m-sub">Mute reason: ${esc(m.mute_reason)}</div>` : ''}
       <div class="st-nums small">
@@ -441,22 +517,24 @@ export class AdminPanel {
       <div class="m-sub">Devices: ${d.devices ?? 0}${d.shared_accounts?.length ? ` · Shares a device with ${d.shared_accounts.map((o) => `<a href="#" data-player="${esc(o.id)}">${esc(o.username)}</a>`).join(', ')}` : ''}</div>
       <div class="row" style="gap:8px;align-items:center"><span class="tag ${live ? 'ok' : ''}">${esc(liveText)}</span>${live?.match?.id && p.id !== this.app.user?.id ? '<button class="btn tiny primary" data-watch>Spectate match</button>' : ''}</div>
       <div class="adm-actions">
-        <div><small>Moderation</small><div class="row">${d.is_admin ? '<span class="m-sub">Admins can’t be banned, muted, kicked or warned.</span>' : `
+        <div><small>Moderation</small><div class="row">${d.is_admin ? '<span class="m-sub">Admins can’t be banned, muted, kicked or warned.</span>' : d.moderator && !this.owner ? '<span class="m-sub">Only the admin can moderate a moderator.</span>' : `
           ${banned ? `<button class="btn tiny" data-act="unban" data-u="${p.id}">Unban</button>` : `<button class="btn tiny danger" data-act="ban" data-u="${p.id}">Ban</button>`}
           ${muted ? `<button class="btn tiny" data-act="unmute" data-u="${p.id}">Unmute</button>` : `<button class="btn tiny" data-act="mute" data-u="${p.id}">Mute</button>`}
           <button class="btn tiny" data-act="warn" data-u="${p.id}">Warn</button>
           <button class="btn tiny" data-act="kick" data-u="${p.id}">Kick from match</button>`}
-          <button class="btn tiny" data-act="notice" data-u="${p.id}">Send notice</button></div></div>
-        <div><small>Account</small><div class="row">
+          <button class="btn tiny" data-act="notice" data-u="${p.id}">Send notice</button>
+          ${!this.owner && !d.is_admin ? `<button class="btn tiny ghost" data-act="recommend" data-suggest="other" data-u="${p.id}">Message the admin about them</button>` : ''}</div></div>
+        ${this.owner ? `<div><small>Account</small><div class="row">
           <button class="btn tiny" data-act="rename" data-u="${p.id}" data-name="${esc(p.username)}">Rename</button>
           <button class="btn tiny" data-act="stats" data-u="${p.id}">Edit stats</button>
-          <button class="btn tiny danger" data-act="reset" data-u="${p.id}">Reset stats</button></div></div>
+          <button class="btn tiny danger" data-act="reset" data-u="${p.id}">Reset stats</button>
+          ${d.is_admin ? '' : `<button class="btn tiny" data-act="makemod" data-u="${p.id}" data-name="${esc(p.username)}">${d.moderator ? 'Edit moderator role' : 'Make moderator'}</button>`}</div></div>
         <div><small>Items</small><div class="row">
           ${AWARDED.map(([id, d]) => { const has = (p.inventory?.cards || []).includes(id); return `<button class="btn tiny ${has ? 'ghost' : ''}" data-act="${has ? 'unaward' : 'award'}" data-item="${id}" data-u="${p.id}" title="${esc(d.awarded)}">${has ? 'Remove' : 'Give'} ${esc(d.name)} card</button>`; }).join('')}
           <button class="btn tiny" data-act="grant" data-u="${p.id}">Give item…</button>
-          <button class="btn tiny" data-act="revoke" data-u="${p.id}">Remove item…</button></div></div>
+          <button class="btn tiny" data-act="revoke" data-u="${p.id}">Remove item…</button></div></div>` : ''}
       </div>
-      ${fold('Recent matches', d.matches.length, d.matches.length ? `<table class="tbl"><tr><th>When</th><th>Mode</th><th>Map</th><th>Result</th><th class="num">K–D</th><th class="num">ELO</th><th></th></tr>${d.matches.map((h) => `<tr><td class="m-sub">${when(h.created_at)}</td><td>${esc(MODES[h.mode]?.name || h.mode)}</td><td>${esc(MAPS[h.map]?.name || h.map)}</td><td class="res-${h.result}">${esc(h.result)}</td><td class="num">${h.kills}–${h.deaths}</td><td class="num">${h.ranked ? (h.elo_change > 0 ? '+' : '') + h.elo_change : '—'}</td><td>${h.ranked && h.elo_change ? `<button class="btn tiny ghost" data-void="${esc(h.match_id)}">Void result</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="m-empty">No matches.</p>', true)}
+      ${fold('Recent matches', d.matches.length, d.matches.length ? `<table class="tbl"><tr><th>When</th><th>Mode</th><th>Map</th><th>Result</th><th class="num">K–D</th><th class="num">ELO</th><th></th></tr>${d.matches.map((h) => `<tr><td class="m-sub">${when(h.created_at)}</td><td>${esc(MODES[h.mode]?.name || h.mode)}</td><td>${esc(MAPS[h.map]?.name || h.map)}</td><td class="res-${h.result}">${esc(h.result)}</td><td class="num">${h.kills}–${h.deaths}</td><td class="num">${h.ranked ? (h.elo_change > 0 ? '+' : '') + h.elo_change : '—'}</td><td>${h.ranked && h.elo_change && this.owner ? `<button class="btn tiny ghost" data-void="${esc(h.match_id)}">Void result</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="m-empty">No matches.</p>', true)}
       ${fold('Reports against them', d.reports_against.length, d.reports_against.map((r) => `<div class="m-sub">${when(r.created_at)} · ${esc(REASON[r.reason])} from ${esc(r.reporter_name)} · ${esc(r.status)}${r.note ? ` · “${esc(r.note)}”` : ''}</div>`).join(''), d.reports_against.some((r) => r.status === 'open'))}
       ${fold('Warnings and notices', d.warnings.length, d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${w.kind === 'notice' ? 'Notice: ' : ''}${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join(''))}
       ${fold('Ban appeals', d.appeals?.length, (d.appeals || []).map((a) => `<div class="m-sub">${when(a.created_at)} · ${esc(a.status)}: “${esc(a.message)}”${a.admin_note ? ` · your note: ${esc(a.admin_note)}` : ''}</div>`).join(''))}
@@ -476,6 +554,18 @@ export class AdminPanel {
 
   // Ban / mute / warn / kick / rename / stats / items buttons.
   bindActions(root, after = () => this.refresh()) {
+    // A moderator only gets the actions their role allows. Ban, mute, kick and warn buttons they can't
+    // use become "Recommend …", which sends the admin a message about the player in Mod contact.
+    root.querySelectorAll('[data-act]').forEach((b) => {
+      const act = b.dataset.act;
+      if (this.canAct(act)) return;
+      if (SUGGEST[act] && b.dataset.u && !this.owner) {
+        b.dataset.suggest = act; b.dataset.act = 'recommend';
+        b.textContent = `Recommend ${SUGGEST[act].toLowerCase()}`;
+        b.classList.remove('danger'); b.classList.add('ghost');
+        b.title = 'Sends this to the admin in Mod contact';
+      } else b.remove();
+    });
     root.querySelectorAll('[data-act]').forEach((b) => { b.onclick = async () => {
       const u = b.dataset.u, act = b.dataset.act, rid = b.dataset.r, fid = b.dataset.f;
       let v;
@@ -487,8 +577,9 @@ export class AdminPanel {
             { id: 'reason', label: 'Reason (shown to them)', type: 'textarea', value: b.dataset.reason || '' },
             { type: 'chips', target: 'reason', options: BAN_REASONS },
             { id: 'appeal', label: 'Allow them to appeal', type: 'checkbox', value: true },
-            { id: 'device', label: 'Device ban: permanent, no appeal, and new accounts on their devices are banned too', type: 'checkbox', value: false },
-          ], { confirm: 'Ban', danger: true, note: 'They are removed from any match and blocked from online play, ranked and XP. A device ban never touches devices your admin account also uses.' });
+            // Device bans are admin-only (the database refuses them from moderators too).
+            ...(this.owner ? [{ id: 'device', label: 'Device ban: permanent, no appeal, and new accounts on their devices are banned too', type: 'checkbox', value: false }] : []),
+          ], { confirm: 'Ban', danger: true, note: `They are removed from any match and blocked from online play, ranked and XP.${this.owner ? ' A device ban never touches devices your admin account also uses.' : ''}` });
           if (!v) return;
           const days = +v.days, mins = days > 0 ? Math.round(days * 1440) : +v.mins;
           await this.call('ban', { p_user: u, p_minutes: v.device ? 0 : mins, p_reason: v.reason, p_appealable: !!v.appeal && !v.device, p_device: !!v.device }, v.device ? 'Player and their devices banned' : 'Player banned');
@@ -513,6 +604,20 @@ export class AdminPanel {
           v = await ask(this.ui, 'Send a notice', [{ id: 'msg', label: 'Message', type: 'textarea', max: 500 }], { confirm: 'Send', note: 'Shown to them as a notice from the moderator, not a warning, the next time their game checks in (within 30 seconds).' });
           if (!v || !v.msg.trim()) return;
           await this.call('notify', { p_user: u, p_message: v.msg }, 'Notice sent');
+        } else if (act === 'recommend') {
+          const name = this.current?.profile?.id === u ? this.current.profile.username : null;
+          const from = rid ? `Report #${rid}: ` : fid ? `Cheat flag #${fid}: ` : '';
+          v = await ask(this.ui, `Recommend to the admin${name ? ` · ${name}` : ''}`, [
+            { id: 'suggest', label: 'What should happen', type: 'select', options: Object.entries(SUGGEST), value: b.dataset.suggest || 'other' },
+            { id: 'msg', label: 'Why (the admin reads this in Mod contact)', type: 'textarea', max: 2000, value: from + (b.dataset.reason ? b.dataset.reason + '. ' : '') },
+          ], { confirm: 'Send to admin', note: 'The message links to this player, so the admin can act on it in one click.' });
+          if (!v) return;
+          if (!v.msg.trim() || v.msg.trim() === from.trim()) return this.ui.toast('Say why first', 'bad');
+          await this.call('staff_send', { p_body: v.msg.trim(), p_mod: null, p_about: u, p_suggest: v.suggest }, 'Sent to the admin');
+          return;
+        } else if (act === 'makemod') {
+          const cur = this.current?.profile?.id === u ? this.current.moderator : null;
+          if (!(await this.editModerator(u, b.dataset.name, cur?.scopes || [], cur?.note || ''))) return;
         } else if (act === 'rename') {
           v = await ask(this.ui, 'Rename player', [{ id: 'name', label: 'New username (3–16 letters, numbers or _)', type: 'text', value: b.dataset.name, max: 16 }], { confirm: 'Rename' });
           if (!v) return;
@@ -758,11 +863,157 @@ export class AdminPanel {
     $('#xb-off')?.addEventListener('click', async () => { await this.call('set_setting', { p_key: 'xp_boost', p_value: { multiplier: 1, until: new Date().toISOString() } }, scheduled ? 'XP event cancelled' : 'XP event ended'); this.app.pollStatus(); this.refresh(); });
   }
 
+  // ───────────── moderators (admin only) ─────────────
+  // Add players as moderators and choose what each one may do (SCOPES). The database checks every
+  // moderator's scopes on each call, so this page is the only place their rights come from.
+  async mods() {
+    const list = await this.call('moderators');
+    const ago = (iso) => (iso ? when(iso) : 'never');
+    this.body.innerHTML = `<p class="m-sub" style="margin-top:0">Moderators get the Admin tab with only the pages and buttons their role allows. Buttons for things they can't do (like Ban) become <b>Recommend</b>, which messages you in Mod contact. Game switches, the audit log, renames, stats, items, device bans and this page stay yours alone.</p>
+      <div class="adm-form"><label class="field"><span>Add a moderator</span>
+        <div class="adm-find" style="max-width:none"><input type="search" id="md-find" placeholder="Search for a player…" autocomplete="off"><div class="adm-find-list hidden" id="md-find-list"></div></div></label></div>
+      <h3 class="m-h3">Moderators <span class="m-sub">${list.length}</span></h3>
+      ${list.length ? list.map((m) => `<div class="adm-report adm-mod ${m.banned ? 'dismissed' : 'resolved'}">
+        <div class="ar-head"><b class="ar-reason"><a href="#" data-player="${esc(m.user_id)}">${esc(m.username)}</a></b>${m.banned ? '<span class="tag bad">Banned: no access until the ban ends</span>' : ''}${m.unread ? `<em class="hot">${m.unread} unread</em>` : ''}<span class="spacer"></span><span class="m-sub">added ${new Date(m.added_at).toLocaleDateString()}</span></div>
+        ${m.note ? `<div class="m-sub">${esc(m.note)}</div>` : ''}
+        <div class="adm-scopes">${SCOPES.map(([k, l]) => `<span class="tag ${m.scopes.includes(k) ? 'ok' : 'off'}">${esc(l)}</span>`).join('')}</div>
+        <div class="m-sub">Last action ${ago(m.last_action)} · ${num(m.actions_week)} action${num(m.actions_week) === 1 ? '' : 's'} this week · last online ${ago(m.last_seen)}</div>
+        <div class="row ar-actions">
+          <button class="btn tiny primary" data-edit="${esc(m.user_id)}">Edit role</button>
+          <button class="btn tiny" data-msg="${esc(m.user_id)}">Message</button>
+          <button class="btn tiny ghost" data-hist="${esc(m.user_id)}">Recent actions</button>
+          <button class="btn tiny danger" data-rm="${esc(m.user_id)}" data-name="${esc(m.username)}">Remove</button></div>
+        <div class="adm-hist hidden" data-hist-for="${esc(m.user_id)}"></div>
+      </div>`).join('') : '<p class="m-empty">No moderators yet. Search for a player above to add one.</p>'}`;
+    this.bindPlayerLinks(this.body);
+    this.bindSearch(this.body.querySelector('#md-find'), this.body.querySelector('#md-find-list'), async (r) => {
+      const cur = list.find((m) => m.user_id === r.id);
+      if (await this.editModerator(r.id, r.username, cur?.scopes || [], cur?.note || '')) this.refresh();
+    });
+    this.body.querySelectorAll('[data-edit]').forEach((b) => { b.onclick = async () => {
+      const m = list.find((x) => x.user_id === b.dataset.edit);
+      if (await this.editModerator(m.user_id, m.username, m.scopes, m.note || '')) this.refresh();
+    }; });
+    this.body.querySelectorAll('[data-msg]').forEach((b) => { b.onclick = () => { this.contactMod = b.dataset.msg; this.go('contact'); }; });
+    this.body.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = async () => {
+      const ok = await ask(this.ui, `Remove ${b.dataset.name} as a moderator?`, [], { confirm: 'Remove', danger: true, note: 'They lose the Admin tab within 30 seconds. Your messages with them are kept, and their past actions stay in the audit log.' });
+      if (!ok) return;
+      await this.call('remove_moderator', { p_user: b.dataset.rm }, `${b.dataset.name} is no longer a moderator`);
+      this.refresh();
+    }; });
+    this.body.querySelectorAll('[data-hist]').forEach((b) => { b.onclick = async () => {
+      const box = this.body.querySelector(`[data-hist-for="${b.dataset.hist}"]`);
+      if (!box.classList.toggle('hidden')) {
+        box.innerHTML = '<p class="m-sub">Loading…</p>';
+        const rows = await this.call('audit_log', { p_limit: 25, p_actor: b.dataset.hist }).catch(() => []);
+        box.innerHTML = rows.length ? `<table class="tbl">${rows.map((a) => `<tr><td class="m-sub">${when(a.created_at)}</td><td>${esc(a.action.replace(/_/g, ' '))}</td><td>${a.target_name ? `<a href="#" data-player="${esc(a.target)}">${esc(a.target_name)}</a>` : esc(a.target || '')}</td><td class="m-sub">${esc(a.details ? JSON.stringify(a.details) : '')}</td></tr>`).join('')}</table>` : '<p class="m-sub">Nothing yet.</p>';
+        this.bindPlayerLinks(box);
+      }
+    }; });
+  }
+
+  // The role editor: one box per scope, with presets to start from. Resolves true once saved.
+  editModerator(id, name, scopes = [], note = '') {
+    const had = scopes.length > 0;
+    return new Promise((resolve) => {
+      const m = this.ui.modal(`<h2 class="m-h2">${had ? 'Edit moderator' : 'Make moderator'} · ${esc(name)}</h2>
+        <p class="m-sub">Pick what ${esc(name)} can do. Changes reach them within 30 seconds.</p>
+        <div class="row adm-chips" style="margin:4px 0 8px"><span class="m-sub">Start from:</span>${PRESETS.map(([l], i) => `<button type="button" class="btn tiny ghost" data-preset="${i}">${esc(l)}</button>`).join('')}<button type="button" class="btn tiny ghost" data-preset="none">Clear</button></div>
+        <div class="adm-scope-list">${SCOPES.map(([k, l, d]) => `<label class="m-check"><input type="checkbox" data-scope="${k}" ${scopes.includes(k) ? 'checked' : ''}><span><b>${esc(l)}</b><small class="m-sub">${esc(d)}</small></span></label>`).join('')}</div>
+        <label class="field"><span>Note (optional, only you see it)</span><input type="text" data-note maxlength="200" value="${esc(note)}" placeholder="e.g. Handles cheat reports on weekends"></label>
+        <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn small ghost" data-x>Cancel</button><button class="btn small primary" data-ok>${had ? 'Save' : 'Make moderator'}</button></div>`);
+      const boxes = [...m.querySelectorAll('[data-scope]')];
+      let settled = false;
+      const done = (v) => { if (!settled) { settled = true; m.remove(); resolve(v); } };
+      m.addEventListener('click', (e) => { if (e.target === m) done(false); });
+      m.querySelector('[data-x]').onclick = () => done(false);
+      m.querySelectorAll('[data-preset]').forEach((b) => { b.onclick = () => {
+        const pick = b.dataset.preset === 'none' ? [] : PRESETS[+b.dataset.preset][1];
+        boxes.forEach((x) => { x.checked = pick.includes(x.dataset.scope); });
+      }; });
+      m.querySelector('[data-ok]').onclick = async () => {
+        const picked = boxes.filter((x) => x.checked).map((x) => x.dataset.scope);
+        if (!picked.length) { this.ui.toast(had ? 'Pick at least one thing, or use Remove on the Moderators page' : 'Pick at least one thing they can do', 'bad'); return; }
+        try {
+          await this.call('set_moderator', { p_user: id, p_scopes: picked, p_note: m.querySelector('[data-note]').value }, had ? 'Moderator role saved' : `${name} is now a moderator`);
+          done(true);
+        } catch { /* toast already shown */ }
+      };
+    });
+  }
+
+  // ───────────── mod contact ─────────────
+  // Direct messages between the admin and each moderator. The admin picks a conversation on the left;
+  // a moderator has just the one, with the admin. A message can link a player and a recommendation
+  // (Ban, Mute, …), which the admin can carry out from the message itself.
+  async contact(quiet = false) {
+    const owner = this.owner;
+    let threads = [];
+    if (owner) {
+      threads = await this.call('staff_threads');
+      if (!threads.some((t) => t.mod_id === this.contactMod)) this.contactMod = threads[0]?.mod_id || null;
+    }
+    const modId = owner ? this.contactMod : null;
+    const msgs = owner && !modId ? [] : await this.call('staff_messages', { p_mod: modId });
+    if (this.section !== 'contact' || !this.body?.isConnected) return;
+    // Opening a conversation marks it read; keep the badge in step until the next status check.
+    if (this.app.staff) {
+      this.app.staff.unread = owner ? threads.reduce((n, t) => n + (t.mod_id === modId ? 0 : num(t.unread)), 0) : 0;
+      this.counts.contact = this.app.staff.unread;
+      this.paintNav();
+    }
+    // A quiet refresh (a new message came in) keeps whatever is being typed.
+    const keep = quiet ? this.body.querySelector('#mc-text')?.value : null;
+    const thread = threads.find((t) => t.mod_id === modId);
+    const other = owner ? thread?.username || 'Moderator' : 'Admin';
+    const bubble = (x) => {
+      const mine = x.from_owner === owner;
+      const about = x.about ? `<div class="mc-about">${x.suggest ? `<b>Recommends: ${esc(SUGGEST[x.suggest] || x.suggest)}</b> · ` : ''}<a href="#" data-player="${esc(x.about)}">${esc(x.about_name || 'player')}</a>
+        ${owner && !mine ? `<span class="row" style="gap:4px;display:inline-flex;margin-left:6px">${x.suggest && x.suggest !== 'other' ? `<button class="btn tiny ${x.suggest === 'ban' ? 'danger' : 'primary'}" data-act="${esc(x.suggest)}" data-u="${esc(x.about)}">${esc(SUGGEST[x.suggest])}</button>` : ''}<button class="btn tiny" data-player="${esc(x.about)}">Open player</button></span>` : ''}</div>` : '';
+      return `<div class="mc-msg ${mine ? 'mine' : ''}"><div class="mc-meta">${mine ? 'You' : esc(owner ? x.sender_name || other : 'Admin')} · ${when(x.created_at)}${mine && x.read_at ? ' · seen' : ''}</div>${about}<div class="mc-body">${esc(x.body)}</div></div>`;
+    };
+    const convo = owner && !modId ? `<p class="m-empty">${threads.length ? 'Pick a conversation.' : 'No moderators yet. Add one on the Moderators page, then message them here.'}</p>`
+      : `<div class="mc-head"><b>${esc(other)}</b>${owner && thread && !thread.active ? '<span class="tag">No longer a moderator</span>' : ''}${owner && thread ? `<span class="spacer"></span><a href="#" data-player="${esc(modId)}">Player page</a>` : ''}</div>
+        <div class="mc-msgs" id="mc-msgs">${msgs.length ? msgs.map(bubble).join('') : `<p class="m-empty">${owner ? `No messages with ${esc(other)} yet.` : 'No messages yet. Use this to ask the admin something or recommend an action, like a ban, that your role doesn’t cover.'}</p>`}</div>
+        ${owner && thread && !thread.active ? '' : `<div class="mc-compose">
+          <textarea id="mc-text" rows="3" maxlength="2000" placeholder="Message ${esc(other)}…"></textarea>
+          <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <label class="field" style="flex:1;min-width:180px"><span>About a player (optional)</span><div class="adm-find" style="max-width:none"><input type="search" id="mc-about" placeholder="Search…" autocomplete="off" value="${esc(this.contactAbout?.username || '')}"><div class="adm-find-list hidden" id="mc-about-list"></div></div></label>
+            ${owner ? '' : `<label class="field"><span>Recommend</span><select id="mc-suggest"><option value="">Nothing</option>${Object.entries(SUGGEST).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></label>`}
+            <button class="btn small primary" id="mc-send">Send</button></div>
+          <small class="m-sub">Ctrl+Enter sends.</small></div>`}`;
+    this.body.innerHTML = owner ? `<div class="mc-wrap"><div class="mc-threads">${threads.map((t) => `<button class="adm-row ${t.mod_id === modId ? 'on' : ''}" data-thread="${esc(t.mod_id)}"><span class="mc-t"><b>${esc(t.username)}</b>${t.active ? '' : ' <span class="m-sub">(former)</span>'}<small class="m-sub">${t.last_body ? `${t.last_from_owner ? 'You: ' : ''}${esc(t.last_body.slice(0, 60))}` : 'No messages yet'}</small></span>${num(t.unread) && t.mod_id !== modId ? `<i class="hot">${num(t.unread)}</i>` : ''}</button>`).join('')}</div><div class="mc-convo">${convo}</div></div>` : `<div class="mc-convo">${convo}</div>`;
+    const box = this.body.querySelector('#mc-msgs');
+    if (box) box.scrollTop = box.scrollHeight;
+    this.bindActions(this.body, () => this.contact(true));
+    this.bindPlayerLinks(this.body);
+    this.body.querySelectorAll('[data-thread]').forEach((b) => { b.onclick = () => { this.contactMod = b.dataset.thread; this.contactAbout = null; this.contact(); }; });
+    const text = this.body.querySelector('#mc-text');
+    if (!text) return;
+    if (keep) text.value = keep;
+    const aboutIn = this.body.querySelector('#mc-about');
+    this.bindSearch(aboutIn, this.body.querySelector('#mc-about-list'), (r) => { this.contactAbout = r; aboutIn.value = r.username; });
+    aboutIn.addEventListener('input', () => { if (!aboutIn.value.trim()) this.contactAbout = null; });
+    const send = async () => {
+      const body = text.value.trim(), suggest = this.body.querySelector('#mc-suggest')?.value || null;
+      if (!body) return this.ui.toast('Write a message first', 'bad');
+      const about = this.contactAbout && aboutIn.value.trim() === this.contactAbout.username ? this.contactAbout.id : null;
+      if (suggest && !about) return this.ui.toast('Pick the player your recommendation is about', 'bad');
+      try { await this.call('staff_send', { p_body: body, p_mod: modId, p_about: about, p_suggest: suggest }); } catch { return; }
+      this.contactAbout = null;
+      text.value = '';
+      this.contact();
+    };
+    this.body.querySelector('#mc-send').onclick = send;
+    text.onkeydown = (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } };
+    if (!quiet) text.focus();
+  }
+
   // ───────────── audit log ─────────────
   async audit() {
     const list = await this.call('audit_log', { p_limit: 200 });
-    this.body.innerHTML = list.length ? `<table class="tbl"><tr><th>When</th><th>Action</th><th>Target</th><th>Details</th></tr>
-      ${list.map((a) => `<tr><td class="m-sub">${when(a.created_at)}</td><td>${esc(a.action.replace(/_/g, ' '))}</td><td>${a.target_name ? `<a href="#" data-player="${esc(a.target)}">${esc(a.target_name)}</a>` : esc(a.target || '')}</td><td class="m-sub">${esc(a.details ? JSON.stringify(a.details) : '')}</td></tr>`).join('')}</table>`
+    this.body.innerHTML = list.length ? `<table class="tbl"><tr><th>When</th><th>By</th><th>Action</th><th>Target</th><th>Details</th></tr>
+      ${list.map((a) => `<tr><td class="m-sub">${when(a.created_at)}</td><td>${a.by_admin ? '<span class="m-sub">You</span>' : `<a href="#" data-player="${esc(a.admin_id)}">${esc(a.actor_name || '?')}</a>`}</td><td>${esc(a.action.replace(/_/g, ' '))}</td><td>${a.target_name ? `<a href="#" data-player="${esc(a.target)}">${esc(a.target_name)}</a>` : esc(a.target || '')}</td><td class="m-sub">${esc(a.details ? JSON.stringify(a.details) : '')}</td></tr>`).join('')}</table>`
       : '<p class="m-empty">No admin actions yet.</p>';
     this.bindPlayerLinks(this.body);
   }
