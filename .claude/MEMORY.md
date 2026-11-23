@@ -1,11 +1,8 @@
 - [Database is read-only](database-read-only.md) — no DB writes without asking and getting approval first
 - [Supabase connection](supabase-connection.md) — WebStorm uses the us-west-1 IPv4 session pooler
-- [Expansion plan Nov 2026](expansion-plan-2026-11.md) — 5 features in order + map editor decisions (5 uploads, featured in all queues, likes+admin)
 - [No design-spec docs](no-design-spec-docs.md) — skip spec/plan files; build directly or use plan mode
-- [Zombies, objectives, mastery](zombies-objectives-mastery-2026-11.md) — Nov 13 expansion, committed as 3.0.0, online untested
 - [Local test server](local-test-server.md) — test via WebStorm at localhost:63342, not python http.server
 - [Versioning](versioning.md) — every change bumps GAME_VERSION (MAJOR.Minor.patch) + CHANGELOG.md entry
-- [Anti-cheat, bans, friendly fire](anticheat-and-bans.md) — 4.0.0 anti-cheat, 4.2.0 FF penalties; untested online
-- [Attachments, clans, party modes plan](attachments-clans-party-plan.md) — 4.3.0 a266f8d; clan UI untested
 - [GitHub branch rule](github-branch-rule.md) — main needs PRs for others; our direct pushes bypass it, keep pushing to main
 - [Online testing is the user's](online-testing-by-user.md) — user tests new features online themselves; don't push an online test pass
+- [The game recently got renamed](rename.md) — the game recently got renamed from John-Paul Simulator to Battle World
