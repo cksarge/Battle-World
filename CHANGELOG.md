@@ -1,6 +1,13 @@
 # Changelog
 
-#### 4.11.2 · 2026-11-23
+### 4.12.0 · 2026-11-23
+
+- New **Moderator** calling card, like the Contributor and Developer cards. It's given to moderators, and to players who send in 3 player reports that a moderator acts on
+  - It's handed out automatically, including to everyone who already qualifies, and the admin can also give or remove it from a player's page
+- Fewer false "kills through walls" cheat flags. Kills that a bullet could really make are no longer flagged: wallbangs through wooden barricades and crates, shots through a cracked wall that's been shot or broken open, and shots over stairs, ramps, open doors and other spots the old check got wrong
+  - Kills by bots are never flagged
+
+#### 4.11.2 · 2026-11-23 · [2572dcf](https://github.com/cksarge/Battle-World/commit/2572dcf)
 
 - Matches that end 0-0 are now voided: they don't count as a win or a loss, ranked rating doesn't change, and they give no drop, challenge or achievement progress. This mostly happens when someone leaves before anyone scores
 - Fixed planting the charge not counting toward the **Charge Set** and **Demolitionist** achievements (and planting challenges) in bot matches and in online matches you host. The "Charge planted" banner and sound now show there too

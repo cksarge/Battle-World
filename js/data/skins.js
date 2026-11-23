@@ -8,6 +8,7 @@ export const RARITIES = {
   // Never dropped: an admin gives these to people who helped make the game (see `awarded` below).
   contributor: { name: 'Contributor', color: '#7cffb2', weight: 0 },
   developer: { name: 'Developer', color: '#00e5ff', weight: 0 },
+  moderator: { name: 'Moderator', color: '#c49bff', weight: 0 },
 };
 
 // pattern: how the finish is drawn on the gun body. palette: colours used by the pattern.
@@ -118,6 +119,9 @@ export const CALLING_CARDS = {
   // Awarded cards: an admin gives them from the player's page in the admin panel (admins have both).
   contributor: { name: 'Contributor', rarity: 'contributor', colors: ['#06120c', '#7cffb2', '#ffd23f'], motif: 'bug', awarded: 'Sent in 5 useful bug reports, feedback or ideas' },
   developer: { name: 'Developer', rarity: 'developer', colors: ['#04070c', '#00e5ff', '#7cffb2'], motif: 'code', awarded: 'Helped write the game’s code: a GitHub collaborator, or had a pull request merged' },
+  // Also given automatically (supabase/schema.sql, award_moderator_card) to new moderators and to anyone
+  // with 3 reports that a moderator acted on.
+  moderator: { name: 'Moderator', rarity: 'moderator', colors: ['#0c0714', '#c49bff', '#ffd23f'], motif: 'shield', awarded: 'Became a Battle World moderator, or sent in 3 player reports that were acted on' },
 };
 
 // Effects that play where your victim falls. Everyone in the match sees them.

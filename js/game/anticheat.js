@@ -15,7 +15,7 @@
 // determined cheaters; and extensions can trip some of them, so the admin judges each one.
 import * as THREE from 'three';
 import { WEAPONS, ECON } from '../data/weapons.js';
-import { CELL } from '../engine/world.js';
+import { CELL, WOOD_HP } from '../engine/world.js';
 import { traceBullet } from './combat.js';
 import { hookedNatives, injectedScripts, fakeInput, autoclicker, resetClicks } from './integrity.js';
 
@@ -78,6 +78,36 @@ export function wallBetween(world, a, b) {
     const pr = world.prop(cx, cz);
     if (pr && (pr.broken || pr.ch === 'W' || pr.ch === 'k')) continue;
     return true;
+  }
+  return false;
+}
+
+// Whether a bullet could NOT get from a to b. Uses the same raycast as real shots (so ramps and stairs,
+// door and gate panels, open doors, lifts, bridges and glass count exactly as they do for bullets), and
+// lets it carry on through anything a bullet can go through or break open: wooden barricades and
+// crates (wallbangs), anything already broken, and cracked walls or wood that have taken damage, since
+// the shot that finished breaking them may not have reached this game yet.
+export function bulletBlocked(world, a, b) {
+  const dir = b.clone().sub(a), len = dir.length();
+  if (len < 0.01) return false;
+  dir.divideScalar(len);
+  const o = a.clone();
+  let left = len;
+  for (let i = 0; i < 8; i++) {
+    const hit = world.raycast(o, dir, left);
+    if (!hit || hit.dist >= left - 0.05) return false;
+    // Only something standing in the way counts: a ray clipping the floor or a ledge it rises over isn't a wall.
+    if (hit.normal.y > 0.5) return false;
+    const [cx, cz] = world.cellBehind(hit.point, hit.normal), pr = world.prop(cx, cz);
+    const passable = pr && (pr.broken || pr.ch === 'W' || pr.ch === 'k' || (pr.ch === 'Q' && (pr.stage > 0 || pr.hp < WOOD_HP.Q)));
+    if (!passable) return true;
+    // Step out the far side of that cell and keep going.
+    let step = 0;
+    const p = hit.point.clone();
+    while (step < 40 && Math.floor(p.x / CELL) === cx && Math.floor(p.z / CELL) === cz) { p.addScaledVector(dir, 0.1); step++; }
+    left -= hit.dist + step * 0.1;
+    if (left <= 0.05) return false;
+    o.copy(p);
   }
   return false;
 }
@@ -241,17 +271,23 @@ export class AntiCheat {
     if (f.strikes >= 2) this.report(p.id, 'fire_rate', { weapon: w.id, shots: Math.round(shots), allowed: Math.round(allowed) });
   }
 
-  // Every game: a kill. Two gun kills through solid walls in one match get reported.
+  // Every game: a kill. Two gun kills in one match that no bullet could have made (through solid walls,
+  // not wallbangs through wood or shots through a wall being broken open) get reported. Bots are left
+  // out: they don't cheat, and the host's game runs them. The check waits a moment so a wall broken by
+  // the same burst of fire has reached this game; the positions are the ones at the kill.
   onKill(killer, victim, weapon) {
     const w = WEAPONS[weapon];
-    if (!this.on || !killer || !victim || killer === victim || !w || w.type === 'knife' || w.projectile) return;
+    if (!this.on || !killer || !victim || killer === victim || killer.isBot || !w || w.type === 'knife' || w.projectile) return;
     if (killer.owner === this.g.localId) return;
     const eye = killer.pos.clone().setY(killer.pos.y + 1.5);
-    const blocked = [1.6, 1.1, 0.5].every((h) => wallBetween(this.g.world, eye, victim.pos.clone().setY(victim.pos.y + h)));
-    if (!blocked) return;
-    const n = (this.walls.get(killer.id) || 0) + 1;
-    this.walls.set(killer.id, n);
-    if (n >= 2) this.report(killer.id, 'wall_shot', { weapon, kills: n });
+    const targets = HEIGHTS.map((h) => victim.pos.clone().setY(victim.pos.y + h));
+    setTimeout(() => {
+      if (!this.g.running) return;
+      if (!targets.every((t) => bulletBlocked(this.g.world, eye, t))) return;
+      const n = (this.walls.get(killer.id) || 0) + 1;
+      this.walls.set(killer.id, n);
+      if (n >= 2) this.report(killer.id, 'wall_shot', { weapon, kills: n });
+    }, 1500);
   }
 
   // Every game: a purchase the host approved. Round modes only allow buying early in the round, and

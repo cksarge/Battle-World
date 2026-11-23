@@ -140,6 +140,25 @@ export function cardImage(id, w = 480, h = 120) {
       g.shadowBlur = 0; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
       break;
     }
+    case 'shield': {
+      // Moderator: a column of report rows with flags on the left, a glowing shield with a tick on the right.
+      for (let i = 0, y = h * 0.14; i < 5; i++, y += h * 0.16) {
+        g.globalAlpha = 0.75; g.fillStyle = i < 3 ? fg2 : fg;
+        g.fillRect(w * 0.05, y, 2, h * 0.1);
+        g.beginPath(); g.moveTo(w * 0.05 + 2, y); g.lineTo(w * 0.05 + h * 0.09, y + h * 0.03); g.lineTo(w * 0.05 + 2, y + h * 0.06); g.fill();
+        g.globalAlpha = 0.25 + rnd() * 0.3; g.fillStyle = fg; g.fillRect(w * 0.05 + h * 0.14, y + h * 0.02, 50 + rnd() * 110, h * 0.045);
+      }
+      g.globalAlpha = 1;
+      const sx = w * 0.8, sy = h * 0.5, s = h * 0.36;
+      const shield = () => { g.beginPath(); g.moveTo(sx, sy - s); g.lineTo(sx + s * 0.8, sy - s * 0.7); g.lineTo(sx + s * 0.7, sy + s * 0.25); g.quadraticCurveTo(sx + s * 0.4, sy + s * 0.8, sx, sy + s); g.quadraticCurveTo(sx - s * 0.4, sy + s * 0.8, sx - s * 0.7, sy + s * 0.25); g.lineTo(sx - s * 0.8, sy - s * 0.7); g.closePath(); };
+      g.shadowColor = fg; g.shadowBlur = h * 0.18;
+      g.fillStyle = fg; shield(); g.fill();
+      g.shadowBlur = 0; g.strokeStyle = fg2; g.lineWidth = Math.max(2, h * 0.025); shield(); g.stroke();
+      g.strokeStyle = bg; g.lineWidth = Math.max(3, h * 0.07); g.lineCap = 'round';
+      g.beginPath(); g.moveTo(sx - s * 0.35, sy); g.lineTo(sx - s * 0.05, sy + s * 0.32); g.lineTo(sx + s * 0.42, sy - s * 0.3); g.stroke();
+      g.lineCap = 'butt';
+      break;
+    }
     default: break;
   }
   g.globalAlpha = 1;

@@ -1123,14 +1123,31 @@ begin
 end;
 $$;
 
+-- The Moderator calling card (4.11.3): given once, automatically, to new moderators and to players with
+-- 3 reports a moderator acted on. Skipped if they have it already, or it was ever given or taken away by
+-- hand (so removing it from someone sticks). Their game adds it to their inventory like any admin gift.
+create or replace function public.award_moderator_card(p_user uuid)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_user is null or exists (select 1 from item_grants where user_id = p_user and kind = 'card' and item = 'moderator')
+    or coalesce((select (inventory -> 'cards') ? 'moderator' from profiles where id = p_user), false) then return; end if;
+  insert into item_grants (user_id, kind, item) values (p_user, 'card', 'moderator');
+end;
+$$;
+revoke all on function public.award_moderator_card(uuid) from public, anon, authenticated;
+
 create or replace function public.admin_resolve_report(p_id bigint, p_status text, p_note text)
 returns void language plpgsql security definer set search_path = public as $$
+declare who uuid;
 begin
   perform staff_guard(array['reports']);
   if p_status not in ('open', 'actioned', 'dismissed') then raise exception 'invalid status'; end if;
   update reports set status = p_status, resolution = left(p_note, 500), resolved_by = auth.uid(),
-    resolved_at = case when p_status = 'open' then null else now() end where id = p_id;
+    resolved_at = case when p_status = 'open' then null else now() end where id = p_id returning reporter into who;
   perform admin_log('resolve_report', p_id::text, json_build_object('status', p_status, 'note', p_note)::jsonb);
+  if p_status = 'actioned' and (select count(*) from reports where reporter = who and status = 'actioned') >= 3 then
+    perform award_moderator_card(who);
+  end if;
 end;
 $$;
 
@@ -1740,10 +1757,21 @@ begin
   if not was then
     insert into warnings (user_id, message, kind) values (p_user,
       'You''re now a Battle World moderator. Open the Admin tab in the menu to get started, and use Mod contact there to message the admin.', 'notice');
+    perform award_moderator_card(p_user);
   end if;
   perform admin_log(case when was then 'update_moderator' else 'add_moderator' end, p_user::text, json_build_object('scopes', clean, 'note', p_note)::jsonb);
 end;
 $$;
+
+-- The Moderator card for everyone who already qualifies: current moderators, and players with 3 or more
+-- reports that were acted on. Safe to re-run: award_moderator_card never gives it twice.
+do $$
+declare u uuid;
+begin
+  for u in select user_id from moderators union select reporter from reports where status = 'actioned' group by reporter having count(*) >= 3 loop
+    perform award_moderator_card(u);
+  end loop;
+end $$;
 
 -- Their messages are kept, so the conversation is still there if they're added back.
 create or replace function public.admin_remove_moderator(p_user uuid)
