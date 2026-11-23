@@ -1,6 +1,10 @@
 # Changelog
 
-### 4.11.0 · 2026-11-23
+#### 4.11.1 · 2026-11-23
+
+- Fixed some text boxes showing white text on a white background: search boxes (like the admin panel's player search), number boxes and some message boxes now use the game's dark style, with readable placeholder text
+
+### 4.11.0 · 2026-11-23 · [265f2ac](https://github.com/cksarge/Battle-World/commit/265f2ac)
 
 - Moderators! The admin can now make players moderators and choose exactly what each one can do: reviewing reports, cheat flags, feedback or ban appeals, looking up players, warning, muting, kicking, banning, announcements, polls and community maps
   - Moderators get the Admin tab with only the pages and buttons their role allows

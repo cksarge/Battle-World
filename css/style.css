@@ -20,7 +20,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; }
-button, input, select { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
 .hidden { display: none !important; }
 a { color: var(--accent); }
 a.btn { color: inherit; text-decoration: none; }
@@ -104,10 +104,10 @@ h3 { font-size: 16px; color: var(--muted); }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > span { font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
-input[type=text], input[type=email], input[type=password], input[type=datetime-local], select {
+input[type=text], input[type=email], input[type=password], input[type=search], input[type=number], input[type=datetime-local], select, textarea {
   background: rgba(0,0,0,.35); border: 1px solid var(--line2); border-radius: 4px; padding: 10px 12px; outline: none;
 }
-input:focus, select:focus { border-color: var(--accent); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 select option { background: var(--panel-solid); }
 input[type=range] { accent-color: var(--accent); width: 100%; }
 input[type=color] { width: 36px; height: 30px; border: 1px solid var(--line2); background: none; padding: 0; border-radius: 4px; cursor: pointer; }

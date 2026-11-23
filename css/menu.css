@@ -116,11 +116,12 @@
 .m-shell .btn.primary, .modal .btn.primary, .toast .btn.primary { background: var(--m-amber); border-color: var(--m-amber); color: var(--m-ink); }
 .m-shell .btn.ghost, .modal .btn.ghost { background: transparent; }
 .m-shell .btn.danger, .modal .btn.danger { border-color: rgba(229, 72, 77, 0.6); color: #ffb3b5; }
-.m-shell input[type=text], .m-shell input[type=email], .m-shell input[type=password], .m-shell input[type=datetime-local], .m-shell select, .modal input[type=text], .modal input[type=number], .modal textarea, .ed input[type=text], .ed input[type=number], .ed select, .ed textarea {
+.m-shell input[type=text], .m-shell input[type=email], .m-shell input[type=password], .m-shell input[type=search], .m-shell input[type=number], .m-shell input[type=datetime-local], .m-shell select, .m-shell textarea, .modal input[type=text], .modal input[type=search], .modal input[type=number], .modal textarea, .modal select, .ed input[type=text], .ed input[type=number], .ed select, .ed textarea {
   background: rgba(8, 10, 7, 0.6); border: 1px solid var(--m-faint); border-radius: 2px; padding: 9px 11px; color: var(--m-bone); font-family: var(--m-body); font-size: 14px;
 }
-.m-shell input[type=datetime-local] { color-scheme: dark; }
-.m-shell input:focus-visible, .m-shell select:focus-visible { outline: 2px solid var(--m-amber); outline-offset: 0; border-color: transparent; }
+.m-shell input, .m-shell textarea, .m-shell select, .modal input, .modal textarea, .modal select { color-scheme: dark; }
+.m-shell input::placeholder, .m-shell textarea::placeholder, .modal input::placeholder, .modal textarea::placeholder { color: var(--m-dim); opacity: 1; }
+.m-shell input:focus-visible, .m-shell select:focus-visible, .m-shell textarea:focus-visible { outline: 2px solid var(--m-amber); outline-offset: 0; border-color: transparent; }
 .m-shell .field > span { font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--m-dim); }
 .m-shell .seg { border-color: var(--m-faint); border-radius: 2px; }
 .m-shell .seg button { font-family: var(--m-body); text-transform: none; letter-spacing: 0.2px; font-size: 13px; color: var(--m-dim); }
