@@ -2,6 +2,10 @@ import { Room, buildMatch, newId } from './realtime.js';
 import { MODES, POOL_KINDS } from '../data/modes.js';
 
 const FILL_AFTER = 20; // seconds before a non-ranked queue starts with bots filling gaps
+// A formed match only starts once every player in it has confirmed (see Matchmaker.form). How long the
+// host waits for those confirmations, and how long a player holds an offer before giving up on it.
+const CONFIRM_MS = 4000;
+const HOLD_MS = 7000;
 
 // Keeps banned accounts out of queues and lobbies. Flags come from the database (moderation_flags).
 // Lookups are cached for a minute so the list filters smoothly, and every match is re-checked with
@@ -37,7 +41,12 @@ function needFor(mode) {
   return POOL_KINDS.has(m.kind) ? m.maxPlayers : m.teamSize * 2;
 }
 
-// Presence-based queue: the longest-waiting player forms the match and hosts it.
+// Presence-based queue: the longest-waiting player forms the match and hosts it. So that nobody ends up
+// in two matches at once (two players can briefly both think they're first, or see a different queue),
+// forming is a handshake: the host offers the match, every player in it confirms or turns it down, and
+// it only starts ('go') once all have confirmed. A player holding an offer turns down any other and is
+// marked held in presence so other hosts leave them out; a turned-down or unanswered offer is called
+// off ('void') and everyone in it carries on searching.
 export class Matchmaker {
   constructor(app, mode, { onUpdate, onMatch }) {
     this.app = app; this.mode = mode;
@@ -53,7 +62,10 @@ export class Matchmaker {
     const group = this.app.party?.group() || [{ id: me.id, name: me.name, elo: me.elo, char: me.char }];
     this.room = new Room(this.app.api.sb, 'jps-q-' + this.mode, me, { name: me.name, elo: me.elo, char: me.char, group });
     this.room.onSync(() => this.evaluate());
-    this.room.on('match', (payload) => this.accept(payload));
+    this.room.on('match', (payload, from) => this.offered(payload, from));
+    this.room.on('ack', (d, from) => this.acked(d, from));
+    this.room.on('go', (d, from) => { if (this.offer?.matchId === d?.matchId && this.offer.host === from) this.begin(this.offer.payload); });
+    this.room.on('void', (d, from) => { if (this.offer?.matchId === d?.matchId && this.offer.host === from) this.release(); });
     await this.room.connect();
     this.timer = setInterval(() => this.evaluate(), 1000);
     this.evaluate();
@@ -75,7 +87,7 @@ export class Matchmaker {
       if (total + g.length > need) continue;
       let team = -1;
       if (room) { team = room[0] >= room[1] ? 0 : 1; if (room[team] < g.length) team = 1 - team; if (room[team] < g.length) continue; room[team] -= g.length; }
-      out.push({ g, team });
+      out.push({ g, team, id: e.id });
       total += g.length;
     }
     return { out, total };
@@ -91,10 +103,13 @@ export class Matchmaker {
     // Co-op zombies can start with whoever is waiting (even alone) once the fill timer runs out.
     const canFill = !m.ranked && humans >= (m.coop ? 1 : 2) && waited >= FILL_AFTER;
     this.onUpdate?.({ count: humans, need, waited, leader, canForce: leader && !m.ranked && humans >= (m.coop ? 1 : 2) });
-    if (!leader) return;
-    const { total } = this.pick(list);
+    if (!leader || this.pending || this.offer) return;
+    const { total } = this.pick(this.free(list));
     if (total >= need || canFill) this.form(list);
   }
+
+  // Queue entries not tied up in someone else's match offer.
+  free(list) { return list.filter((e) => !e.held || e.id === this.app.me().id); }
 
   forceStart() {
     const list = this.queue();
@@ -102,26 +117,79 @@ export class Matchmaker {
   }
 
   async form(list) {
-    if (this.forming) return;
+    if (this.forming || this.pending || this.offer) return;
     this.forming = true;
     // Re-check everyone with fresh flags before the match exists; banned entries drop out.
     const banned = await this.bans.verify(list.flatMap(groupIds));
     this.forming = false;
-    if (this.done || !this.room) return;
+    if (this.done || !this.room || this.pending || this.offer) return;
     if (banned.size) { this.evaluate(); return; }
     const me = this.app.me();
+    const picked = this.pick(this.free(this.queue())).out;
+    if (!picked.some(({ g }) => g.some((x) => x.id === me.id))) return;
     const humans = [];
-    for (const { g, team } of this.pick(list).out) for (const x of g) humans.push({ id: x.id, name: x.name, elo: x.elo, char: x.char, ...(team >= 0 ? { team } : {}) });
-    const payload = buildMatch({ mode: this.mode, humans, hostId: me.id, fillBots: true, botLevel: 'normal' });
+    for (const { g, team } of picked) for (const x of g) humans.push({ id: x.id, name: x.name, elo: x.elo, char: x.char, ...(team >= 0 ? { team } : {}) });
+    const payload = { ...buildMatch({ mode: this.mode, humans, hostId: me.id, fillBots: true, botLevel: 'normal' }), confirm: true };
+    // Everyone else in the match must confirm it (a party confirms through its leader, the queue entry).
+    const waiting = new Set(picked.map((x) => x.id).filter((id) => id !== me.id));
+    if (!waiting.size) { this.begin(payload); return; }
+    this.pending = { payload, waiting, timer: setTimeout(() => this.callOff(), CONFIRM_MS) };
+    this.room.track({ held: payload.matchId });
     this.room.send('match', payload);
-    this.accept(payload);
   }
 
-  async accept(payload) {
-    if (this.done) return;
-    if (!payload.players.some((p) => p.id === this.app.me().id)) return;
-    // A match formed by someone else: refuse it if it includes a banned account.
-    if ((await this.bans.verify(humanIds(payload))).size) return;
+  // Host: a player confirmed or turned down the match on offer.
+  acked(d, from) {
+    const p = this.pending;
+    if (!p || d?.matchId !== p.payload.matchId || !p.waiting.has(from)) return;
+    if (!d.ok) { this.callOff(); return; }
+    p.waiting.delete(from);
+    if (p.waiting.size) return;
+    clearTimeout(p.timer);
+    this.room.send('go', { matchId: p.payload.matchId });
+    this.begin(p.payload);
+  }
+
+  // Host: someone turned it down or didn't answer in time; everyone goes back to searching.
+  callOff() {
+    const p = this.pending;
+    if (!p) return;
+    clearTimeout(p.timer);
+    this.pending = null;
+    this.room?.send('void', { matchId: p.payload.matchId });
+    this.room?.track({ held: null });
+  }
+
+  // A match someone else formed with this player in it.
+  async offered(payload, from) {
+    if (this.done || !payload?.players?.some((p) => p.id === this.app.me().id)) return;
+    // From a game that doesn't ask for confirmation (an older version): take it as before.
+    if (!payload.confirm) {
+      if ((await this.bans.verify(humanIds(payload))).size || this.done || this.pending || this.offer) return;
+      this.begin(payload);
+      return;
+    }
+    const answer = (ok) => this.room?.send('ack', { matchId: payload.matchId, ok });
+    // Already forming a match or holding another offer: say no, so the other one can't start without us.
+    if (this.pending || this.offer || from !== payload.hostId) { answer(false); return; }
+    this.offer = { matchId: payload.matchId, host: from, payload, timer: setTimeout(() => this.release(), HOLD_MS) };
+    this.room.track({ held: payload.matchId });
+    // Refuse it if it includes a banned account.
+    const banned = (await this.bans.verify(humanIds(payload))).size > 0;
+    if (this.offer?.matchId !== payload.matchId) return;
+    if (banned) { this.release(); answer(false); return; }
+    answer(true);
+  }
+
+  // Let go of an offer that was called off (or whose host went quiet) and keep searching.
+  release() {
+    if (!this.offer) return;
+    clearTimeout(this.offer.timer);
+    this.offer = null;
+    this.room?.track({ held: null });
+  }
+
+  begin(payload) {
     if (this.done) return;
     this.done = true;
     this.cancel();
@@ -132,6 +200,13 @@ export class Matchmaker {
 
   cancel() {
     clearInterval(this.timer);
+    // Leaving mid-handshake: call off a match we were forming, and turn down one we were holding.
+    if (!this.done) {
+      if (this.pending) this.callOff();
+      if (this.offer) { this.room?.send('ack', { matchId: this.offer.matchId, ok: false }); this.release(); }
+    }
+    clearTimeout(this.pending?.timer); clearTimeout(this.offer?.timer);
+    this.pending = this.offer = null;
     this.room?.leave();
     this.room = null;
   }

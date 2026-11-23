@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.13.2 · 2026-11-23
+#### 4.13.3 · 2026-11-23
+
+- Fixed matchmaking sometimes putting a player into two matches at once (or starting a match without someone in it) when more than two people were searching at the same time. A match now only starts once every player in it has confirmed, and anyone already being matched is left out of other matches until theirs starts or falls through
+
+#### 4.13.2 · 2026-11-23 · [4094eee](https://github.com/cksarge/Battle-World/commit/4094eee)
 
 - The **Thumper Launcher** can no longer be bought in Ranked 1v1. It's still in every other mode
   - A saved loadout with the Thumper in it buys everything else on it in ranked

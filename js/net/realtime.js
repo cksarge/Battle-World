@@ -47,7 +47,9 @@ export class Room {
       ch.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
           clearTimeout(timer);
-          try { await ch.track({ ...this.presence, id: this.me.id, t: Date.now() }); } catch { /* presence optional */ }
+          // t (when we joined) orders the queue, so later presence updates (track) keep the same one.
+          this.presence.t ||= Date.now();
+          try { await ch.track({ ...this.presence, id: this.me.id }); } catch { /* presence optional */ }
           resolve(this);
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           clearTimeout(timer);
