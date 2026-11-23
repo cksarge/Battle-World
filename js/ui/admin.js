@@ -309,7 +309,7 @@ export class AdminPanel {
     const self = (f) => f.reporter === f.target && SELF_KINDS.has(f.kind);
     this.body.innerHTML = `<div class="seg" id="ff">${[['open', 'Open'], ['resolved', 'Handled'], ['dismissed', 'Dismissed'], ['all', 'All']].map(([k, l]) => `<button data-k="${k}" class="${k === this.flagFilter ? 'sel' : ''}">${l}</button>`).join('')}</div>
       <p class="m-sub">Flags come from players' games: things they saw another player do that are impossible, and signs of cheat scripts a player's own game found on itself. One flag can be a glitch or a browser extension; several kinds, or flags from different players, are worth a look. Nothing here bans anyone automatically.</p>
-      ${fold('Stat outliers, last 30 days', outliers?.length, `<p class="ar-help">Online results far outside normal: at least 100 kills with 70%+ headshots, or 6+ kills per death. Not flagged automatically; worth spectating.</p>
+      ${fold('Stat outliers, last 30 days', outliers?.length, `<p class="ar-help">Online results far outside normal (Zombies matches not counted): at least 100 kills with 70%+ headshots, or 6+ kills per death. Not flagged automatically; worth spectating.</p>
         <table class="tbl"><tr><th>Player</th><th class="num">Matches</th><th class="num">Kills</th><th class="num">Headshots</th><th class="num">K/D</th><th></th></tr>${(outliers || []).map((o) => `<tr><td>${pl(o.user_id, o.username)}</td><td class="num">${num(o.matches)}</td><td class="num">${num(o.kills)}</td><td class="num">${Math.round(num(o.hs_rate) * 100)}%</td><td class="num">${num(o.kd)}</td><td>${o.banned ? '<span class="tag bad">Banned</span>' : ''}</td></tr>`).join('')}</table>`)}
       ${list.length ? list.map((f) => `<div class="adm-report ${esc(f.status || 'open')}">
         <div class="ar-head"><b class="ar-reason">${esc(FLAG_KINDS[f.kind] || f.kind)}</b><span>${pl(f.target, f.target_name)}${f.target_open > 1 ? ` <em class="hot">${f.target_open} open flags</em>` : ''} <span class="m-sub">${f.target_flags} total${f.target_reporters > 1 ? ` · seen by ${f.target_reporters} players` : ''}</span></span><span class="spacer"></span><span class="m-sub">${when(f.created_at)}</span></div>
@@ -435,7 +435,7 @@ export class AdminPanel {
       ${banned && m.ban_reason ? `<div class="m-sub">Ban reason: ${esc(m.ban_reason)}</div>` : ''}${muted && m.mute_reason ? `<div class="m-sub">Mute reason: ${esc(m.mute_reason)}</div>` : ''}
       <div class="st-nums small">
         <div><b>${p.elo}</b><span>Rating (peak ${p.peak_elo})</span></div><div><b>${p.ranked_wins}–${p.ranked_losses}</b><span>Ranked</span></div>
-        <div><b>${p.wins}–${p.losses}</b><span>Online W–L</span></div><div><b>${p.kills}/${p.deaths}</b><span>Kills / deaths</span></div>
+        <div><b>${p.wins}–${p.losses}</b><span>Online W–L</span></div><div><b>${p.kills}/${p.deaths}</b><span>Kills / deaths (PvP)</span></div><div><b>${p.zombie_kills || 0}/${p.zombie_deaths || 0}</b><span>Zombies kills / deaths</span></div>
         <div><b>${p.headshots}</b><span>Headshots</span></div><div><b>${p.assists || 0}</b><span>Assists</span></div><div><b>${(p.xp || 0).toLocaleString()}</b><span>XP (season ${(p.pass_xp || 0).toLocaleString()})</span></div></div>
       <div class="m-sub">Commends: ${commends} · Reports against: ${d.reports_against.length} · Reports filed: ${d.reports_filed}</div>
       <div class="m-sub">Devices: ${d.devices ?? 0}${d.shared_accounts?.length ? ` · Shares a device with ${d.shared_accounts.map((o) => `<a href="#" data-player="${esc(o.id)}">${esc(o.username)}</a>`).join(', ')}` : ''}</div>
@@ -519,7 +519,7 @@ export class AdminPanel {
           await this.call('rename', { p_user: u, p_name: v.name.trim() }, 'Username changed');
         } else if (act === 'stats') {
           const d = await this.app.api.profile(u);
-          const keys = ['elo', 'peak_elo', 'ranked_wins', 'ranked_losses', 'wins', 'losses', 'matches', 'kills', 'deaths', 'headshots', 'xp', 'pass_xp'];
+          const keys = ['elo', 'peak_elo', 'ranked_wins', 'ranked_losses', 'wins', 'losses', 'matches', 'kills', 'deaths', 'headshots', 'zombie_kills', 'zombie_deaths', 'xp', 'pass_xp'];
           v = await ask(this.ui, 'Edit stats', keys.map((k) => ({ id: k, label: k.replace(/_/g, ' '), type: 'number', value: d[k] ?? 0 })), { confirm: 'Save' });
           if (!v) return;
           const patch = Object.fromEntries(keys.filter((k) => String(d[k] ?? 0) !== v[k]).map((k) => [k, Math.max(0, Math.round(+v[k] || 0))]));

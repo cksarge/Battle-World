@@ -66,13 +66,16 @@ export class StatsScreens {
     // Weapon / accuracy / rivals / death spots: from stored details if the database has them, else this browser.
     const withDetails = matches.filter((m) => m.details);
     const agg = withDetails.length ? this.aggregateDetails(withDetails) : { weapons: local.weapons, shots: local.shots, hits: local.hits, h2h: local.h2h, deaths: local.deaths };
-    const totK = p ? p.kills : matches.reduce((a, m) => a + m.k, 0), totD = p ? p.deaths : matches.reduce((a, m) => a + m.d, 0);
-    const totHS = p ? p.headshots : matches.reduce((a, m) => a + m.hs, 0);
+    // K/D and headshot rate are PvP only: Zombies kills are counted separately.
+    const pvp = matches.filter((m) => m.mode !== 'zombies'), zmb = matches.filter((m) => m.mode === 'zombies');
+    const totK = p ? p.kills : pvp.reduce((a, m) => a + m.k, 0), totD = p ? p.deaths : pvp.reduce((a, m) => a + m.d, 0);
+    const totHS = p ? p.headshots : pvp.reduce((a, m) => a + m.hs, 0);
+    const zK = p ? p.zombie_kills || 0 : zmb.reduce((a, m) => a + m.k, 0), zD = p ? p.zombie_deaths || 0 : zmb.reduce((a, m) => a + m.d, 0);
     const totA = p ? p.assists || 0 : matches.reduce((a, m) => a + (m.a || 0), 0);
     const wins = matches.filter((m) => m.result === 'win').length;
     const lvl = levelFor(p?.xp || 0);
     // Recent form: K/D per match, oldest → newest.
-    const recent = matches.slice(0, 30).reverse();
+    const recent = pvp.slice(0, 30).reverse();
     const spark = this.sparkline(recent.map((m) => (m.d ? m.k / m.d : m.k)), recent.map((m) => m.result));
     const byMode = this.groupBy(matches, 'mode'), byMap = this.groupBy(matches, 'map');
     const bars = (groups, names) => Object.entries(groups).sort((a, b) => b[1].n - a[1].n).map(([k, g]) => `<div class="bar-row"><span>${esc(names[k]?.name || k)}</span>
@@ -92,12 +95,13 @@ export class StatsScreens {
         ${p ? `<div><b>${p.elo}</b><span>Rating, peak ${p.peak_elo}</span></div><div><b>${p.ranked_wins}–${p.ranked_losses}</b><span>Ranked record</span></div>` : ''}
         <div><b>${kd(totK, totD)}</b><span>Kills per death</span></div>
         <div><b>${pct(totHS, totK)}%</b><span>Headshot kills</span></div>
+        ${zK || zD ? `<div><b>${kd(zK, zD)}</b><span>Zombies K/D</span></div>` : ''}
         <div><b>${totA.toLocaleString()}</b><span>Assists</span></div>
         <div><b>${pct(wins, matches.length)}%</b><span>Wins, last ${matches.length}</span></div>
         <div><b>${agg.shots ? pct(agg.hits, agg.shots) + '%' : '—'}</b><span>Shots that hit</span></div>
       </div>
       <div class="st-grid">
-        <section><h3 class="m-h3">Recent form</h3>${recent.length ? spark : '<p class="m-empty">Play a few matches to see your form.</p>'}<p class="m-sub">Kills per death in your last ${recent.length} matches. Dots show wins and losses.</p></section>
+        <section><h3 class="m-h3">Recent form</h3>${recent.length ? spark : '<p class="m-empty">Play a few matches to see your form.</p>'}<p class="m-sub">Kills per death in your last ${recent.length} non-Zombies matches. Dots show wins and losses.</p></section>
         <section><h3 class="m-h3">By mode</h3>${bars(byMode, MODES)}</section>
         <section><h3 class="m-h3">By map</h3>${bars(byMap, MAPS)}</section>
         <section class="span2"><h3 class="m-h3">Weapons</h3>${weapons.length ? `<table class="tbl"><tr><th>Weapon</th><th>Class</th><th class="num">Kills</th><th class="num">Headshots</th><th class="num">Accuracy</th></tr>
@@ -210,6 +214,7 @@ export class StatsScreens {
         <div><b>${p.ranked_wins}–${p.ranked_losses}</b><span>Ranked record</span></div>
         <div><b>${kd(p.kills, p.deaths)}</b><span>Kills per death</span></div>
         <div><b>${pct(p.headshots, p.kills)}%</b><span>Headshot kills</span></div>
+        ${p.zombie_kills || p.zombie_deaths ? `<div><b>${kd(p.zombie_kills || 0, p.zombie_deaths || 0)}</b><span>Zombies K/D</span></div>` : ''}
         <div><b>${(p.assists || 0).toLocaleString()}</b><span>Assists</span></div>
         <div><b>${pct(p.wins, p.matches)}%</b><span>Win rate</span></div>
         <div><b>${p.matches}</b><span>Online matches</span></div>

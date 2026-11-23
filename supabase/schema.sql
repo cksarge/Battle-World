@@ -78,6 +78,23 @@ alter table public.match_history add column if not exists details jsonb;
 -- victim, or threw the smoke the killer shot through.
 alter table public.profiles add column if not exists assists int not null default 0;
 alter table public.match_history add column if not exists assists int not null default 0;
+-- Zombies (4.x): kills and deaths against the horde are kept apart from PvP totals, so K/D on
+-- leaderboards, profiles and the admin outlier panel reflects player-vs-player only. The first run
+-- moves zombie results already counted in kills/deaths/headshots over from match_history.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'zombie_kills') then
+    alter table public.profiles add column zombie_kills int not null default 0;
+    alter table public.profiles add column zombie_deaths int not null default 0;
+    alter table public.profiles add column zombie_headshots int not null default 0;
+    update public.profiles p set
+      zombie_kills = z.k, zombie_deaths = z.d, zombie_headshots = z.hs,
+      kills = greatest(p.kills - z.k, 0), deaths = greatest(p.deaths - z.d, 0), headshots = greatest(p.headshots - z.hs, 0)
+    from (select user_id, sum(kills)::int as k, sum(deaths)::int as d, sum(headshots)::int as hs
+          from public.match_history where online and mode = 'zombies' group by user_id) z
+    where z.user_id = p.id;
+  end if;
+end $$;
 
 alter table public.match_history enable row level security;
 drop policy if exists "history is public" on public.match_history;
@@ -948,6 +965,7 @@ declare
   ast int := least(greatest(coalesce(p_assists, 0), 0), 150);
   dth int := least(greatest(p_deaths, 0), 150);
   hs int := least(greatest(p_headshots, 0), k);
+  zmb boolean := p_mode = 'zombies';
   gained int;
   det jsonb := case when p_details is not null and pg_column_size(p_details) <= 16000 then p_details end;
 begin
@@ -972,7 +990,10 @@ begin
       matches = matches + 1,
       wins = wins + (p_result = 'win')::int,
       losses = losses + (p_result = 'loss')::int,
-      kills = kills + k, assists = assists + ast, deaths = deaths + dth, headshots = headshots + hs,
+      kills = kills + case when zmb then 0 else k end, assists = assists + ast,
+      deaths = deaths + case when zmb then 0 else dth end, headshots = headshots + case when zmb then 0 else hs end,
+      zombie_kills = zombie_kills + case when zmb then k else 0 end, zombie_deaths = zombie_deaths + case when zmb then dth else 0 end,
+      zombie_headshots = zombie_headshots + case when zmb then hs else 0 end,
       xp = xp + gained, pass_xp = pass_xp + gained, last_seen = now()
     where id = uid;
   else
@@ -1164,7 +1185,7 @@ $$;
 -- Sets any of the listed stat columns from a JSON object, e.g. {"elo": 1200, "xp": 5000}.
 create or replace function public.admin_set_stats(p_user uuid, p_patch jsonb)
 returns void language plpgsql security definer set search_path = public as $$
-declare col text; allowed text[] := array['elo','peak_elo','ranked_wins','ranked_losses','wins','losses','matches','kills','deaths','headshots','xp','pass_xp','season_wins','season_losses','season_peak'];
+declare col text; allowed text[] := array['elo','peak_elo','ranked_wins','ranked_losses','wins','losses','matches','kills','deaths','headshots','zombie_kills','zombie_deaths','zombie_headshots','xp','pass_xp','season_wins','season_losses','season_peak'];
 begin
   perform admin_guard();
   for col in select jsonb_object_keys(p_patch) loop
@@ -1180,7 +1201,7 @@ returns void language plpgsql security definer set search_path = public as $$
 begin
   perform admin_guard();
   update profiles set elo = 1000, peak_elo = 1000, ranked_wins = 0, ranked_losses = 0, wins = 0, losses = 0, matches = 0,
-    kills = 0, deaths = 0, headshots = 0, xp = 0, pass_xp = 0, season_wins = 0, season_losses = 0, season_peak = 1000 where id = p_user;
+    kills = 0, deaths = 0, headshots = 0, zombie_kills = 0, zombie_deaths = 0, zombie_headshots = 0, xp = 0, pass_xp = 0, season_wins = 0, season_losses = 0, season_peak = 1000 where id = p_user;
   perform admin_log('reset_stats', p_user::text, null);
 end;
 $$;
@@ -1330,7 +1351,8 @@ end;
 $$;
 
 -- Players whose online results over the last p_days are far outside normal: at least 100 kills and
--- 70%+ of them headshots, or 6+ kills per death. Read from match_history; nothing is flagged.
+-- 70%+ of them headshots, or 6+ kills per death. Read from match_history (Zombies matches left out,
+-- since horde kills aren't PvP); nothing is flagged.
 create or replace function public.admin_stat_outliers(p_days int default 30)
 returns json language plpgsql security definer set search_path = public as $$
 begin
@@ -1341,7 +1363,7 @@ begin
       round(sum(h.kills)::numeric / greatest(sum(h.deaths), 1), 2) as kd,
       (m.banned_until > now()) as banned
     from match_history h join profiles p on p.id = h.user_id left join moderation m on m.user_id = h.user_id
-    where h.online and h.created_at > now() - make_interval(days => greatest(1, least(p_days, 365)))
+    where h.online and h.mode <> 'zombies' and h.created_at > now() - make_interval(days => greatest(1, least(p_days, 365)))
     group by h.user_id, p.username, m.banned_until
     having sum(h.kills) >= 100 and (sum(h.headshots)::numeric / sum(h.kills) >= 0.7 or sum(h.kills)::numeric / greatest(sum(h.deaths), 1) >= 6)
     order by sum(h.headshots)::numeric / sum(h.kills) desc limit 50) t);
@@ -1745,7 +1767,7 @@ create or replace function public.leaderboard(p_kind text default 'elo', p_limit
 returns json language sql stable security definer set search_path = public as $$
   select coalesce(json_agg(t order by t.pos), '[]') from (
     select row_number() over (order by case p_kind when 'kills' then p.kills when 'wins' then p.wins when 'xp' then p.xp else p.elo end desc) as pos,
-      p.id, p.username, p.elo, p.peak_elo, p.ranked_wins, p.ranked_losses, p.wins, p.losses, p.matches, p.kills, p.deaths, p.headshots, p.xp,
+      p.id, p.username, p.elo, p.peak_elo, p.ranked_wins, p.ranked_losses, p.wins, p.losses, p.matches, p.kills, p.deaths, p.headshots, p.zombie_kills, p.zombie_deaths, p.xp,
       (select c.tag from clan_members cm join clans c on c.id = cm.clan_id where cm.user_id = p.id) as clan
     from profiles p
     where not exists (select 1 from moderation m where m.user_id = p.id and m.banned_until > now())
