@@ -1,6 +1,6 @@
 # Changelog
 
-#### 4.10.2 · 2026-11-23
+#### 4.10.2 · 2026-11-23 · [4e52ff6](https://github.com/cksarge/Battle-World/commit/4e52ff6)
 
 - Zombies kills no longer count toward your K/D, headshot rate or the kills leaderboard. They're tracked separately, and profiles and your Stats page show a **Zombies K/D** of their own
   - Kills and deaths from past Zombies matches have been moved over too
