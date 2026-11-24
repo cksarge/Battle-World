@@ -945,6 +945,9 @@ export class Game {
       }
     }
     const wall = this.world.raycast(origin, dir, w.range);
+    // Glass doesn't stop the blade (like bullets): any pane within reach, up to whatever it hits, shatters.
+    const reach = best && (!wall || wall.dist > best.dist) ? best.dist : wall ? wall.dist : w.range;
+    this.breakGlassAlong(origin, origin.clone().addScaledVector(dir, reach), p);
     if (best && (!wall || wall.dist > best.dist)) {
       const victimFwd = best.o.forward().setY(0).normalize();
       const back = victimFwd.dot(dir.clone().setY(0).normalize()) > 0.5;

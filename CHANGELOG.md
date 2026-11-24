@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.17.4 · 2026-11-24
+#### 4.17.5 · 2026-11-24
+
+- Knives (and the machete, karambit and hatchet) now break glass when you swing at it
+
+#### 4.17.4 · 2026-11-24 · [4c8e882](https://github.com/cksarge/Battle-World/commit/4c8e882)
 
 - Admin panel: the overview's Today stats are an even 8 tiles (the current season tile is gone)
 
