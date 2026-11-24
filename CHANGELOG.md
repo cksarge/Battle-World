@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.17.1 · 2026-11-24
+#### 4.17.2 · 2026-11-24
+
+- The database upgrade is done and Battle World is back online
+
+#### 4.17.1 · 2026-11-24 · [d428e46](https://github.com/cksarge/Battle-World/commit/d428e46)
 
 - Updated the Terms of Service and Privacy Policy: they now cover the anti-cheat checks your game runs on itself, trusted players helping moderate, and moderators' messages to the admin. You'll be asked to agree once more
 
