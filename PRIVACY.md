@@ -27,8 +27,10 @@ This Privacy Policy explains what information Battle World (the "Game"), made an
 - Text chat in lobbies and matches. Chat is sent live to the other players. It is not saved by us, except when a player reports someone: the reported player's chat from that match is attached to the report.
 - Reports, ban appeals and feedback you send. Feedback can include your game version, browser (user agent), screen size and graphics settings if you leave that option ticked.
 - Moderation and anti-cheat records: warnings, mutes, bans, friendly-fire penalties and automatic flags when a match sees something that looks like cheating (for example impossible speed or fire rate).
+- Anti-cheat checks on your own game: during online matches, your game checks its own page for signs of cheat tools. If it finds any, it sends a flag with what it found: the names of built-in browser functions that were replaced, the web addresses of scripts added to the game page (which can identify a browser extension or userscript), keyboard or mouse input made by a script, or the timing of your clicks and reactions when they look automated. Nothing is sent when nothing is found.
 - Match replays for reviews: when your game flags another player for possible cheating, or you report a player from a match's results, your game sends us its replay of that match (everyone's positions, actions and in-game events, plus the usernames of the players in it). Only moderators use these, to check what happened.
 - Your vote in each poll you vote in.
+- If you're a moderator: messages you send to and receive from the admin in the admin panel, which can mention other players, and the moderation actions you take.
 - Sign-in attempts by username and time, used to lock out password guessing. These are deleted after a day.
 
 **About your device**
@@ -49,7 +51,7 @@ Settings, keybinds, guest stats and progress, saved replays (apart from the revi
 
 ## 4. Who it's shared with
 
-- **Moderators**: the admin can let trusted players help moderate. Depending on what they're allowed to do, moderators can see reports, anti-cheat flags, review replays, match records, moderation history, accounts that have played on the same device, and who voted for what in polls. Only the admin sees email addresses.
+- **Moderators**: the admin can let trusted players help moderate. Depending on what they're allowed to do, moderators can see reports, anti-cheat flags, review replays, match records, moderation history, accounts that have played on the same device, and who voted for what in polls, and they can message the admin about players. Only the admin sees email addresses.
 - **Other players** see your username, operator, cosmetics, level, rank, rating, stats, achievements, clan and the maps you upload. Friends can see when you're online and what you're playing. Chat goes to the players in your lobby or match.
 - **Service providers** that run the Game for us:
   - Supabase (database, accounts, emails and realtime multiplayer, hosted in the United States).

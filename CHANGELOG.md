@@ -1,6 +1,10 @@
 # Changelog
 
-### 4.17.0 · 2026-11-24
+#### 4.17.1 · 2026-11-24
+
+- Updated the Terms of Service and Privacy Policy: they now cover the anti-cheat checks your game runs on itself, trusted players helping moderate, and moderators' messages to the admin. You'll be asked to agree once more
+
+### 4.17.0 · 2026-11-24 · [d99128e](https://github.com/cksarge/Battle-World/commit/d99128e)
 
 - Agreeing to the Terms of Service and Privacy Policy is now saved to your account, so you're only asked once per update instead of once on every new device. New accounts count as agreed from sign-up
 

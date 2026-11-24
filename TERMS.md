@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Effective November 18, 2026**
+**Effective November 24, 2026**
 
 These Terms of Service ("Terms") are an agreement between you and Carter K ("we", "us"), who makes and runs Battle World (the "Game"), including the website at battleworld.carterscoding.com, player accounts, online matches and every other feature the Game offers. By creating an account, or by playing or otherwise using the Game, you agree to these Terms and to the [Privacy Policy](PRIVACY.md). If you don't agree, don't use the Game.
 
@@ -33,10 +33,12 @@ You agree not to:
 
 To keep the Game fair and safe, we may, at our discretion and without notice:
 
-- Review reports, chat attached to reports, automated anti-cheat flags and match data.
+- Review reports, chat attached to reports, automated anti-cheat flags (including checks your game runs on its own page for cheat tools), match data and match replays.
 - Warn, mute, kick or ban accounts, temporarily or permanently, including device bans that apply to every account used on that device.
 - Reset or change stats, ratings, levels or items, void ranked results, or remove maps, usernames or other content.
 - Apply automatic penalties, such as for friendly fire.
+
+We may let trusted players help moderate. Moderators act on our behalf, only with the permissions we give them, and can take the actions above that those permissions allow. Their actions are recorded, and we can review or reverse them.
 
 Banned players can appeal from inside the Game. We'll consider appeals, but our decision is final.
 

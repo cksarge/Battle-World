@@ -12,9 +12,10 @@ export const TURNSTILE_ENABLED = false;
 // 30 seconds, so players already playing are moved to the screen, and let back in once it's null again.
 export const FORCED_MAINTENANCE = 'Battle World is getting a database upgrade. It should be back within the hour. This page reloads by itself when it’s over.';
 // MAJOR.Minor.patch, bumped with every change; each version is listed in CHANGELOG.md.
-export const GAME_VERSION = '4.17.0';
-// Effective date of TERMS.md and PRIVACY.md. Change it when either changes meaningfully, so every
-// player is told once (see ui/legal.js).
-export const LEGAL_VERSION = '2026-11-24';
+export const GAME_VERSION = '4.17.1';
+// Version of TERMS.md and PRIVACY.md: their effective date, plus .2, .3… for a second change the same
+// day. Change it when either changes meaningfully, so every player is told once (see ui/legal.js).
+// Versions must sort in order as text (profiles.legal_version, accept_legal never goes backwards).
+export const LEGAL_VERSION = '2026-11-24.2';
 // GitHub repository, for the latest-commit link in the menu footer.
 export const GITHUB_REPO = 'cksarge/Battle-World';
