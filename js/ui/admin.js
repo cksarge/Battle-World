@@ -306,8 +306,7 @@ export class AdminPanel {
       <h3 class="m-h3">Today</h3>
       <div class="adm-stats">
         ${tile('players', 'Players', 'players')}${tile('new_today', 'New today', 'players')}${tile('active_today', 'Active today', 'live')}${tile('matches_today', 'Matches today', 'live')}
-        ${tile('open_reports', 'Open reports', 'reports')}${tile('open_feedback', 'Open feedback', 'feedback')}${tile('banned', 'Banned', 'moderated')}${tile('muted', 'Muted', 'moderated')}
-        <button data-go="settings" ${this.canSection('settings') ? '' : 'disabled'}><b>${esc((o.season || '—').toUpperCase())}</b><span>Current season</span></button></div>
+        ${tile('open_reports', 'Open reports', 'reports')}${tile('open_feedback', 'Open feedback', 'feedback')}${tile('banned', 'Banned', 'moderated')}${tile('muted', 'Muted', 'moderated')}</div>
       ${quick.length ? `<h3 class="m-h3">Quick actions</h3>
       <div class="row" style="gap:8px;flex-wrap:wrap">${quick.map(([go, l]) => `<button class="btn small" data-go="${go}">${l}</button>`).join('')}</div>` : ''}`;
     this.body.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => this.go(b.dataset.go); });

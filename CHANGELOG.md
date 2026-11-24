@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.17.3 · 2026-11-24
+#### 4.17.4 · 2026-11-24
+
+- Admin panel: the overview's Today stats are an even 8 tiles (the current season tile is gone)
+
+#### 4.17.3 · 2026-11-24 · [0b9abe9](https://github.com/cksarge/Battle-World/commit/0b9abe9)
 
 - Fixed challenge XP occasionally failing to save when two challenges were claimed at the same moment
 - Database updates no longer cause brief errors for players who are online while they're applied
