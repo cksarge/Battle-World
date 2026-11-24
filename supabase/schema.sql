@@ -1558,7 +1558,7 @@ returns json language sql stable security definer set search_path = public as $$
   where p.id = p_id;
 $$;
 
--- Live polls, plus ones that ended in the last 3 days (with their results). Counts are only included
+-- Live polls, plus ones that ended in the last day (with their results; 3 days before 4.15.0). Counts are only included
 -- once you've voted or the poll has ended, so early results don't sway anyone.
 create or replace function public.polls_list()
 returns json language plpgsql stable security definer set search_path = public as $$
@@ -1571,7 +1571,7 @@ begin
       (made is not null and (p.cutoff is null or made < p.cutoff)) as eligible,
       case when v.choice is not null or now() >= p.ends_at then poll_counts(p.id) end as counts
     from polls p left join poll_votes v on v.poll_id = p.id and v.user_id = uid
-    where p.starts_at <= now() and p.ends_at > now() - interval '3 days'
+    where p.starts_at <= now() and p.ends_at > now() - interval '1 day'
     order by p.id desc limit 10) r);
 end;
 $$;
@@ -1645,6 +1645,18 @@ begin
   perform staff_guard(array['polls']);
   perform admin_log('delete_poll', p_id::text, (select json_build_object('question', question, 'counts', poll_counts(id)) from polls where id = p_id)::jsonb);
   delete from polls where id = p_id;
+end;
+$$;
+
+-- Who voted for what in one poll (4.15.0): every vote with the voter's name, oldest first. For the admin
+-- and moderators with the polls scope; players only ever see the totals.
+create or replace function public.admin_poll_votes(p_id bigint)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform staff_guard(array['polls']);
+  return (select coalesce(json_agg(row_to_json(t) order by t.created_at), '[]') from (
+    select v.user_id, p.username, v.choice, v.created_at
+    from poll_votes v join profiles p on p.id = v.user_id where v.poll_id = p_id) t);
 end;
 $$;
 
@@ -2136,7 +2148,7 @@ begin
     'admin_announcements()', 'admin_set_setting(text, jsonb)', 'admin_audit_log(int, uuid)', 'admin_flags(text, int)',
     'admin_resolve_flag(bigint, text, text, boolean)', 'admin_notify(uuid, text)', 'admin_settle_dispute(bigint, boolean, text, text)',
     'admin_stat_outliers(int)', 'poll_vote(bigint, int)', 'admin_create_poll(text, text[], numeric, text, timestamptz, timestamptz)',
-    'admin_end_poll(bigint)', 'admin_delete_poll(bigint)', 'admin_polls()',
+    'admin_end_poll(bigint)', 'admin_delete_poll(bigint)', 'admin_polls()', 'admin_poll_votes(bigint)',
     'admin_moderators()', 'admin_set_moderator(uuid, text[], text)', 'admin_remove_moderator(uuid)',
     'admin_staff_threads()', 'admin_staff_messages(uuid)', 'admin_staff_send(text, uuid, uuid, text)'
   ] loop

@@ -785,15 +785,15 @@ export class AdminPanel {
         <label class="field"><span>Who can vote</span><select id="pl-who"><option value="anyone">Anyone with an account</option><option value="before_start">Accounts made before the poll starts</option><option value="before_date">Accounts made before a date…</option></select></label>
         <label class="field hidden" id="pl-cut-f"><span>Accounts made before</span><input type="datetime-local" id="pl-cut"></label>
       </div>
-      <p class="m-sub">Guests can't vote. Each account gets one vote and can't change it. Players see the results once they've voted, and everyone who voted sees the final results for 3 days after it closes.</p>
+      <p class="m-sub">Guests can't vote. Each account gets one vote and can't change it. Players see the results once they've voted, and everyone who voted sees the final results for 1 day after it closes. Who voted for what is only visible here (Who voted).</p>
       <button class="btn small primary" id="pl-post" style="align-self:flex-start">Start poll</button></div>
       <h3 class="m-h3">Polls</h3>${list.length ? list.map((p) => {
         const st = state(p);
         return `<div class="adm-ann ${st === 'live' ? 'live' : ''}" style="flex-direction:column;align-items:stretch">
           <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap"><span class="tag">${st === 'live' ? 'Live' : st === 'scheduled' ? 'Scheduled' : 'Ended'}</span><b>${esc(p.question)}</b><span class="spacer"></span>
-            ${st !== 'ended' ? `<button class="btn tiny ghost" data-endpoll="${p.id}">${st === 'scheduled' ? 'Cancel' : 'End now'}</button>` : ''}<button class="btn tiny danger" data-delpoll="${p.id}" data-q="${esc(p.question)}">Delete</button></div>
+            ${st !== 'scheduled' ? `<button class="btn tiny" data-voters="${p.id}">Who voted</button>` : ''}${st !== 'ended' ? `<button class="btn tiny ghost" data-endpoll="${p.id}">${st === 'scheduled' ? 'Cancel' : 'End now'}</button>` : ''}<button class="btn tiny danger" data-delpoll="${p.id}" data-q="${esc(p.question)}">Delete</button></div>
           <span class="m-sub">${st === 'scheduled' ? `Opens ${when(p.starts_at)} · ` : ''}${st === 'ended' ? 'Closed' : 'Closes'} ${when(p.ends_at)} · ${esc(who(p))}</span>
-          ${pollResultsHTML(p.options, p.counts || p.options.map(() => 0))}</div>`;
+          ${pollResultsHTML(p.options, p.counts || p.options.map(() => 0))}<div class="adm-voters hidden" data-voters-for="${p.id}"></div></div>`;
       }).join('') : '<p class="m-empty">No polls yet.</p>'}`;
     const $ = (q) => this.body.querySelector(q), opts = $('#pl-opts');
     const bindRm = () => opts.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = () => { if (opts.children.length > 2) b.parentElement.remove(); else this.ui.toast('A poll needs at least 2 options', 'bad'); }; });
@@ -828,6 +828,20 @@ export class AdminPanel {
       const cancel = b.textContent === 'Cancel';
       await this.call('end_poll', { p_id: +b.dataset.endpoll }, cancel ? 'Poll cancelled' : 'Poll ended');
       this.app.pollStatus(); this.refresh();
+    }; });
+    // Who voted for what, grouped by option (players only ever see the totals).
+    this.body.querySelectorAll('[data-voters]').forEach((b) => { b.onclick = async () => {
+      const box = this.body.querySelector(`[data-voters-for="${b.dataset.voters}"]`), poll = list.find((x) => x.id === +b.dataset.voters);
+      if (box.classList.toggle('hidden')) { b.textContent = 'Who voted'; return; }
+      b.textContent = 'Hide voters';
+      box.innerHTML = '<p class="m-sub">Loading…</p>';
+      let votes;
+      try { votes = await this.call('poll_votes', { p_id: poll.id }); } catch { box.classList.add('hidden'); b.textContent = 'Who voted'; return; }
+      box.innerHTML = votes.length ? poll.options.map((o, i) => {
+        const who = votes.filter((v) => v.choice === i);
+        return `<div class="adm-voter-opt"><b>${esc(o)}</b> <span class="m-sub">${who.length}</span><div>${who.length ? who.map((v) => `<a href="#" data-player="${esc(v.user_id)}" title="Voted ${esc(when(v.created_at))}">${esc(v.username)}</a>`).join(', ') : '<span class="m-sub">Nobody</span>'}</div></div>`;
+      }).join('') : '<p class="m-sub">No votes yet.</p>';
+      this.bindPlayerLinks(box);
     }; });
     this.body.querySelectorAll('[data-delpoll]').forEach((b) => { b.onclick = async () => {
       const ok = await ask(this.ui, `Delete “${b.dataset.q}”?`, [], { confirm: 'Delete poll', danger: true, note: 'This removes the poll and all its votes for everyone. It can’t be undone. (Ending it keeps the results.)' });

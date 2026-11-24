@@ -465,6 +465,8 @@
 .adm-fold summary i { font-style: normal; font-family: var(--m-body); font-size: 12px; color: var(--m-dim); margin-left: 4px; }
 .adm-fold[open] summary { margin-bottom: 6px; }
 .adm-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 6px; }
+.adm-voters { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: rgba(0, 0, 0, .2); border: 1px solid var(--m-faint); }
+.adm-voter-opt > div { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 /* Moderators (Admin → Moderators) and Mod contact */
 .admin-badge.mod { border-color: var(--m-teal); color: var(--m-teal); }
 .adm-scopes { display: flex; flex-wrap: wrap; gap: 4px; }

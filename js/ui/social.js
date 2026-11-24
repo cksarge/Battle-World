@@ -210,7 +210,7 @@ export function pollDialog(ui, id) {
     <p class="m-sub">${p.live ? `Closes ${ends}` : `Closed ${ends}`} · ${esc(pollWho(p))}</p>
     ${showResults ? pollResultsHTML(p.options, p.counts, p.my_vote)
       : `<div class="poll-opts">${p.options.map((o, i) => `<label class="m-check"><input type="radio" name="poll-opt" value="${i}" ${reason ? 'disabled' : ''}><span>${esc(o)}</span></label>`).join('')}</div>
-        ${reason ? `<p class="m-sub">${esc(reason)}</p>` : '<p class="m-sub">You get one vote and can’t change it. Results show once you’ve voted.</p>'}`}
+        ${reason ? `<p class="m-sub">${esc(reason)}</p>` : '<p class="m-sub">You get one vote and can’t change it. Results show once you’ve voted. Other players only see the totals; the game’s moderators can see who voted for what.</p>'}`}
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn small ghost" data-x>Close</button>${!showResults && !reason && p.live ? '<button class="btn small primary" data-vote>Vote</button>' : ''}</div>`);
   m.querySelector('[data-x]').onclick = () => m.remove();
   m.querySelector('[data-vote]')?.addEventListener('click', async (e) => {

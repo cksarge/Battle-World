@@ -1,6 +1,11 @@
 # Changelog
 
-### 4.14.0 · 2026-11-23
+### 4.15.0 · 2026-11-24
+
+- Admin panel: a **Who voted** button on each poll shows who voted for which option. Moderators who can run polls can see it too; players still only see the totals, and the voting screen now says that moderators can see votes
+- Final poll results now stay up for 1 day after a poll closes, instead of 3
+
+### 4.14.0 · 2026-11-23 · [f92b192](https://github.com/cksarge/Battle-World/commit/f92b192)
 
 - New mode: **Sniper Duels**. A 1v1 with snipers only, first to 7 rounds
   - Every round you start with an AWP, a knife and full armor. No pistols or grenades
