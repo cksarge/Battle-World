@@ -1,6 +1,9 @@
 -- Battle World — Supabase schema
 -- Paste this whole file into Supabase Dashboard → SQL Editor → New query → Run.
--- Safe to re-run.
+-- Safe to re-run. It runs as one transaction: players never see a half-applied update (for example
+-- the moment between a function's permissions being reset and granted again), and if anything fails
+-- nothing is changed at all.
+begin;
 
 -- ───────────────────────── profiles ─────────────────────────
 create table if not exists public.profiles (
@@ -284,7 +287,7 @@ revoke all on public.moderators from anon, authenticated;
 
 -- Every scope a moderator can be given. The admin panel lists the same ones (js/ui/admin.js, SCOPES).
 create or replace function public.staff_scope_list()
-returns text[] language sql immutable as $$
+returns text[] language sql immutable set search_path = public as $$
   select array['reports', 'flags', 'feedback', 'appeals', 'players', 'warn', 'mute', 'kick', 'ban', 'announce', 'polls', 'maps'];
 $$;
 
@@ -430,6 +433,9 @@ revoke all on public.item_grants from anon, authenticated;
 grant select on public.item_grants to authenticated;
 drop policy if exists "own grants" on public.item_grants;
 create policy "own grants" on public.item_grants for select using ((select auth.uid()) = user_id);
+-- Unseen warnings and undelivered gifts are looked up for every signed-in player every 30 s (my_status).
+create index if not exists warnings_user_idx on public.warnings (user_id) where not seen;
+create index if not exists item_grants_user_idx on public.item_grants (user_id) where not applied;
 
 create table if not exists public.announcements (
   id         bigint generated always as identity primary key,
@@ -898,6 +904,9 @@ begin
   if parts[1] = 'd' and parts[2] = to_char(now() at time zone 'utc', 'YYYY-MM-DD') then amount := 300;
   elsif parts[1] = 'w' and parts[2] = to_char(now() at time zone 'utc', 'IYYY-"W"IW') then amount := 1000;
   else raise exception 'that challenge has expired'; end if;
+  -- The player's profile row is locked first, so two claims at the same moment (two tabs, or a claim
+  -- racing the end-of-match one) queue up instead of deadlocking.
+  perform 1 from profiles where id = uid for update;
   insert into challenge_claims (user_id, key, xp) values (uid, p_key, amount) on conflict do nothing;
   if not found then return 0; end if;
   perform ensure_season(uid);
@@ -1784,6 +1793,10 @@ create table if not exists public.staff_messages (
   read_at    timestamptz
 );
 create index if not exists staff_messages_mod on public.staff_messages (mod_id, id);
+-- Admin pages look these up by player.
+create index if not exists staff_messages_about on public.staff_messages (about) where about is not null;
+create index if not exists reports_target_idx on public.reports (target, created_at desc);
+create index if not exists ban_appeals_user_idx on public.ban_appeals (user_id);
 alter table public.staff_messages enable row level security;
 revoke all on public.staff_messages from anon, authenticated;
 
@@ -2313,3 +2326,5 @@ revoke all on function public.report_ranked(text, uuid, uuid) from public, anon;
 revoke all on function public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int, jsonb, int) from public, anon;
 grant execute on function public.report_ranked(text, uuid, uuid) to authenticated;
 grant execute on function public.record_match(text, text, text, boolean, boolean, text, int, int, int, text, int, jsonb, int) to authenticated;
+
+commit;

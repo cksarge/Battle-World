@@ -249,7 +249,12 @@ export class Api {
 
   myStatus() { return this.rpc('my_status'); }
   ackStatus(warnings, grants) { return this.rpc('ack_status', { p_warnings: warnings, p_grants: grants }); }
-  claimChallenge(key) { return this.rpc('claim_challenge', { p_key: key }); }
+  // One claim at a time: the end-of-match claims and the sign-in catch-up can overlap otherwise.
+  claimChallenge(key) {
+    const run = (this.claimQueue || Promise.resolve()).catch(() => null).then(() => this.rpc('claim_challenge', { p_key: key }));
+    this.claimQueue = run;
+    return run;
+  }
 
   async saveChallenges(id, challenges) {
     const { error } = await this.sb.from('profiles').update({ challenges }).eq('id', id);

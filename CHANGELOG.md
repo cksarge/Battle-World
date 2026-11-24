@@ -1,6 +1,11 @@
 # Changelog
 
-#### 4.17.2 · 2026-11-24
+#### 4.17.3 · 2026-11-24
+
+- Fixed challenge XP occasionally failing to save when two challenges were claimed at the same moment
+- Database updates no longer cause brief errors for players who are online while they're applied
+
+#### 4.17.2 · 2026-11-24 · [e901f43](https://github.com/cksarge/Battle-World/commit/e901f43)
 
 - The database upgrade is done and Battle World is back online
 
