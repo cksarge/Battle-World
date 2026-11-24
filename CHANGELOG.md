@@ -1,6 +1,17 @@
 # Changelog
 
-### 4.15.0 · 2026-11-24
+### 4.16.0 · 2026-11-24
+
+- Better tools for moderators reviewing reports and cheat flags:
+  - **Replays for reviews:** when your game flags someone for cheating, or you report someone from the results screen, your replay of that match is sent to the moderators so they can watch what happened. Only moderators can see it, and it's deleted after 60 days
+  - Admin panel: a **match page** for every report and cheat flag, with everyone's results, the ranked result, every report, flag and staff action from that match, and its replays to watch
+  - Admin panel: a **case history** on each player's page, listing every report, cheat flag, warning, staff action, ban appeal, moderator message and new device for them in one timeline, with links to each match
+  - Admin panel: a **Linked accounts** page grouping accounts that have signed in on the same browser, with banned ones first
+  - The admin can see a player's email and last sign-in on their page
+- Reporting a player now says that the replay goes to the moderators with it
+- Updated the Privacy Policy to cover review replays, what moderators can see and poll votes
+
+### 4.15.0 · 2026-11-24 · [ec8ee7f](https://github.com/cksarge/Battle-World/commit/ec8ee7f)
 
 - Admin panel: a **Who voted** button on each poll shows who voted for which option. Moderators who can run polls can see it too; players still only see the totals, and the voting screen now says that moderators can see votes
 - Final poll results now stay up for 1 day after a poll closes, instead of 3

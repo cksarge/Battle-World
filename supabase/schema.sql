@@ -1184,6 +1184,8 @@ begin
     'profile', (select row_to_json(p) from profiles p where p.id = p_id),
     'moderation', (select row_to_json(m) from moderation m where m.user_id = p_id),
     'is_admin', exists (select 1 from admins where user_id = p_id),
+    -- Only the admin sees the account's email and sign-in times.
+    'account', case when is_admin() then (select json_build_object('email', u.email, 'last_sign_in_at', u.last_sign_in_at, 'confirmed_at', u.email_confirmed_at) from auth.users u where u.id = p_id) end,
     'moderator', (select json_build_object('scopes', m.scopes, 'note', case when is_admin() then m.note end, 'added_at', m.added_at) from moderators m where m.user_id = p_id),
     'warnings', (select coalesce(json_agg(w order by w.id desc), '[]') from warnings w where w.user_id = p_id),
     'reports_against', (select coalesce(json_agg(row_to_json(t)), '[]') from (select r.*, rp.username as reporter_name from reports r join profiles rp on rp.id = r.reporter where r.target = p_id order by r.created_at desc limit 50) t),
@@ -1879,6 +1881,132 @@ begin
 end;
 $$;
 
+-- ───────────── investigation tools (4.16.0) ─────────────
+-- Replays for reviewing cheat flags and reports. A player's game uploads its replay of a match (gzip'd
+-- JSON, base64) when it flagged someone in it or when they report someone from it; only the admin and
+-- moderators who handle flags or reports can watch them. Kept 60 days.
+create table if not exists public.flag_replays (
+  match_id   text not null,
+  uploader   uuid not null references public.profiles(id) on delete cascade,
+  data       text not null check (char_length(data) <= 4000000),
+  bytes      int not null default 0,
+  created_at timestamptz not null default now(),
+  primary key (match_id, uploader)
+);
+alter table public.flag_replays enable row level security;
+revoke all on public.flag_replays from anon, authenticated;
+
+-- Only from a match the caller flagged someone in, or reported someone from.
+create or replace function public.upload_flag_replay(p_match text, p_data text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null or p_data is null or char_length(p_data) > 4000000 then return false; end if;
+  if not exists (select 1 from cheat_flags where match_id = p_match and reporter = uid and target is distinct from uid)
+    and not exists (select 1 from reports where match_id = p_match and reporter = uid) then return false; end if;
+  delete from flag_replays where created_at < now() - interval '60 days';
+  insert into flag_replays (match_id, uploader, data, bytes) values (p_match, uid, p_data, char_length(p_data))
+  on conflict (match_id, uploader) do update set data = excluded.data, bytes = excluded.bytes, created_at = now();
+  return true;
+end;
+$$;
+
+-- The replay a player uploaded for a match, for watching in the admin panel.
+create or replace function public.admin_flag_replay(p_match text, p_uploader uuid)
+returns text language plpgsql security definer set search_path = public as $$
+begin
+  perform staff_guard(array['flags', 'reports']);
+  return (select data from flag_replays where match_id = p_match and uploader = p_uploader);
+end;
+$$;
+
+-- Accounts that have signed in on the same browser as another account, one row per shared device.
+-- The admin panel joins these into groups of linked accounts.
+create or replace function public.admin_linked_accounts()
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform staff_guard(array['players']);
+  return (select coalesce(json_agg(row_to_json(t)), '[]') from (
+    select d.device_id, max(d.last_seen) as last_seen,
+      bool_or(exists (select 1 from banned_devices b where b.device_id = d.device_id)) as device_banned,
+      json_agg(json_build_object('id', p.id, 'username', p.username, 'created_at', p.created_at, 'last_seen', p.last_seen,
+        'elo', p.elo, 'banned', coalesce(m.banned_until > now(), false), 'ban_reason', case when m.banned_until > now() then m.ban_reason end,
+        'admin', exists (select 1 from admins a where a.user_id = p.id)) order by p.created_at) as accounts
+    from player_devices d join profiles p on p.id = d.user_id left join moderation m on m.user_id = p.id
+    where d.device_id in (select device_id from player_devices group by device_id having count(*) > 1)
+    group by d.device_id) t);
+end;
+$$;
+
+-- Everything that happened to or around one player, newest first: reports for and by them, cheat flags,
+-- warnings and notices, every staff action on them, ban appeals, team-kill kicks, moderator messages
+-- about them, feedback they sent and new devices they signed in on. Items from a match carry match_id.
+create or replace function public.admin_player_timeline(p_id uuid)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform staff_guard(array['players']);
+  return (select coalesce(json_agg(e order by e.at desc), '[]') from (
+    select r.created_at as at, 'report_against' as type, r.reason as title, r.note as detail, rp.username as actor, r.reporter as actor_id,
+      r.match_id, r.id as ref, r.status, r.resolution from reports r join profiles rp on rp.id = r.reporter where r.target = p_id
+    union all
+    select r.created_at, 'report_filed', r.reason, r.note, tp.username, r.target, r.match_id, r.id, r.status, r.resolution
+      from reports r join profiles tp on tp.id = r.target where r.reporter = p_id
+    union all
+    select f.created_at, 'flag', f.kind, f.details::text, rp.username, f.reporter, f.match_id, f.id, f.status, f.resolution
+      from cheat_flags f left join profiles rp on rp.id = f.reporter where f.target = p_id
+    union all
+    select w.created_at, w.kind, null, w.message, null, null, null, w.id, case when w.seen then 'seen' else 'unseen' end, null
+      from warnings w where w.user_id = p_id
+    union all
+    select a.created_at, 'action', a.action, a.details::text, b.username, a.admin_id, null, a.id, null, null
+      from admin_audit a left join profiles b on b.id = a.admin_id where a.target = p_id::text
+    union all
+    select a.created_at, 'appeal', a.status, a.message, null, null, null, a.id, a.status, a.admin_note from ban_appeals a where a.user_id = p_id
+    union all
+    select f.created_at, 'ff_kick', null, f.team_kills || ' team kills, ' || f.team_damage || ' team damage', null, null, f.match_id, f.id, null, null
+      from ff_penalties f where f.user_id = p_id
+    union all
+    select x.created_at, 'staff_message', x.suggest, x.body, sp.username, x.sender, null, x.id, null, null
+      from staff_messages x left join profiles sp on sp.id = x.sender where x.about = p_id
+    union all
+    select fb.created_at, 'feedback', fb.kind, fb.message, null, null, null, fb.id, fb.status, fb.admin_note from feedback fb where fb.user_id = p_id
+    union all
+    select d.first_seen, 'device', null, (select string_agg(pr.username, ', ') from player_devices o join profiles pr on pr.id = o.user_id
+      where o.device_id = d.device_id and o.user_id <> p_id), null, null, null, null, null, null from player_devices d where d.user_id = p_id
+    order by 1 desc limit 400) e);
+end;
+$$;
+
+-- One match in full: every player's result, the ranked result, reports and cheat flags from it,
+-- staff actions on it, and the replays players uploaded.
+create or replace function public.admin_match(p_match text)
+returns json language plpgsql security definer set search_path = public as $$
+begin
+  perform staff_guard(array['reports', 'flags', 'players']);
+  return json_build_object(
+    'results', (select coalesce(json_agg(row_to_json(t) order by t.result, t.kills desc), '[]') from (
+      select h.user_id, p.username, h.mode, h.map, h.ranked, h.online, h.result, h.kills, h.deaths, h.headshots, h.assists, h.score, h.elo_change, h.created_at
+      from match_history h join profiles p on p.id = h.user_id where h.match_id = p_match) t),
+    'ranked', (select json_build_object('winner', r.winner, 'winner_name', wp.username, 'loser', r.loser, 'loser_name', lp.username,
+        'winner_delta', r.winner_delta, 'loser_delta', r.loser_delta, 'voided', r.voided, 'disputed', r.disputed, 'created_at', r.created_at)
+      from ranked_matches r left join profiles wp on wp.id = r.winner left join profiles lp on lp.id = r.loser where r.match_id = p_match),
+    'reports', (select coalesce(json_agg(row_to_json(t) order by t.created_at), '[]') from (
+      select r.id, r.reason, r.note, r.status, r.resolution, r.created_at, r.reporter, rp.username as reporter_name, r.target, tp.username as target_name
+      from reports r join profiles rp on rp.id = r.reporter join profiles tp on tp.id = r.target where r.match_id = p_match) t),
+    'flags', (select coalesce(json_agg(row_to_json(t) order by t.created_at), '[]') from (
+      select f.id, f.kind, f.details, f.status, f.resolution, f.created_at, f.reporter, rp.username as reporter_name, f.target, tp.username as target_name
+      from cheat_flags f left join profiles rp on rp.id = f.reporter left join profiles tp on tp.id = f.target where f.match_id = p_match) t),
+    'kicks', (select coalesce(json_agg(json_build_object('user_id', f.user_id, 'username', p.username, 'team_kills', f.team_kills, 'team_damage', f.team_damage)), '[]')
+      from ff_penalties f join profiles p on p.id = f.user_id where f.match_id = p_match),
+    'actions', (select coalesce(json_agg(row_to_json(t) order by t.created_at), '[]') from (
+      select a.action, a.details, a.created_at, b.username as actor_name from admin_audit a left join profiles b on b.id = a.admin_id
+      where a.target = p_match or a.details ->> 'match_id' = p_match) t),
+    'replays', (select coalesce(json_agg(json_build_object('uploader', x.uploader, 'username', p.username, 'bytes', x.bytes, 'created_at', x.created_at) order by x.created_at), '[]')
+      from flag_replays x join profiles p on p.id = x.uploader where x.match_id = p_match)
+  );
+end;
+$$;
+
 -- Clans (4.3.0): a name and a 2-4 character tag, up to 20 members, joined with an invite code. One
 -- clan per player. Everything goes through the functions below; nobody writes the tables directly.
 create table if not exists public.clans (
@@ -2150,7 +2278,8 @@ begin
     'admin_stat_outliers(int)', 'poll_vote(bigint, int)', 'admin_create_poll(text, text[], numeric, text, timestamptz, timestamptz)',
     'admin_end_poll(bigint)', 'admin_delete_poll(bigint)', 'admin_polls()', 'admin_poll_votes(bigint)',
     'admin_moderators()', 'admin_set_moderator(uuid, text[], text)', 'admin_remove_moderator(uuid)',
-    'admin_staff_threads()', 'admin_staff_messages(uuid)', 'admin_staff_send(text, uuid, uuid, text)'
+    'admin_staff_threads()', 'admin_staff_messages(uuid)', 'admin_staff_send(text, uuid, uuid, text)',
+    'upload_flag_replay(text, text)', 'admin_flag_replay(text, uuid)', 'admin_linked_accounts()', 'admin_player_timeline(uuid)', 'admin_match(text)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

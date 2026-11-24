@@ -29,7 +29,7 @@ const DURATIONS = [[60, '1 hour'], [360, '6 hours'], [1440, '1 day'], [4320, '3 
 // Side menu, grouped by job. The number badges come from the overview counts (see navCounts).
 const NAV = [
   ['To do', [['overview', 'Overview'], ['reports', 'Reports'], ['appeals', 'Appeals'], ['flags', 'Cheat flags'], ['feedback', 'Feedback']]],
-  ['Players', [['players', 'Find a player'], ['live', 'Online now'], ['moderated', 'Bans & mutes']]],
+  ['Players', [['players', 'Find a player'], ['live', 'Online now'], ['moderated', 'Bans & mutes'], ['alts', 'Linked accounts']]],
   ['Game', [['announce', 'Announcements'], ['polls', 'Polls'], ['settings', 'Game switches'], ['maps', 'Community maps']]],
   ['Staff', [['mods', 'Moderators'], ['contact', 'Mod contact']]],
   ['History', [['audit', 'Audit log']]],
@@ -63,14 +63,17 @@ const PRESETS = [
 // The scopes that open each page (any one of them will do). [] = every moderator; pages not listed are admin-only.
 const SECTION_SCOPES = {
   overview: [], contact: [], reports: ['reports'], appeals: ['appeals'], flags: ['flags'], feedback: ['feedback'],
-  players: ['players'], player: ['players'], live: ['players'], moderated: ['ban', 'mute', 'players'],
+  players: ['players'], player: ['players'], live: ['players'], moderated: ['ban', 'mute', 'players'], alts: ['players'],
+  match: ['reports', 'flags', 'players'],
   announce: ['announce'], polls: ['polls'], maps: ['maps'],
 };
 // The scope each player action needs. Actions not listed are admin-only.
 const ACT_SCOPES = { ban: 'ban', unban: 'ban', mute: 'mute', unmute: 'mute', warn: 'warn', notice: 'warn', kick: 'kick' };
 // What a moderator can recommend in Mod contact. Actions they can't do themselves turn into "Recommend …" buttons.
 const SUGGEST = { ban: 'Ban', mute: 'Mute', warn: 'Warn', kick: 'Kick', unban: 'Unban', unmute: 'Unmute', other: 'Something else' };
-const SECTION_KEYS = new Set(NAV.flatMap(([, s]) => s.map(([k]) => k)).concat('player'));
+// 'player' and 'match' are pages opened from links, not the menu.
+const SECTION_KEYS = new Set(NAV.flatMap(([, s]) => s.map(([k]) => k)).concat('player', 'match'));
+const LINKED_PAGES = new Set(['player', 'match']);
 // Quick reasons for the ban / mute / warn dialogs. Picking one fills the reason box; it can still be edited.
 const BAN_REASONS = ['Cheating', 'Hacking / exploits', 'Team killing / griefing', 'Harassment', 'Hate speech', 'Inappropriate name', 'Ban evasion'];
 const MUTE_REASONS = ['Spam', 'Harassment', 'Hate speech', 'Inappropriate language'];
@@ -134,14 +137,15 @@ export class AdminPanel {
     // Come back to the section you were last on (browser storage can be unavailable; then Overview).
     let saved = null;
     try { saved = localStorage.getItem(SAVED_SECTION); } catch { /* private mode */ }
-    this.section = SECTION_KEYS.has(saved) && saved !== 'player' ? saved : 'overview';
+    this.section = SECTION_KEYS.has(saved) && !LINKED_PAGES.has(saved) ? saved : 'overview';
+    this.trail = []; // pages to go back to from player and match pages
     this.reportFilter = 'open';
     this.counts = {};
   }
 
   go(section) {
     this.section = section;
-    if (section !== 'player') try { localStorage.setItem(SAVED_SECTION, section); } catch { /* private mode */ }
+    if (!LINKED_PAGES.has(section)) try { localStorage.setItem(SAVED_SECTION, section); } catch { /* private mode */ }
     this.refresh();
   }
 
@@ -172,12 +176,31 @@ export class AdminPanel {
     if (unread && this.section === 'contact') this.contact(true).catch(() => null);
   }
 
-  // Opens a player's page from anywhere; "Back" returns to where you came from.
+  // Opens a player's or a match's page from anywhere; "Back" steps back through what you opened.
   openPlayer(id) {
     if (!this.canSection('player')) { this.ui.toast('Looking up players isn’t part of your moderator role. You can ask the admin in Mod contact.', 'bad', null, 6000); return; }
-    if (this.section !== 'player') this.back = this.section;
+    if (this.section === 'player' && this.playerId === id) return;
+    this.trail.push({ section: this.section, playerId: this.playerId, matchId: this.matchId });
     this.playerId = id;
     this.go('player');
+  }
+  openMatch(id) {
+    if (!id) return;
+    if (this.section === 'match' && this.matchId === id) return;
+    this.trail.push({ section: this.section, playerId: this.playerId, matchId: this.matchId });
+    this.matchId = id;
+    this.go('match');
+  }
+  backButton() {
+    const t = this.trail[this.trail.length - 1];
+    const label = !t ? 'Overview' : t.section === 'player' ? 'Back to player' : t.section === 'match' ? 'Back to match' : NAV.flatMap(([, s]) => s).find(([k]) => k === t.section)?.[1] || 'Back';
+    return `<div class="row"><button class="btn tiny ghost" id="adm-back">← ${esc(label)}</button></div>`;
+  }
+  goBack() {
+    const t = this.trail.pop();
+    if (!t) return this.go('overview');
+    this.playerId = t.playerId; this.matchId = t.matchId;
+    this.go(t.section);
   }
 
   // Badge numbers for the side menu: open reports, appeals, cheat flags and feedback.
@@ -212,7 +235,7 @@ export class AdminPanel {
     this.el = el;
     if (!this.app.isStaff) { el.innerHTML = '<p class="m-empty">Not available.</p>'; return; }
     if (!this.canSection(this.section)) this.section = 'overview';
-    const on = this.section === 'player' ? 'players' : this.section;
+    const on = LINKED_PAGES.has(this.section) ? [...this.trail].reverse().find((t) => !LINKED_PAGES.has(t.section))?.section || 'players' : this.section;
     const nav = NAV.map(([g, items]) => [g, items.filter(([k]) => this.canSection(k))]).filter(([, items]) => items.length);
     el.innerHTML = `<div class="adm"><div class="row adm-top"><h2 class="m-h1">${this.owner ? 'Admin' : 'Moderation'}</h2>
         ${this.canSection('players') ? '<div class="adm-find"><input type="search" id="adm-find" placeholder="Jump to a player…" aria-label="Jump to a player" autocomplete="off"><div class="adm-find-list hidden" id="adm-find-list"></div></div>' : ''}
@@ -222,7 +245,7 @@ export class AdminPanel {
         <div id="adm-body"><p class="m-sub">Loading…</p></div>
       </div></div>`;
     this.paintNav();
-    el.querySelectorAll('.adm-nav [data-s]').forEach((b) => { b.onclick = () => this.go(b.dataset.s); });
+    el.querySelectorAll('.adm-nav [data-s]').forEach((b) => { b.onclick = () => { this.trail = []; this.altsFor = null; this.go(b.dataset.s); }; });
     el.querySelector('#adm-reload').onclick = () => this.refresh();
     this.bindFind(el);
     this.body = el.querySelector('#adm-body');
@@ -296,13 +319,14 @@ export class AdminPanel {
     this.body.innerHTML = `<div class="seg" id="rf">${[['open', 'Open'], ['actioned', 'Actioned'], ['dismissed', 'Dismissed'], ['all', 'All']].map(([k, l]) => `<button data-k="${k}" class="${k === this.reportFilter ? 'sel' : ''}">${l}</button>`).join('')}</div>
       ${list.length ? list.map((r) => `<div class="adm-report ${r.status}">
         <div class="ar-head"><b class="ar-reason">${esc(REASON[r.reason] || r.reason)}</b><span>against <a href="#" data-player="${r.target}">${esc(r.target_name)}</a>${r.target_report_count > 1 ? ` <em class="hot">${r.target_report_count} reports total</em>` : ''}</span><span class="spacer"></span><span class="m-sub">${when(r.created_at)}</span></div>
-        <div class="m-sub">From ${esc(r.reporter_name)} · ${esc(MODES[r.mode]?.name || r.mode || '')}${r.evidence?.map ? ` on ${esc(MAPS[r.evidence.map]?.name || r.evidence.map)}` : ''} · match ${esc(r.match_id)}</div>
+        <div class="m-sub">From ${esc(r.reporter_name)} · ${esc(MODES[r.mode]?.name || r.mode || '')}${r.evidence?.map ? ` on ${esc(MAPS[r.evidence.map]?.name || r.evidence.map)}` : ''} · <a href="#" data-match="${esc(r.match_id)}">match ${esc(r.match_id)}</a></div>
         ${r.note ? `<p class="ar-note">“${esc(r.note)}”</p>` : ''}
         ${r.evidence?.stats ? `<div class="m-sub">Their stats that match: ${num(r.evidence.stats.k)} kills, ${num(r.evidence.stats.d)} deaths, ${num(r.evidence.stats.hs)} headshots, ${num(r.evidence.stats.dmg)} damage</div>` : ''}
         ${r.evidence?.chat?.length ? `<div class="ar-chat">${r.evidence.chat.map((c) => `<div><span class="m-sub">${Math.floor(c.t / 60)}:${String(c.t % 60).padStart(2, '0')}</span> ${esc(c.text)}</div>`).join('')}</div>` : ''}
         ${r.status !== 'open' ? `<div class="m-sub">${esc(r.status)}${r.resolution ? ': ' + esc(r.resolution) : ''} · ${when(r.resolved_at)}</div>` : ''}
         <div class="row ar-actions">
           <button class="btn tiny" data-player="${r.target}">Open player</button>
+          <button class="btn tiny" data-match="${esc(r.match_id)}">Open match &amp; replays</button>
           <button class="btn tiny danger" data-act="ban" data-u="${r.target}" data-r="${r.id}">Ban</button>
           <button class="btn tiny" data-act="mute" data-u="${r.target}" data-r="${r.id}">Mute</button>
           <button class="btn tiny" data-act="warn" data-u="${r.target}" data-r="${r.id}">Warn</button>
@@ -370,7 +394,7 @@ export class AdminPanel {
           : `<button class="btn tiny danger" data-settle="${f.id}" data-void="1">Void result and notify both</button><button class="btn tiny" data-settle="${f.id}" data-void="0">Keep result</button>`);
       }
       if (t) {
-        out.push(`<button class="btn tiny" data-player="${esc(t)}">Open player</button>`,
+        out.push(`<button class="btn tiny" data-match="${esc(f.match_id)}">Open match &amp; replays</button>`, `<button class="btn tiny" data-player="${esc(t)}">Open player</button>`,
           `<button class="btn tiny danger" data-act="ban" data-u="${esc(t)}" data-f="${f.id}" data-reason="Cheating">Ban</button>`,
           `<button class="btn tiny" data-act="warn" data-u="${esc(t)}" data-f="${f.id}">Warn</button>`,
           `<button class="btn tiny" data-act="notice" data-u="${esc(t)}">Send notice</button>`,
@@ -389,7 +413,7 @@ export class AdminPanel {
         <table class="tbl"><tr><th>Player</th><th class="num">Matches</th><th class="num">Kills</th><th class="num">Headshots</th><th class="num">K/D</th><th></th></tr>${(outliers || []).map((o) => `<tr><td>${pl(o.user_id, o.username)}</td><td class="num">${num(o.matches)}</td><td class="num">${num(o.kills)}</td><td class="num">${Math.round(num(o.hs_rate) * 100)}%</td><td class="num">${num(o.kd)}</td><td>${o.banned ? '<span class="tag bad">Banned</span>' : ''}</td></tr>`).join('')}</table>`)}
       ${list.length ? list.map((f) => `<div class="adm-report ${esc(f.status || 'open')}">
         <div class="ar-head"><b class="ar-reason">${esc(FLAG_KINDS[f.kind] || f.kind)}</b><span>${pl(f.target, f.target_name)}${f.target_open > 1 ? ` <em class="hot">${f.target_open} open flags</em>` : ''} <span class="m-sub">${f.target_flags} total${f.target_reporters > 1 ? ` · seen by ${f.target_reporters} players` : ''}</span></span><span class="spacer"></span><span class="m-sub">${when(f.created_at)}</span></div>
-        <div class="m-sub">${self(f) ? 'Found by their own game' : `Seen by ${esc(f.reporter_name || '?')}`} · ${esc(MODES[f.mode]?.name || f.mode || '')} · match ${esc(f.match_id)}</div>
+        <div class="m-sub">${self(f) ? 'Found by their own game' : `Seen by ${esc(f.reporter_name || '?')}`} · ${esc(MODES[f.mode]?.name || f.mode || '')} · <a href="#" data-match="${esc(f.match_id)}">match ${esc(f.match_id)}</a></div>
         ${FLAG_HELP[f.kind] ? `<p class="ar-help">${esc(FLAG_HELP[f.kind])}</p>` : ''}
         ${f.kind === 'ranked_dispute' ? ranked(f) : f.details ? `<div class="m-sub small">${detail(f.details)}</div>` : ''}
         ${f.status && f.status !== 'open' ? `<div class="m-sub">${f.status === 'resolved' ? 'Handled' : 'Dismissed'}${f.resolution ? ': ' + esc(f.resolution) : ''} · ${when(f.resolved_at)}</div>` : ''}
@@ -478,8 +502,10 @@ export class AdminPanel {
     this.bindPlayerLinks(res);
   }
 
+  // Player and match links (data-player / data-match) anywhere in the panel.
   bindPlayerLinks(root) {
     root.querySelectorAll('[data-player]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); this.openPlayer(a.dataset.player); }; });
+    root.querySelectorAll('[data-match]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); this.openMatch(a.dataset.match); }; });
   }
 
   // ───────────── one player ─────────────
@@ -487,9 +513,8 @@ export class AdminPanel {
   // then their history in sections you can fold away.
   async player() {
     const id = this.playerId;
-    const backTo = NAV.flatMap(([, s]) => s).find(([k]) => k === this.back) || ['players', 'Find a player'];
-    this.body.innerHTML = `<div class="row"><button class="btn tiny ghost" id="adm-back">← ${esc(backTo[1])}</button></div><div id="adm-player"><p class="m-sub">Loading player…</p></div>`;
-    this.body.querySelector('#adm-back').onclick = () => this.go(backTo[0]);
+    this.body.innerHTML = `${this.backButton()}<div id="adm-player"><p class="m-sub">Loading player…</p></div>`;
+    this.body.querySelector('#adm-back').onclick = () => this.goBack();
     if (id) await this.showPlayer(id);
   }
 
@@ -508,13 +533,14 @@ export class AdminPanel {
     box.innerHTML = `<div class="adm-player">
       <div class="row"><h3 class="m-h2">${esc(p.username)}</h3>${rankBadge(p.elo)}${d.is_admin ? '<span class="admin-badge">Admin</span>' : ''}${d.moderator ? `<span class="admin-badge mod" title="${esc(d.moderator.scopes.map((k) => SCOPE_NAME[k] || k).join(', '))}">Moderator</span>` : ''}${banned ? `<span class="tag bad">Banned ${esc(banUntil(m.banned_until))}</span>${m.device_ban ? '<span class="tag bad">Device ban</span>' : m.ban_appealable === false ? '<span class="tag bad">No appeal</span>' : ''}` : ''}${muted ? `<span class="tag warn">Muted ${esc(banUntil(m.muted_until))}</span>` : ''}</div>
       <div class="m-sub">Joined ${when(p.created_at)} · last seen ${when(p.last_seen)} · id ${esc(p.id)}</div>
+      ${d.account ? `<div class="m-sub">Email: <b class="adm-email">${esc(d.account.email || '—')}</b> <button class="btn tiny ghost" data-copy="${esc(d.account.email || '')}">Copy</button>${d.account.confirmed_at ? '' : ' · <span class="tag warn">not confirmed</span>'} · last sign-in ${when(d.account.last_sign_in_at)}</div>` : ''}
       ${banned && m.ban_reason ? `<div class="m-sub">Ban reason: ${esc(m.ban_reason)}</div>` : ''}${muted && m.mute_reason ? `<div class="m-sub">Mute reason: ${esc(m.mute_reason)}</div>` : ''}
       <div class="st-nums small">
         <div><b>${p.elo}</b><span>Rating (peak ${p.peak_elo})</span></div><div><b>${p.ranked_wins}–${p.ranked_losses}</b><span>Ranked</span></div>
         <div><b>${p.wins}–${p.losses}</b><span>Online W–L</span></div><div><b>${p.kills}/${p.deaths}</b><span>Kills / deaths (PvP)</span></div><div><b>${p.zombie_kills || 0}/${p.zombie_deaths || 0}</b><span>Zombies kills / deaths</span></div>
         <div><b>${p.headshots}</b><span>Headshots</span></div><div><b>${p.assists || 0}</b><span>Assists</span></div><div><b>${(p.xp || 0).toLocaleString()}</b><span>XP (season ${(p.pass_xp || 0).toLocaleString()})</span></div></div>
       <div class="m-sub">Commends: ${commends} · Reports against: ${d.reports_against.length} · Reports filed: ${d.reports_filed}</div>
-      <div class="m-sub">Devices: ${d.devices ?? 0}${d.shared_accounts?.length ? ` · Shares a device with ${d.shared_accounts.map((o) => `<a href="#" data-player="${esc(o.id)}">${esc(o.username)}</a>`).join(', ')}` : ''}</div>
+      <div class="m-sub">Devices: ${d.devices ?? 0}${d.shared_accounts?.length ? ` · Shares a device with ${d.shared_accounts.map((o) => `<a href="#" data-player="${esc(o.id)}">${esc(o.username)}</a>`).join(', ')} · <a href="#" data-alts="${esc(p.id)}">See every linked account</a>` : ''}</div>
       <div class="row" style="gap:8px;align-items:center"><span class="tag ${live ? 'ok' : ''}">${esc(liveText)}</span>${live?.match?.id && p.id !== this.app.user?.id ? '<button class="btn tiny primary" data-watch>Spectate match</button>' : ''}</div>
       <div class="adm-actions">
         <div><small>Moderation</small><div class="row">${d.is_admin ? '<span class="m-sub">Admins can’t be banned, muted, kicked or warned.</span>' : d.moderator && !this.owner ? '<span class="m-sub">Only the admin can moderate a moderator.</span>' : `
@@ -534,15 +560,19 @@ export class AdminPanel {
           <button class="btn tiny" data-act="grant" data-u="${p.id}">Give item…</button>
           <button class="btn tiny" data-act="revoke" data-u="${p.id}">Remove item…</button></div></div>` : ''}
       </div>
-      ${fold('Recent matches', d.matches.length, d.matches.length ? `<table class="tbl"><tr><th>When</th><th>Mode</th><th>Map</th><th>Result</th><th class="num">K–D</th><th class="num">ELO</th><th></th></tr>${d.matches.map((h) => `<tr><td class="m-sub">${when(h.created_at)}</td><td>${esc(MODES[h.mode]?.name || h.mode)}</td><td>${esc(MAPS[h.map]?.name || h.map)}</td><td class="res-${h.result}">${esc(h.result)}</td><td class="num">${h.kills}–${h.deaths}</td><td class="num">${h.ranked ? (h.elo_change > 0 ? '+' : '') + h.elo_change : '—'}</td><td>${h.ranked && h.elo_change && this.owner ? `<button class="btn tiny ghost" data-void="${esc(h.match_id)}">Void result</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="m-empty">No matches.</p>', true)}
+      <details class="adm-fold" open data-timeline><summary>Case history <i>everything about them, newest first</i></summary><div class="adm-timeline"><p class="m-sub">Loading…</p></div></details>
+      ${fold('Recent matches', d.matches.length, d.matches.length ? `<table class="tbl"><tr><th>When</th><th>Mode</th><th>Map</th><th>Result</th><th class="num">K–D</th><th class="num">ELO</th><th></th></tr>${d.matches.map((h) => `<tr><td class="m-sub"><a href="#" data-match="${esc(h.match_id)}" title="Open this match">${when(h.created_at)}</a></td><td>${esc(MODES[h.mode]?.name || h.mode)}</td><td>${esc(MAPS[h.map]?.name || h.map)}</td><td class="res-${h.result}">${esc(h.result)}</td><td class="num">${h.kills}–${h.deaths}</td><td class="num">${h.ranked ? (h.elo_change > 0 ? '+' : '') + h.elo_change : '—'}</td><td>${h.ranked && h.elo_change && this.owner ? `<button class="btn tiny ghost" data-void="${esc(h.match_id)}">Void result</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="m-empty">No matches.</p>', true)}
       ${fold('Reports against them', d.reports_against.length, d.reports_against.map((r) => `<div class="m-sub">${when(r.created_at)} · ${esc(REASON[r.reason])} from ${esc(r.reporter_name)} · ${esc(r.status)}${r.note ? ` · “${esc(r.note)}”` : ''}</div>`).join(''), d.reports_against.some((r) => r.status === 'open'))}
       ${fold('Warnings and notices', d.warnings.length, d.warnings.map((w) => `<div class="m-sub">${when(w.created_at)} · ${w.kind === 'notice' ? 'Notice: ' : ''}${esc(w.message)}${w.seen ? ' · seen' : ''}</div>`).join(''))}
       ${fold('Ban appeals', d.appeals?.length, (d.appeals || []).map((a) => `<div class="m-sub">${when(a.created_at)} · ${esc(a.status)}: “${esc(a.message)}”${a.admin_note ? ` · your note: ${esc(a.admin_note)}` : ''}</div>`).join(''))}
-      ${fold('Team-kill kicks', d.ff_penalties?.length, `${m.queue_cooldown_until && new Date(m.queue_cooldown_until) > new Date() ? `<div class="m-sub">Matchmaking cooldown until ${when(m.queue_cooldown_until)}</div>` : ''}${(d.ff_penalties || []).map((f) => `<div class="m-sub">${when(f.created_at)} · ${f.team_kills} team kills, ${f.team_damage} team damage · match ${esc(f.match_id)}</div>`).join('')}`)}
+      ${fold('Team-kill kicks', d.ff_penalties?.length, `${m.queue_cooldown_until && new Date(m.queue_cooldown_until) > new Date() ? `<div class="m-sub">Matchmaking cooldown until ${when(m.queue_cooldown_until)}</div>` : ''}${(d.ff_penalties || []).map((f) => `<div class="m-sub">${when(f.created_at)} · ${f.team_kills} team kills, ${f.team_damage} team damage · <a href="#" data-match="${esc(f.match_id)}">match ${esc(f.match_id)}</a></div>`).join('')}`)}
       ${fold('Past seasons', d.seasons.length, d.seasons.map((s) => `<div class="m-sub">${esc(s.season_id.toUpperCase())}: ${s.final_elo} final, ${s.peak_elo} peak, ${s.wins}–${s.losses}, ${s.pass_xp.toLocaleString()} season XP</div>`).join(''))}
     </div>`;
     this.bindActions(box, () => this.showPlayer(id));
     this.bindPlayerLinks(box);
+    box.querySelector('[data-copy]')?.addEventListener('click', (e) => { navigator.clipboard?.writeText(e.target.dataset.copy).then(() => this.ui.toast('Email copied', 'good'), () => null); });
+    box.querySelector('[data-alts]')?.addEventListener('click', (e) => { e.preventDefault(); this.altsFor = id; this.trail.push({ section: 'player', playerId: id, matchId: this.matchId }); this.go('alts'); });
+    this.timeline(id, box.querySelector('.adm-timeline'));
     box.querySelector('[data-watch]')?.addEventListener('click', () => this.app.spectate(live.match));
     box.querySelectorAll('[data-void]').forEach((b) => { b.onclick = async () => {
       const v = await ask(this.ui, 'Void ranked result', [], { confirm: 'Void it', danger: true, note: `Reverses both players' rating change and win/loss for match ${b.dataset.void}.` });
@@ -657,6 +687,128 @@ export class AdminPanel {
         after();
       } catch { /* toast already shown */ }
     }; });
+  }
+
+  // ───────────── case history (on a player's page) ─────────────
+  // Every report, flag, warning, staff action, appeal, moderator message and new device for one player
+  // in one list, so nothing has to be pieced together from separate pages.
+  async timeline(id, el) {
+    if (!el) return;
+    let items;
+    try { items = await this.app.api.admin('player_timeline', { p_id: id }); } catch (e) { el.innerHTML = `<p class="m-sub">${esc(e.missing ? 'Case history needs the database update (supabase/schema.sql).' : e.message)}</p>`; return; }
+    const FILTERS = [['all', 'All'], ['reports', 'Reports'], ['flags', 'Cheat flags'], ['staff', 'Staff actions'], ['messages', 'Warnings & messages'], ['other', 'Other']];
+    const group = (t) => (t === 'report_against' || t === 'report_filed' ? 'reports' : t === 'flag' ? 'flags' : t === 'action' || t === 'appeal' || t === 'ff_kick' ? 'staff' : t === 'warning' || t === 'notice' || t === 'staff_message' ? 'messages' : 'other');
+    const who = (e) => (e.actor ? `<a href="#" data-player="${esc(e.actor_id)}">${esc(e.actor)}</a>` : '');
+    const short = (v) => { try { const o = JSON.parse(v); return o && typeof o === 'object' ? Object.entries(o).filter(([k]) => k !== 'name').map(([k, x]) => `${k.replace(/_/g, ' ')}: ${typeof x === 'object' ? JSON.stringify(x) : x}`).join(' · ') : String(v); } catch { return String(v ?? ''); } };
+    const status = (e) => (e.status ? ` <span class="tag ${e.status === 'open' || e.status === 'unseen' ? 'warn' : ''}">${esc(e.status)}</span>` : '');
+    const line = (e) => {
+      const match = e.match_id ? ` · <a href="#" data-match="${esc(e.match_id)}">match ${esc(e.match_id)}</a>` : '';
+      const res = e.resolution ? `<div class="m-sub">Outcome: ${esc(e.resolution)}</div>` : '';
+      const body = (txt) => (txt ? `<div class="tl-body">${esc(txt)}</div>` : '');
+      switch (e.type) {
+        case 'report_against': return ['⚑', `Reported for <b>${esc(REASON[e.title] || e.title)}</b> by ${who(e)}${status(e)}${match}`, body(e.detail) + res];
+        case 'report_filed': return ['↗', `Reported ${who(e)} for ${esc(REASON[e.title] || e.title)}${status(e)}${match}`, body(e.detail) + res];
+        case 'flag': return ['⚠', `Cheat flag: <b>${esc(FLAG_KINDS[e.title] || e.title)}</b> · ${e.actor_id === id ? 'found by their own game' : `seen by ${who(e) || 'unknown'}`}${status(e)}${match}`, `<div class="m-sub small">${esc(short(e.detail))}</div>${res}`];
+        case 'warning': return ['✉', `Warning sent${status(e)}`, body(e.detail)];
+        case 'notice': return ['ℹ', `Notice sent${status(e)}`, body(e.detail)];
+        case 'action': return ['🛡', `<b>${esc(e.title.replace(/_/g, ' '))}</b> by ${who(e) || 'staff'}`, e.detail ? `<div class="m-sub small">${esc(short(e.detail))}</div>` : ''];
+        case 'appeal': return ['📝', `Ban appeal${status(e)}`, body(e.detail) + (e.resolution ? `<div class="m-sub">Reply: ${esc(e.resolution)}</div>` : '')];
+        case 'ff_kick': return ['⛔', `Kicked for team killing${match}`, `<div class="m-sub">${esc(e.detail)}</div>`];
+        case 'staff_message': return ['💬', `Mod contact: ${who(e) || 'staff'}${e.title ? ` recommended <b>${esc(SUGGEST[e.title] || e.title)}</b>` : ' wrote about them'}`, body(e.detail)];
+        case 'feedback': return ['💡', `Sent ${esc(e.title)}${status(e)}`, body(e.detail) + (e.resolution ? `<div class="m-sub">Note: ${esc(e.resolution)}</div>` : '')];
+        case 'device': return ['💻', `Signed in on a new device${e.detail ? ` (also used by ${esc(e.detail)})` : ''}`, ''];
+        default: return ['•', esc(e.type), body(e.detail)];
+      }
+    };
+    const paint = () => {
+      const list = items.filter((e) => this.tlFilter === 'all' || group(e.type) === this.tlFilter);
+      el.innerHTML = `<div class="seg" data-tl>${FILTERS.map(([k, l]) => { const n = k === 'all' ? items.length : items.filter((e) => group(e.type) === k).length; return n || k === 'all' ? `<button data-k="${k}" class="${k === this.tlFilter ? 'sel' : ''}">${l} <i>${n}</i></button>` : ''; }).join('')}</div>
+        ${list.length ? `<ol class="adm-tl">${list.map((e) => { const [icon, head, more] = line(e); return `<li><span class="tl-ico">${icon}</span><div><div class="tl-head">${head}</div>${more}<div class="m-sub small">${when(e.at)}</div></div></li>`; }).join('')}</ol>` : '<p class="m-empty">Nothing here.</p>'}`;
+      el.querySelectorAll('[data-tl] button').forEach((b) => { b.onclick = () => { this.tlFilter = b.dataset.k; paint(); }; });
+      this.bindPlayerLinks(el);
+    };
+    if (!FILTERS.some(([k]) => k === this.tlFilter)) this.tlFilter = 'all';
+    paint();
+  }
+
+  // ───────────── one match ─────────────
+  // Everything tied to one match: who played and how it went, the ranked result, reports, cheat flags,
+  // team-kill kicks, staff actions, and the replays players' games uploaded.
+  async match() {
+    const id = this.matchId;
+    this.body.innerHTML = `${this.backButton()}<div id="adm-match"><p class="m-sub">Loading match…</p></div>`;
+    this.body.querySelector('#adm-back').onclick = () => this.goBack();
+    const box = this.body.querySelector('#adm-match');
+    const d = await this.call('match', { p_match: id });
+    const pl = (pid, name) => (pid ? `<a href="#" data-player="${esc(pid)}">${esc(name || '?')}</a>` : 'unknown');
+    const first = d.results[0], r = d.ranked;
+    const canReplay = this.owner || this.app.staff?.scopes.has('flags') || this.app.staff?.scopes.has('reports');
+    box.innerHTML = `<div class="adm-player">
+      <div class="row"><h3 class="m-h2">Match ${esc(id)}</h3>${first ? `<span class="m-sub">${esc(MODES[first.mode]?.name || first.mode)} on ${esc(MAPS[first.map]?.name || first.map)} · ${when(first.created_at)}${first.online ? '' : ' · offline'}</span>` : ''}</div>
+      ${r ? `<div class="ar-ranked">Ranked: ${pl(r.winner, r.winner_name)} beat ${pl(r.loser, r.loser_name)} (+${Math.abs(num(r.winner_delta))} / −${Math.abs(num(r.loser_delta))})${r.voided ? ' <span class="tag ok">Voided</span>' : ''}${r.disputed ? ' <span class="tag warn">Disputed</span>' : ''}${this.owner && !r.voided ? ' <button class="btn tiny ghost" data-voidm>Void result</button>' : ''}</div>` : ''}
+      <h3 class="m-h3">Replays</h3>
+      ${!canReplay ? '<p class="m-sub">Watching replays needs the Reports or Cheat flags permission.</p>' : d.replays.length ? `<div class="adm-list">${d.replays.map((x) => `<div class="adm-row"><b>${pl(x.uploader, x.username)}</b><span class="m-sub">their view · ${Math.round(num(x.bytes) * 0.75 / 1024)} KB · ${when(x.created_at)}</span><span class="spacer"></span><button class="btn tiny primary" data-replay="${esc(x.uploader)}">Watch</button></div>`).join('')}</div>`
+        : '<p class="m-sub">No replay uploaded for this match. A player’s game uploads its replay when it flags someone or when they report someone from the results screen (from version 4.16.0 on).</p>'}
+      <h3 class="m-h3">Players</h3>
+      ${d.results.length ? `<table class="tbl"><tr><th>Player</th><th>Result</th><th class="num">K</th><th class="num">A</th><th class="num">D</th><th class="num">HS</th><th>Score</th><th class="num">ELO</th></tr>${d.results.map((h) => `<tr><td>${pl(h.user_id, h.username)}</td><td class="res-${h.result}">${esc(h.result)}</td><td class="num">${h.kills}</td><td class="num">${h.assists || 0}</td><td class="num">${h.deaths}</td><td class="num">${h.headshots}</td><td class="m-sub">${esc(h.score || '')}</td><td class="num">${h.ranked ? (h.elo_change > 0 ? '+' : '') + h.elo_change : '—'}</td></tr>`).join('')}</table><p class="m-sub small">Signed-in players who finished the match. Bots and guests aren’t recorded.</p>` : '<p class="m-sub">No finished results recorded for this match.</p>'}
+      ${fold('Reports from this match', d.reports.length, d.reports.map((x) => `<div class="m-sub">${when(x.created_at)} · ${pl(x.reporter, x.reporter_name)} reported ${pl(x.target, x.target_name)} for <b>${esc(REASON[x.reason] || x.reason)}</b> · <span class="tag">${esc(x.status)}</span>${x.note ? ` · “${esc(x.note)}”` : ''}${x.resolution ? ` · outcome: ${esc(x.resolution)}` : ''}</div>`).join(''), true)}
+      ${fold('Cheat flags from this match', d.flags.length, d.flags.map((x) => `<div class="m-sub">${when(x.created_at)} · <b>${esc(FLAG_KINDS[x.kind] || x.kind)}</b> against ${pl(x.target, x.target_name)} · ${x.reporter === x.target ? 'found by their own game' : `seen by ${pl(x.reporter, x.reporter_name)}`} · <span class="tag">${esc(x.status || 'open')}</span>${x.resolution ? ` · ${esc(x.resolution)}` : ''}</div>`).join(''), true)}
+      ${fold('Team-kill kicks', d.kicks.length, d.kicks.map((x) => `<div class="m-sub">${pl(x.user_id, x.username)}: ${x.team_kills} team kills, ${x.team_damage} team damage</div>`).join(''))}
+      ${fold('Staff actions on this match', d.actions.length, d.actions.map((x) => `<div class="m-sub">${when(x.created_at)} · ${esc(x.action.replace(/_/g, ' '))} by ${esc(x.actor_name || '?')}</div>`).join(''))}
+    </div>`;
+    this.bindPlayerLinks(box);
+    box.querySelectorAll('[data-replay]').forEach((b) => { b.onclick = async () => {
+      b.disabled = true; b.textContent = 'Loading…';
+      try {
+        const raw = await this.call('flag_replay', { p_match: id, p_uploader: b.dataset.replay });
+        if (!raw) throw new Error('That replay is gone.');
+        const { unpackReplay } = await import('../game/replaycodec.js');
+        await this.app.watchReplayData(await unpackReplay(raw), 'admin');
+      } catch (e) { if (e?.message) this.ui.toast(e.message, 'bad'); b.disabled = false; b.textContent = 'Watch'; }
+    }; });
+    box.querySelector('[data-voidm]')?.addEventListener('click', async () => {
+      const v = await ask(this.ui, 'Void ranked result', [], { confirm: 'Void it', danger: true, note: `Reverses both players' rating change and win/loss for match ${id}.` });
+      if (!v) return;
+      await this.call('void_ranked', { p_match_id: id }, 'Ranked result voided');
+      this.refresh();
+    });
+  }
+
+  // ───────────── linked accounts ─────────────
+  // Accounts that have signed in on the same browser, joined into groups (an account on two shared
+  // devices links both groups). Groups with a banned account come first: likely ban evasion.
+  async alts() {
+    const rows = await this.call('linked_accounts');
+    const parent = new Map(), acct = new Map(), devices = new Map();
+    const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+    for (const r of rows) {
+      for (const a of r.accounts) { acct.set(a.id, a); if (!parent.has(a.id)) parent.set(a.id, a.id); }
+      const [head, ...rest] = r.accounts.map((a) => a.id);
+      for (const id of rest) parent.set(find(id), find(head));
+    }
+    for (const r of rows) {
+      const root = find(r.accounts[0].id), g = devices.get(root) || { devices: 0, banned: false, last: null };
+      g.devices++; g.banned ||= r.device_banned; if (!g.last || r.last_seen > g.last) g.last = r.last_seen;
+      devices.set(root, g);
+    }
+    const groups = new Map();
+    for (const id of acct.keys()) { const root = find(id); if (!groups.has(root)) groups.set(root, []); groups.get(root).push(acct.get(id)); }
+    let list = [...groups.entries()].map(([root, accounts]) => ({ accounts, ...devices.get(root), anyBanned: accounts.some((a) => a.banned) }));
+    list.sort((a, b) => (b.anyBanned - a.anyBanned) || (b.accounts.length - a.accounts.length) || String(b.last).localeCompare(String(a.last)));
+    const focus = this.altsFor;
+    if (focus) list = list.filter((g) => g.accounts.some((a) => a.id === focus));
+    if (this.altsBannedOnly && !focus) list = list.filter((g) => g.anyBanned);
+    this.body.innerHTML = `${focus ? this.backButton() : ''}
+      <p class="m-sub" style="margin-top:0">Accounts that have signed in on the same browser as each other. Families and shared computers do this too, so treat it as a lead, not proof. Groups with a banned account are listed first.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap">${focus ? `<button class="btn tiny" id="alt-all">Show every group</button>` : `<label class="m-check small"><input type="checkbox" id="alt-banned" ${this.altsBannedOnly ? 'checked' : ''}><span>Only groups with a banned account</span></label>`}<span class="m-sub">${list.length} group${list.length === 1 ? '' : 's'}</span></div>
+      ${list.length ? list.map((g) => `<div class="adm-report ${g.anyBanned ? 'open' : 'dismissed'}">
+        <div class="ar-head"><b class="ar-reason">${g.accounts.length} accounts</b><span class="m-sub">${g.devices} shared device${g.devices === 1 ? '' : 's'} · last used ${when(g.last)}</span>${g.banned ? '<span class="tag bad">Device banned</span>' : ''}${g.anyBanned ? '<span class="tag bad">Has a banned account</span>' : ''}</div>
+        <table class="tbl">${g.accounts.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).map((a) => `<tr class="${a.id === focus ? 'me' : ''}"><td><a href="#" data-player="${esc(a.id)}">${esc(a.username)}</a>${a.admin ? ' <span class="admin-badge">Admin</span>' : ''}</td><td>${rankBadge(a.elo)}</td><td class="m-sub">made ${new Date(a.created_at).toLocaleDateString()}</td><td class="m-sub">last online ${when(a.last_seen)}</td><td>${a.banned ? `<span class="tag bad" title="${esc(a.ban_reason || '')}">Banned</span>` : ''}</td></tr>`).join('')}</table>
+      </div>`).join('') : `<p class="m-empty">${focus ? 'They don’t share a device with anyone.' : 'No accounts share a device.'}</p>`}`;
+    if (focus) this.body.querySelector('#adm-back').onclick = () => { this.altsFor = null; this.goBack(); };
+    this.body.querySelector('#alt-all')?.addEventListener('click', () => { this.altsFor = null; this.trail = []; this.refresh(); });
+    this.body.querySelector('#alt-banned')?.addEventListener('change', (e) => { this.altsBannedOnly = e.target.checked; this.refresh(); });
+    this.bindPlayerLinks(this.body);
   }
 
   // ───────────── bans & mutes ─────────────

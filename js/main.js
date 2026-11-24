@@ -691,27 +691,47 @@ class App {
 
   // ───────────── replays ─────────────
   storeReplay(data) {
+    this.lastReplay = data;
     import('./game/replaystore.js').then((m) => m.saveReplay(data)).then((id) => { this.lastReplayId = id; })
       .catch((e) => console.warn('Replay not saved', e));
+  }
+
+  // A match replay for the moderators, when this player flagged or reported someone in that match.
+  uploadReplay(data) {
+    if (!this.user || !this.api || !data?.matchId) return;
+    this.api.uploadFlagReplay(data.matchId, data).catch((e) => console.warn('Replay upload failed', e));
+  }
+
+  // After reporting someone from the results screen: send the replay of that match too.
+  uploadReplayFor(matchId) {
+    if (this.lastReplay?.matchId === matchId && this.lastReplay.online) this.uploadReplay(this.lastReplay);
   }
 
   async watchReplay(id) {
     const { loadReplay } = await import('./game/replaystore.js');
     const data = await loadReplay(id);
     if (!data) { this.ui.toast('That replay is no longer available', 'bad'); return; }
+    return this.watchReplayData(data);
+  }
+
+  // Plays a replay already loaded (also used by the admin panel for uploaded ones); `back` is the menu
+  // tab to return to afterwards.
+  async watchReplayData(data, back = 'replays') {
+    this.replayBack = back;
     if (this.game) { this.game.destroy(); this.game = null; }
     const { ReplayViewer } = await import('./game/replay.js');
     this.ui.hide();
     this.setStatus('watching a replay');
     this.replay = new ReplayViewer(this, data);
-    try { await this.replay.start(); } catch (e) { this.replay = null; this.ui.toast(e.message, 'bad'); this.ui.showMenu('replays'); }
+    try { await this.replay.start(); } catch (e) { this.replay = null; this.ui.toast(e.message, 'bad'); this.ui.showMenu(this.replayBack || 'replays'); }
   }
 
   exitReplay() {
     this.replay = null;
     this.gameEl.classList.add('hidden');
     this.setStatus('menu');
-    this.ui.showMenu('replays');
+    this.ui.showMenu(this.replayBack || 'replays');
+    this.replayBack = null;
   }
 
   exitGame() {

@@ -1038,10 +1038,13 @@ export class Game {
     if (this.spectator) result = 'over';
     const myStats = lp ? { k: lp.kills, a: lp.assists, d: lp.deaths, hs: lp.hs } : { k: 0, a: 0, d: 0, hs: 0 };
     this.endKillcam();
-    this.app.storeReplay?.(this.rec.serialize({
+    const replay = this.rec.serialize({
       matchId: this.matchId, mode: this.mode.id, map: this.mapDef.id, mapRow: this.opts.mapRow || null, variant: this.variant, date: Date.now(), localId: this.localId,
       result, scores: d.scores, online: this.online,
-    }));
+    });
+    this.app.storeReplay?.(replay);
+    this.replayUploaded = true;
+    if (this.online && this.anticheat?.flaggedSomeone) this.app.uploadReplay?.(replay);
     let eloChange = 0;
     if (this.zombies && !this.spectator) {
       try {
@@ -1099,6 +1102,10 @@ export class Game {
   }
 
   leave() {
+    // Leaving mid-match after this game flagged someone: send the moderators what was recorded so far.
+    if (!this.ended && !this.replayUploaded && this.online && !this.spectator && this.anticheat?.flaggedSomeone) {
+      this.app.uploadReplay?.(this.rec.serialize({ matchId: this.matchId, mode: this.mode.id, map: this.mapDef.id, mapRow: this.opts.mapRow || null, variant: this.variant, date: Date.now(), localId: this.localId, online: true, partial: true }));
+    }
     // Leaving a ranked match is a forfeit, so there's nothing to rejoin.
     if (!this.spectator && (this.ended || this.mode.ranked)) this.app.clearActiveMatch?.();
     this.destroy();

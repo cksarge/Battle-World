@@ -465,6 +465,14 @@
 .adm-fold summary i { font-style: normal; font-family: var(--m-body); font-size: 12px; color: var(--m-dim); margin-left: 4px; }
 .adm-fold[open] summary { margin-bottom: 6px; }
 .adm-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 6px; }
+.adm-tl { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.adm-tl li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; padding: 6px 8px; border-left: 2px solid var(--m-faint); }
+.adm-tl li:hover { background: rgba(255, 255, 255, .03); }
+.adm-tl .tl-ico { text-align: center; }
+.adm-tl .tl-head { overflow-wrap: anywhere; }
+.adm-tl .tl-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; color: var(--m-bone); opacity: .85; margin: 2px 0; }
+.seg button i { font-style: normal; opacity: .6; font-size: 11px; margin-left: 2px; }
+.adm-email { user-select: all; }
 .adm-voters { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: rgba(0, 0, 0, .2); border: 1px solid var(--m-faint); }
 .adm-voter-opt > div { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 /* Moderators (Admin → Moderators) and Mod contact */

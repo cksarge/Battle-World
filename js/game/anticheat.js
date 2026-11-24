@@ -147,6 +147,7 @@ export class AntiCheat {
     const key = target + '|' + kind;
     if (this.reported.has(key) || this.reported.size >= MAX_REPORTS) return;
     this.reported.add(key);
+    this.flaggedSomeone = true; // the match replay goes to the moderators (Game.onEnd / leave)
     console.info('[anticheat]', kind, p?.name || target, details);
     g.app.api?.flagPlayer(g.matchId, target, kind, g.mode.id, { name: p?.name, ...details }).catch(() => null);
   }

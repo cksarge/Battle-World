@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Effective November 18, 2026**
+**Effective November 24, 2026**
 
 This Privacy Policy explains what information Battle World (the "Game"), made and run by Carter K ("we", "us"), collects, how it's used and what choices you have. It applies to the website at battleworld.carterscoding.com and everything in the Game. By using the Game you agree to this policy and to the [Terms of Service](TERMS.md).
 
@@ -27,6 +27,8 @@ This Privacy Policy explains what information Battle World (the "Game"), made an
 - Text chat in lobbies and matches. Chat is sent live to the other players. It is not saved by us, except when a player reports someone: the reported player's chat from that match is attached to the report.
 - Reports, ban appeals and feedback you send. Feedback can include your game version, browser (user agent), screen size and graphics settings if you leave that option ticked.
 - Moderation and anti-cheat records: warnings, mutes, bans, friendly-fire penalties and automatic flags when a match sees something that looks like cheating (for example impossible speed or fire rate).
+- Match replays for reviews: when your game flags another player for possible cheating, or you report a player from a match's results, your game sends us its replay of that match (everyone's positions, actions and in-game events, plus the usernames of the players in it). Only moderators use these, to check what happened.
+- Your vote in each poll you vote in.
 - Sign-in attempts by username and time, used to lock out password guessing. These are deleted after a day.
 
 **About your device**
@@ -36,7 +38,7 @@ This Privacy Policy explains what information Battle World (the "Game"), made an
 
 **Kept only in your browser**
 
-Settings, keybinds, guest stats and progress, saved replays, map drafts, the offline-play copy of the Game (if you turn it on) and small notes like whether you've seen the tutorial are stored in your browser's local storage and IndexedDB. They stay on your device. Clearing your browser data removes them.
+Settings, keybinds, guest stats and progress, saved replays (apart from the review replays above), map drafts, the offline-play copy of the Game (if you turn it on) and small notes like whether you've seen the tutorial are stored in your browser's local storage and IndexedDB. They stay on your device. Clearing your browser data removes them.
 
 ## 3. How we use it
 
@@ -47,6 +49,7 @@ Settings, keybinds, guest stats and progress, saved replays, map drafts, the off
 
 ## 4. Who it's shared with
 
+- **Moderators**: the admin can let trusted players help moderate. Depending on what they're allowed to do, moderators can see reports, anti-cheat flags, review replays, match records, moderation history, accounts that have played on the same device, and who voted for what in polls. Only the admin sees email addresses.
 - **Other players** see your username, operator, cosmetics, level, rank, rating, stats, achievements, clan and the maps you upload. Friends can see when you're online and what you're playing. Chat goes to the players in your lobby or match.
 - **Service providers** that run the Game for us:
   - Supabase (database, accounts, emails and realtime multiplayer, hosted in the United States).
@@ -61,7 +64,7 @@ We don't sell or rent your personal information, and we don't share it for adver
 
 ## 5. How long we keep it
 
-We keep account information for as long as your account exists. Moderation records (reports, bans, flags and device IDs linked to bans) may be kept after an account is deleted, to stop banned players from coming back. Sign-in attempt records are deleted after one day. Information kept only in your browser lasts until you clear it.
+We keep account information for as long as your account exists. Moderation records (reports, bans, flags and device IDs linked to bans) may be kept after an account is deleted, to stop banned players from coming back. Sign-in attempt records are deleted after one day, and review replays after 60 days. Information kept only in your browser lasts until you clear it.
 
 ## 6. Your choices and rights
 
