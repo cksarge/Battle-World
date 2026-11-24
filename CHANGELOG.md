@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.17.6 · 2026-11-24
+#### 4.17.7 · 2026-11-24
+
+- Team killing bots no longer gets you warned or kicked in a match where you're the only player (bot matches, or an online match filled with bots). It still counts in any match with another real player
+
+#### 4.17.6 · 2026-11-24 · [3376a02](https://github.com/cksarge/Battle-World/commit/3376a02)
 
 - Fixed a poll sometimes still showing **Vote** right after you voted (until you reloaded the page). The results now show straight away
 

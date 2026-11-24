@@ -109,8 +109,10 @@ export class GameHost {
   // Host: friendly fire adds up per human player per match, like CS2. A warning at the first team kill
   // or 100 team damage; a kick at 3 team kills or 300 team damage. Online kicks are recorded, which
   // brings queue cooldowns and, if it keeps happening, a ban (report_ff_kick in schema.sql).
+  // Matches where everyone else is a bot don't count: there's nobody to grief.
   teamDamage(p, dmg, killed) {
     if (p.isBot || !this.friendlyFire || (this.ffKicked ||= new Set()).has(p.id)) return;
+    if (![...this.players.values()].some((o) => o !== p && !o.isBot && !o.zombie)) return;
     const ff = (p.ff ||= { dmg: 0, tk: 0, warned: false });
     ff.dmg += dmg;
     if (killed) ff.tk++;
