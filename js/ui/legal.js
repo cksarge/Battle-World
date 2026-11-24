@@ -1,7 +1,8 @@
 // Terms of Service and Privacy Policy agreement. New players tick a box (at sign-up, or before their
 // first guest game on a new device); players from before the documents existed, or before they last
-// changed, see a one-time notice instead. Agreement is remembered per device, and accounts made
-// through sign-up carry it in their user metadata so signing in elsewhere doesn't ask again.
+// changed, see a one-time notice instead. Agreement is remembered on the device and, for accounts, in
+// the database (profiles.legal_version, set at sign-up and by accept_legal), so an account that has
+// agreed to the current version isn't asked again on any other device.
 import { bindDocLinks } from './changelog.js';
 import { LEGAL_VERSION } from '../config.js';
 
@@ -15,8 +16,14 @@ export function markNewDevice() {
   try { if (!localStorage.getItem(KEY)) localStorage.setItem(KEY, NEW); } catch { /* ignore */ }
 }
 
-export function acceptLegal() {
+export function acceptLegal(app = null) {
   try { localStorage.setItem(KEY, LEGAL_VERSION); } catch { /* ignore */ }
+  // Signed in: remember it on the account too, so other devices don't ask again.
+  const p = app?.profile;
+  if (app?.user && app.api && p && p.legal_version !== LEGAL_VERSION) {
+    p.legal_version = LEGAL_VERSION;
+    app.api.acceptLegal(LEGAL_VERSION).catch(() => null);
+  }
 }
 
 // Shows the notice or the agreement dialog if this player hasn't agreed to the current version here.
@@ -26,12 +33,15 @@ export function maybeLegal(ui, done) {
   // A menu re-render clears open dialogs, so it's shown again if that happened.
   if (ui.legalOpen?.isConnected) return true;
   if (app.game || (app.user && !p)) return false;
+  // The account already agreed to this version (on any device): nothing to show here.
+  if (p?.legal_version === LEGAL_VERSION) { try { localStorage.setItem(KEY, LEGAL_VERSION); } catch { /* ignore */ } return false; }
   let seen;
   try { seen = localStorage.getItem(KEY); } catch { return false; }
-  if (seen === LEGAL_VERSION) return false;
-  if (app.user?.user_metadata?.terms_accepted === LEGAL_VERSION) { acceptLegal(); return false; }
+  // Agreed on this device already (before it was saved to the account): save it to the account now.
+  if (seen === LEGAL_VERSION) { acceptLegal(app); return false; }
+  if (app.user?.user_metadata?.terms_accepted === LEGAL_VERSION) { acceptLegal(app); return false; }
   const fresh = seen === NEW && !p, updated = !!seen && seen !== NEW;
-  const close = (m) => { acceptLegal(); ui.legalOpen = null; m.remove(); done?.(); };
+  const close = (m) => { acceptLegal(app); ui.legalOpen = null; m.remove(); done?.(); };
   const links = `<a href="#" data-doc="TERMS.md">Terms of Service</a> and <a href="#" data-doc="PRIVACY.md">Privacy Policy</a>`;
   const m = fresh
     ? ui.modal(`<h2 class="m-h2">Welcome to Battle World</h2>

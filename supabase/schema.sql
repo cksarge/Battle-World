@@ -39,12 +39,34 @@ create policy "users update own profile" on public.profiles
 revoke update on public.profiles from anon, authenticated;
 grant update (character, last_seen, inventory) on public.profiles to authenticated;
 
+-- Which version of the Terms of Service and Privacy Policy (js/config.js LEGAL_VERSION, a date) the
+-- player last agreed to, and when (4.17.0). Sign-up requires agreeing, so new accounts start with the
+-- version they ticked; after that accept_legal() records each newer one. The game skips the notice on
+-- any device once the account has agreed to the current version.
+alter table public.profiles add column if not exists legal_version text;
+alter table public.profiles add column if not exists legal_accepted_at timestamptz;
+-- Accounts that agreed at sign-up before these columns existed (it was kept in their sign-up details).
+update public.profiles p set legal_version = u.raw_user_meta_data ->> 'terms_accepted', legal_accepted_at = u.created_at
+from auth.users u
+where u.id = p.id and p.legal_version is null and u.raw_user_meta_data ->> 'terms_accepted' ~ '^\d{4}-\d{2}-\d{2}$';
+
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = '' as $$
+declare v text := new.raw_user_meta_data ->> 'terms_accepted';
 begin
-  insert into public.profiles (id, username)
-  values (new.id, new.raw_user_meta_data ->> 'username');
+  insert into public.profiles (id, username, legal_version, legal_accepted_at)
+  values (new.id, new.raw_user_meta_data ->> 'username', case when v ~ '^\d{4}-\d{2}-\d{2}$' then v end, case when v ~ '^\d{4}-\d{2}-\d{2}$' then now() end);
   return new;
+end;
+$$;
+
+-- The signed-in player agreed to a version of the documents. Never moves an account to an older version.
+create or replace function public.accept_legal(p_version text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or p_version !~ '^\d{4}-\d{2}-\d{2}$' then return; end if;
+  update profiles set legal_version = p_version, legal_accepted_at = now()
+  where id = auth.uid() and (legal_version is null or legal_version < p_version);
 end;
 $$;
 
@@ -2279,7 +2301,7 @@ begin
     'admin_end_poll(bigint)', 'admin_delete_poll(bigint)', 'admin_polls()', 'admin_poll_votes(bigint)',
     'admin_moderators()', 'admin_set_moderator(uuid, text[], text)', 'admin_remove_moderator(uuid)',
     'admin_staff_threads()', 'admin_staff_messages(uuid)', 'admin_staff_send(text, uuid, uuid, text)',
-    'upload_flag_replay(text, text)', 'admin_flag_replay(text, uuid)', 'admin_linked_accounts()', 'admin_player_timeline(uuid)', 'admin_match(text)'
+    'accept_legal(text)', 'upload_flag_replay(text, text)', 'admin_flag_replay(text, uuid)', 'admin_linked_accounts()', 'admin_player_timeline(uuid)', 'admin_match(text)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

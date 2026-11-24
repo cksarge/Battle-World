@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.16.1 · 2026-11-24
+### 4.17.0 · 2026-11-24
+
+- Agreeing to the Terms of Service and Privacy Policy is now saved to your account, so you're only asked once per update instead of once on every new device. New accounts count as agreed from sign-up
+
+#### 4.16.1 · 2026-11-24 · [f16c5f2](https://github.com/cksarge/Battle-World/commit/f16c5f2)
 
 - Battle World is down for a short database upgrade. The game shows a maintenance screen until it's done, and reloads by itself when it's over
 

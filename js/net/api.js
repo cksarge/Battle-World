@@ -298,6 +298,9 @@ export class Api {
   friendRemove(id) { return this.rpc('friend_remove', { p_id: id }); }
 
   commend(to, matchId, kind) { return this.rpc('commend_player', { p_to: to, p_match: matchId, p_kind: kind }); }
+  // Records that the signed-in player agreed to this version of the Terms and Privacy Policy.
+  acceptLegal(version) { return this.rpc('accept_legal', { p_version: version }); }
+
   // A replay for the moderators to review (supabase/schema.sql, upload_flag_replay). Only accepted for a
   // match this player flagged someone in or reported someone from.
   async uploadFlagReplay(matchId, data) {
