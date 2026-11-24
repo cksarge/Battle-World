@@ -12,7 +12,7 @@ export const TURNSTILE_ENABLED = false;
 // 30 seconds, so players already playing are moved to the screen, and let back in once it's null again.
 export const FORCED_MAINTENANCE = null;
 // MAJOR.Minor.patch, bumped with every change; each version is listed in CHANGELOG.md.
-export const GAME_VERSION = '4.17.5';
+export const GAME_VERSION = '4.17.6';
 // Version of TERMS.md and PRIVACY.md: their effective date, plus .2, .3… for a second change the same
 // day. Change it when either changes meaningfully, so every player is told once (see ui/legal.js).
 // Versions must sort in order as text (profiles.legal_version, accept_legal never goes backwards).

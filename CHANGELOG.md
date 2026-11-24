@@ -1,6 +1,10 @@
 # Changelog
 
-#### 4.17.5 · 2026-11-24
+#### 4.17.6 · 2026-11-24
+
+- Fixed a poll sometimes still showing **Vote** right after you voted (until you reloaded the page). The results now show straight away
+
+#### 4.17.5 · 2026-11-24 · [22594fc](https://github.com/cksarge/Battle-World/commit/22594fc)
 
 - Knives (and the machete, karambit and hatchet) now break glass when you swing at it
 

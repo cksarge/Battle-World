@@ -222,12 +222,20 @@ export function pollDialog(ui, id) {
     if (!pick) return ui.toast('Pick an option first', 'bad');
     e.target.disabled = true;
     try {
-      p.counts = await app.api.votePoll(p.id, +pick.value);
-      p.my_vote = +pick.value;
+      app.pollsVersion = (app.pollsVersion || 0) + 1; // a status check already under way won't undo this
+      const counts = await app.api.votePoll(p.id, +pick.value);
+      app.pollsVersion++;
+      // Show it on whichever copy of the poll the menu has now (a background refresh may have replaced it).
+      for (const x of [p, (app.polls || []).find((y) => y.id === p.id)]) if (x) { x.counts = counts; x.my_vote = +pick.value; }
       ui.toast('Vote counted', 'good');
       m.remove();
       ui.renderBanner();
       pollDialog(ui, id);
+      // Then fetch the poll list fresh, so everything (totals included) matches the server.
+      app.api.polls().then((list) => {
+        if (list?.find((y) => y.id === p.id)?.my_vote == null) return; // not caught up yet; the next check will be
+        app.polls = list; app.pollsVersion++; ui.renderBanner();
+      }).catch(() => null);
     } catch (err) {
       e.target.disabled = false;
       ui.toast(err.missing ? 'Polls aren’t available yet' : err.message, 'bad');

@@ -304,8 +304,12 @@ class App {
     clearInterval(this.statusTimer);
     // Checked more often while the maintenance screen is up, so players get back in quickly.
     this.statusTimer = setInterval(() => this.pollStatus(), this.maintenanceShown ? 10000 : 30000);
+    // A vote while this was loading makes its poll list out of date (it would show "Vote" again), so
+    // it's only used if no vote happened in the meantime (see pollDialog in ui/social.js).
+    const pollsVersion = this.pollsVersion || 0;
     const [ann, settings, polls] = await Promise.all([this.api.announcements(), this.api.appSettings(), this.api.polls()]);
-    this.announcementsList = ann; this.appSettings = settings; this.polls = polls;
+    this.announcementsList = ann; this.appSettings = settings;
+    if ((this.pollsVersion || 0) === pollsVersion) this.polls = polls;
     this.ui.renderBanner?.();
     if (!this.user) { this.applyMaintenance(); return; }
     let st;
