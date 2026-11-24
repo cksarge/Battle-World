@@ -1,6 +1,10 @@
 # Changelog
 
-### 4.16.0 · 2026-11-24
+#### 4.16.1 · 2026-11-24
+
+- Battle World is down for a short database upgrade. The game shows a maintenance screen until it's done, and reloads by itself when it's over
+
+### 4.16.0 · 2026-11-24 · [21e17c9](https://github.com/cksarge/Battle-World/commit/21e17c9)
 
 - Better tools for moderators reviewing reports and cheat flags:
   - **Replays for reviews:** when your game flags someone for cheating, or you report someone from the results screen, your replay of that match is sent to the moderators so they can watch what happened. Only moderators can see it, and it's deleted after 60 days

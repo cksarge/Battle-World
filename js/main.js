@@ -20,6 +20,7 @@ import { normalizeAchievements, mergeAchievements, applyMatchAchievements, check
 import { addMastery } from './data/mastery.js';
 import { deviceId } from './net/device.js';
 import { markNewDevice } from './ui/legal.js';
+import { FORCED_MAINTENANCE } from './config.js';
 
 const boot = document.getElementById('boot');
 const bootBar = boot.querySelector('.boot-bar div');
@@ -69,6 +70,13 @@ class App {
     applyPadSettings(this.settings);
     this.padNav = new PadNav(this);
     if (isTouchOnly()) this.watchController();
+    // Hard-coded maintenance (js/config.js): the database may be down, so don't touch it at all.
+    if (FORCED_MAINTENANCE) {
+      this.showForcedMaintenance(FORCED_MAINTENANCE);
+      step(100, 'Ready');
+      setTimeout(() => boot.classList.add('done'), 150);
+      return;
+    }
     step(80, 'Checking session');
     // No internet (offline play installed): straight into guest mode for bot matches and training.
     if (!navigator.onLine) {
@@ -291,6 +299,8 @@ class App {
   // other players' messages, so nobody can fake them.
   async pollStatus() {
     if (!this.api) return;
+    // Hard-coded maintenance switched on after this page loaded (js/config.js): leave everything now.
+    if (await this.forcedMaintenanceOn()) { this.goOffline(); this.game?.leave?.(); this.showForcedMaintenance(this.forcedMessage); return; }
     clearInterval(this.statusTimer);
     // Checked more often while the maintenance screen is up, so players get back in quickly.
     this.statusTimer = setInterval(() => this.pollStatus(), this.maintenanceShown ? 10000 : 30000);
@@ -368,6 +378,32 @@ class App {
     this.ui.lobby?.leave(); this.ui.lobby = null;
     this.party?.leave(true); this.party = null;
     this.presence?.leave(); this.presence = null;
+  }
+
+  // ───────────── hard-coded maintenance (js/config.js FORCED_MAINTENANCE) ─────────────
+  // Reads the live copy of config.js (not this page's), so switching it on or off reaches open games.
+  async forcedMaintenanceOn() {
+    try {
+      const res = await fetch(`js/config.js?v=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) return false;
+      const m = /FORCED_MAINTENANCE\s*=\s*(null|'((?:[^'\\]|\\.)*)')/.exec(await res.text());
+      this.forcedMessage = m?.[2] || null;
+      this.forcedOff = !!m && m[1] === 'null'; // only a clear "null" counts as off
+      return !!(m && m[1] !== 'null');
+    } catch { return false; }
+  }
+
+  // Shows the maintenance screen and checks every 30 seconds; when it's switched off, reloads the page.
+  showForcedMaintenance(message) {
+    clearInterval(this.statusTimer);
+    this.maintenanceShown = true;
+    this.ui.showMaintenance({ on: true, message });
+    if (this.forcedTimer) return;
+    this.forcedTimer = setInterval(async () => {
+      const on = await this.forcedMaintenanceOn();
+      if (on) this.ui.showMaintenance({ on: true, message: this.forcedMessage || message });
+      else if (this.forcedOff && navigator.onLine) location.reload();
+    }, 30000);
   }
 
   // Maintenance removes everyone except admins from everything (matches included) and keeps a
